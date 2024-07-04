@@ -7,99 +7,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
-#include <map>
-#include <vector>
 #include <cmath>
 #include <getopt.h>
 #include <ctime>
 
-typedef struct{
-  bam1_t **d;//data
-  unsigned l;//at pos
-  unsigned m;//maxpos;
-}queue_t;
-
 size_t nproc=0;
-int nreads_per_pos=4;//assuming this is the number reads per pos. If larger the program will reallocate
 char out_mode[5]="wb";
-
-queue_t *init_queue_t(int l){
-  //  fprintf(stderr,"initializing queue with: %d elements\n",l);
-  queue_t *ret =(queue_t *) malloc(sizeof(queue_t));
-  ret->d =(bam1_t **) malloc(l*sizeof(bam1_t*));
-  ret->l=0;
-  ret->m=l;
-  for(int i=0;i<ret->m;i++){
-    //    fprintf(stderr,"queue[%d] init\n",i);
-    ret->d[i] = bam_init1();
-  }
-  return ret;
-}
-
-void realloc_queue(queue_t *q){
-  //  fprintf(stderr,"reallcing from: q:%d to q:%d\n",q->m,2*q->m);
-
-  for(int i=0;0&&i<q->l;i++)
-    fprintf(stderr,"inqueu[%d].pos:%d\n",i,q->d[i]->core.pos);
-
-  bam1_t **d2 = (bam1_t **) malloc(2*q->m*sizeof(bam1_t*));
-
-  for(int i=0;i<q->l;i++)
-    d2[i] = q->d[i];
-  for(int i=q->l;i<2*q->m;i++){
-    d2[i] = bam_init1();
-    d2[i]->core.pos=-1;
-  }
-
-  free(q->d);
-  q->d=d2;
-  q->m=2*q->m;
-  
-  for(int i=0;0&&i<q->m;i++)
-    fprintf(stderr,"onqueu[%d].pos:%d\n",i,q->d[i]->core.pos);
-  
-}
-
 htsFormat *dingding2 =(htsFormat*) calloc(1,sizeof(htsFormat));
 
-
-char *mystr =new char[2048];
-
-kstring_t *cigs =(kstring_t*) calloc(0,sizeof(kstring_t));
-kstring_t *refs =(kstring_t*) calloc(0,sizeof(kstring_t));
-
-
-void do_magic(queue_t *q,bam_hdr_t *hdr,samFile *fp){
-  //fprintf(stderr,"do_magic queue->l:%d queue->m:%d chr:%d pos:%d\n",q->l,q->m,q->d[0]->core.tid,q->d[0]->core.pos);
-  bam1_t *b = NULL;
-  cigs->l =0;
-  refs->l =0;
-  //first loop over all reads(these have the same chr/pos, and group these into queues that are pertile,perlib,pereverything)
-
-  for(int i=0;i<q->l;i++){
-    b = q->d[i];
-    uint32_t *ary = bam_get_cigar(b);
-    for(uint i=0;i<b->core.n_cigar;i++){
-	ksprintf(cigs,"%d%c",bam_cigar_oplen(ary[i]),bam_cigar_opchr(ary[i]));
-    }
-    kputw(b->core.tid,refs);
-    
-    if(i<q->l-1){
-      kputc('_',cigs);
-      kputc('_',refs);
-    }
-
-    if(0&&!(b->core.flag &BAM_FDUP)){
-      assert(sam_write1(fp, hdr,b)>=0);      
-      continue;
-    }
-    //    fprintf(stderr,"Spooling duplicates\n");
-  }
-  b=q->d[0];
-  bam_aux_update_int(b,"C0",(int64_t)q->l);
-  bam_aux_update_str(b,"C1",cigs->l+1,cigs->s);
-  bam_aux_update_str(b,"C2",refs->l+1,refs->s);
-  assert(sam_write1(fp, hdr,b)>=0);  
+void do_magic(bam1_t *b,bam_hdr_t *hdr,samFile *fp){
+  assert(sam_write1(fp, hdr,b)>=0);      
 }
 
 
@@ -107,7 +24,7 @@ int usage(FILE *fp, int is_long_help)
 {
     fprintf(fp,
 "\n"
-"Usage: ./superduper [options] <in.bam>|<in.sam>|<in.cram> \n"
+"Usage: ./main_mapq [options] <in.bam>|<in.sam>|<in.cram> \n"
 "\n"
 "Options:\n"
 // output options
@@ -197,11 +114,11 @@ int main(int argc, char **argv){
     return 0;
   }
   
-  fprintf(stderr,"./squeezer refName:%s fname:%s out_mode:%s nthread:%d\n",refName,fname,out_mode,nthreads);
+  fprintf(stderr,"./main_mapq refName:%s fname:%s out_mode:%s nthread:%d\n",refName,fname,out_mode,nthreads);
   
   if(refName){
     char *ref =(char*) malloc(10 + strlen(refName) + 1);
-    sprintf(ref, "reference=%s", refName);
+    snprintf(ref,10 + strlen(refName), "reference=%s", refName);
     hts_opt_add((hts_opt **)&dingding2->specific,ref);
     free(ref);
   }
@@ -235,45 +152,21 @@ int main(int argc, char **argv){
     
   }
   
-  queue_t *queue = init_queue_t(nreads_per_pos);  
   bam_hdr_t  *hdr = sam_hdr_read(in);
   assert(sam_hdr_write(out, hdr) == 0);
   
   bam1_t *b = bam_init1();
 
   int ret;
-  
-  // char *tmpnam =(char*) calloc(2048,sizeof(char));
   while(((ret=sam_read1(in,hdr,b)))>0){
     nproc++;
-    //catch case where there is one read in queue, and the next read is a new read
-    //then we simply write the element in the queue to the output
-    if(queue->l==1 && strcasecmp(bam_get_qname(queue->d[0]),bam_get_qname(b))!=0){
-      assert(sam_write1(out, hdr, queue->d[0])>=0);
-      queue->l =0;
-    }
-    if(queue->l>1 && strcasecmp(bam_get_qname(queue->d[0]),bam_get_qname(b))!=0){
-      //      fprintf(stderr,"calling do_magic\n");
-      do_magic(queue,hdr,out);
-      queue->l =0;
-    }
-
-    if(queue->l==queue->m)
-      realloc_queue(queue);
-
-    bam_copy1(queue->d[queue->l++],b);
+    do_magic(b,hdr,out);
   }
-  do_magic(queue,hdr,out);
-  queue->l;
+
   assert(sam_close(out)==0);
   assert(sam_close(in)==0);
-  for(int i=0;i<queue->m;i++)
-    bam_destroy1(queue->d[i]);
-  free(queue->d);
-  free(queue);
   bam_hdr_destroy(hdr);
 
-  delete [] mystr;
   bam_destroy1(b);
   hts_opt_free((hts_opt *)dingding2->specific);
   free(dingding2);
