@@ -25,6 +25,10 @@ int gap_ext_pen = 2;
 float lambda = 1.33f;
 float k = 0.621f;
 
+// precompute these bc we dont wanna do it for each read
+float factor = lambda * match_reward / std::log(2);
+float computeK = std::log(k)/std::log(2);
+
 // get the score
 
 // score = (lambda *S - log(K)/log(2))
@@ -55,10 +59,11 @@ void do_magic(bam1_t *b,bam_hdr_t *hdr,samFile *fp){
   // gap extensions
   int xg = bam_aux2i(bam_aux_get(b, "XG"));
 
-  int S = (matches * match_reward) - (mismatches * mismatch_pen) - (xo * gap_open_pen) - (xg * gap_ext_pen);
-  float score = (lambda * S) - (std::log(k) / std::log(2));
 
-  // add tag, unicorn score 
+  int S = (matches * match_reward) - (mismatches * mismatch_pen) ;
+  float score = factor * S - computeK;
+
+  // add tag, unicorn score
   bam_aux_append(b, "US", 'f', sizeof(float), (uint8_t*)&score);
   // write
   assert(sam_write1(fp, hdr,b)>=0);
