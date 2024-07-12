@@ -60,7 +60,7 @@ void do_magic(bam1_t *b,bam_hdr_t *hdr,samFile *fp){
   int xg = bam_aux2i(bam_aux_get(b, "XG"));
 
 
-  int S = (matches * match_reward) - (mismatches * mismatch_pen) ;
+  int S = (matches * match_reward) - (mismatches * mismatch_pen) - (xo * gap_open_pen) - (xg * gap_ext_pen)
   float score = factor * S - computeK;
 
   // add tag, unicorn score
