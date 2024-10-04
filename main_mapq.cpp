@@ -60,7 +60,7 @@ void do_magic(bam1_t *b,bam_hdr_t *hdr,samFile *fp){
   int xg = bam_aux2i(bam_aux_get(b, "XG"));
 
 
-  int S = (matches * match_reward) - (mismatches * mismatch_pen) - (xo * gap_open_pen) - (xg * gap_ext_pen)
+  int S = (matches * match_reward) - (mismatches * mismatch_pen) - (xo * gap_open_pen) - (xg * gap_ext_pen);
   float score = factor * S - computeK;
 
   // add tag, unicorn score
@@ -68,6 +68,26 @@ void do_magic(bam1_t *b,bam_hdr_t *hdr,samFile *fp){
   // write
   assert(sam_write1(fp, hdr,b)>=0);
 }
+
+// get ANI per read 
+void get_ani(bam1_t *b, bam_hdr_t *hdr, samFile *fp) {
+    // need NM tag 
+    uint8_t *nm = bam_aux_get(b, "NM");
+    int nm_val = bam_aux2i(nm); 
+
+    // insert size 
+    int query_len = b->core.l_qseq; 
+
+    // ANI = (1 - (NM / query_len)) * 100
+    float ani = (1.0 - ((float)nm_val / query_len)) * 100;
+
+    fprintf(stdout,"%f\n",ani);
+
+    bam_aux_append(b, "AN", 'f', sizeof(float), (uint8_t*)&ani);
+
+    assert(sam_write1(fp, hdr, b) >= 0);
+}
+
 
 int usage(FILE *fp, int is_long_help)
 {
@@ -210,7 +230,9 @@ int main(int argc, char **argv){
   int x = 0;
   while(((ret=sam_read1(in,hdr,b)))>0){
     nproc++;
-    do_magic(b,hdr,out);
+    //do_magic(b,hdr,out);
+    get_ani(b,hdr,out);
+
     x++;
     //if (x>9) break;
   }
