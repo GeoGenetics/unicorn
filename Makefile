@@ -1,4 +1,5 @@
 CPP=g++
+CC=gcc
 
 ifndef HTSSRC
 $(info HTSSRC not defined; expecting systemwide htslib instalation)
@@ -11,8 +12,12 @@ endif
 
 .PHONY:all
 
-unicron:src/main_unicorn.cpp
+_unicron: src/main_unicorn.c
+	$(CC) -o unicorn $< $(HTSIPTH) $(HTSLPTH) -Wall -Wextra -pedantic -std=c11 -g -lhts
+
+unicorncpp: src/main_unicorn.cpp
 	$(CPP) -o $@ $< $(HTSIPTH) $(HTSLPTH) -Wall -Wextra -pedantic -std=c++11 -g -lhts
 
-all: unicorn
+unicorn:unicorncpp _unicron
 	
+all: unicorn

@@ -1,0 +1,3 @@
+[submodule "src/klib"]
+	path = src/klib
+	url = https://github.com/attractivechaos/klib.git
