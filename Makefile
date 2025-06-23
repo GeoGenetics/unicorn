@@ -1,5 +1,7 @@
 CPP=g++
 CC=gcc
+SRC=$(wildcard src/*.c)
+OBJ=$(SRC:.c=.o)
 
 ifndef HTSSRC
 $(info HTSSRC not defined; expecting systemwide htslib instalation)
@@ -12,8 +14,11 @@ endif
 
 .PHONY:all
 
-_unicron: src/main_unicorn.c
-	$(CC) -o unicorn $< $(HTSIPTH) $(HTSLPTH) -Wall -Wextra -pedantic -std=c11 -g -lhts
+%.o:%.c
+	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
+
+_unicron: $(OBJ)
+	$(CC) -o unicorn $(OBJ) $(HTSIPTH) $(HTSLPTH) -Isrc -Wall -Wextra -pedantic -std=c11 -g -lhts
 
 unicorncpp: src/main_unicorn.cpp
 	$(CPP) -o $@ $< $(HTSIPTH) $(HTSLPTH) -Wall -Wextra -pedantic -std=c++11 -g -lhts
