@@ -12,6 +12,6 @@ make
 ./unicron
 ```
 
-#Developers
+# Developers
 
-Go to src/README.md
+Go to [src/README.md](https://github.com/GeoGenetics/unicorn/tree/unicorn/src)
