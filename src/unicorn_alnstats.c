@@ -84,7 +84,7 @@ int unicorn_alnstats(int argc, char **argv)
   if ( !opts.oprefix)
     opts.oprefix = strdup("/dev/stdout");
   ret = -3;
-    if ( !( in  = hts_open(opts.ifile,"r") ) )      goto exit;
+  if ( !( in  = hts_open(opts.ifile,"r") ) )      goto exit;
   if ( !( out = hts_open(opts.oprefix,"wbz9") ) ) goto exit;
   ret = -4;
   if ( opts.threads > 1 ) {

@@ -21,9 +21,42 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
+#include <stdint.h>
 #include "version.h"
 #define unicorn_version() VERSION
 
+/* unicorn's IO interface
+This is an opaque structure.
+Memebers and methods are accessed via the unicron_* functions.
+For example:
+    unicorn_t *u = unicorn_init(4, "input.bam");
+    fprintf(stderr, "%d references in input.bam\n", unicron_getrefn(u));
+    unicron_destroy(u);
+    */
+typedef struct unicorn_t *unicorn_t;
+
+/* unicron's statistics
+Contains the statistics to be computed over a unicron_t object.
+*/
+typedef struct unicorn_stats_t {
+    uint64_t REFLEN:1;
+    uint64_t REFNREADS:1;
+    uint64_t REFNALNS:1;
+    uint64_t RESERVED:61; // Reserved for future use
+} unicorn_stats_t;
+
+
+/* Initializer a unicorn type*/
+unicorn_t *unicorn_init(int threads, const char *ifile);
+/* Destroy a unicorn type*/
+void unicorn_destroy(unicorn_t *unicorn);
+
+/* Query unicorn_t memebers*/
+int unicorn_getrefn(unicorn_t *unicorn);
+
+
+/* unicorn stats methods*/
+unicorn_stats_t *unicorn_stats_init(const char *statstr);
+
 // Main program function
 int unicorn_alnstats(int argc, char **argv);
-int unicorn_refstats(int argc, char **argv);

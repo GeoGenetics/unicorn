@@ -15,7 +15,7 @@ endif
 .PHONY: clean all
 
 %.o:%.c
-	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
+	$(CC) -o $(@) $*.c -g -c $(CFLAGS) $(HTSIPTH)
 
 all: libunicorn unicornc unicorncpp
 
