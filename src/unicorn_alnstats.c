@@ -54,6 +54,7 @@ int unicorn_alnstats(int argc, char **argv)
     unicorn_usage(stderr);
     return 0;
   }
+  fprintf(stderr, "libhts:  %s\n", hts_version());
   htsThreadPool p = {0, 0};
   htsFile *in = NULL, *out = NULL;
   int c, ret = -1;

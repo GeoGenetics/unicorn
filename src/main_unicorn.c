@@ -17,7 +17,7 @@ static void unicorn_usage(FILE *fp)
 
 int main(int argc, char **argv)
 {
-  fprintf(stderr, "unicorn %s\n", VERSION);
+  fprintf(stderr, "unicorn %s\n", unicorn_version());
   if (argc < 2) {
     unicorn_usage(stderr);
     return 1;
