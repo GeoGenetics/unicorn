@@ -12,17 +12,19 @@ $(info htslib include dir is $(HTSIPTH))
 $(info htslib lib dir is $(HTSLPTH))
 endif
 
-.PHONY:all
+.PHONY: clean all
 
 %.o:%.c
 	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
 
-_unicron: $(OBJ)
+all: unicornc unicorncpp
+
+unicornc: $(OBJ)
 	$(CC) -o unicorn $(OBJ) $(HTSIPTH) $(HTSLPTH) -Isrc -Wall -Wextra -pedantic -std=c11 -g -lhts
 
 unicorncpp: src/main_unicorn.cpp
 	$(CPP) -o $@ $< $(HTSIPTH) $(HTSLPTH) -Wall -Wextra -pedantic -std=c++11 -g -lhts
 
-unicorn:unicorncpp _unicron
-	
-all: unicorn
+clean:
+	rm -f $(OBJ) unicorn unicorncpp
+
