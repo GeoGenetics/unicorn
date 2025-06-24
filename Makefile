@@ -1,9 +1,8 @@
 CPP=g++
 CC=gcc
-CFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g
-SRC=$(wildcard src/*.c)
+CFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g -Isrc
+SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)
-LOBJ=$(wildcard src/unicorn_*.o)
 ifndef HTSSRC
 $(info HTSSRC not defined; expecting systemwide htslib instalation)
 else
@@ -21,7 +20,7 @@ endif
 all: libunicorn unicornc unicorncpp
 
 libunicorn: $(OBJ)
-	ar rcs $(@).a $(LOBJ)
+	ar rcs $(@).a $(OBJ)
 	cp src/unicorn.h .
 
 unicornc: src/main_unicorn.c $(OBJ)
