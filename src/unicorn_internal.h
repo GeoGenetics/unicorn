@@ -24,3 +24,11 @@ SOFTWARE.
 #include <htslib/hts.h>
 #include <htslib/thread_pool.h>
 #include <htslib/sam.h>
+
+typedef struct {
+    int  threads;
+    char *ifile;
+    htsThreadPool p;
+    htsFile   *_FP;
+    bam_hdr_t *hdr;
+} unicorn_t;

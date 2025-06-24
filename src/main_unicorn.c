@@ -10,10 +10,10 @@
 #include "unicorn.h"
 
 typedef struct unicorn_opts {
-  int  threads;  // Number of threads to use
-  char *oprefix; // Output prefix for results
-  char *ifile;   // Input file (BAM/SAM/CRAM)
-  char *statstr; // Comma separated list of statistics to compute
+  int  threads;    // Number of threads to use
+  char *oprefix;   // Output prefix for results
+  char *ifile;     // Input file (BAM/SAM/CRAM)
+  char *statstr;   // Comma separated list of statistics to compute
 } unicorn_opt_t;
 
 static void unicorn_usage(FILE *fp)
@@ -47,6 +47,10 @@ static int unicorn_refstats(int argc, char **argv)
   ketopt_t o = KETOPT_INIT;
   unicorn_opt_t opts = {0};
   opts.threads = 4;
+  unicorn_t *u = NULL;
+  unicorn_refstat_t *stats = NULL;
+  char OBUFF[516] = {0};
+  FILE *ofp = NULL;
   //Read command line options
   while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, NULL)) >= 0 ) {
     switch(c) {
@@ -72,24 +76,35 @@ static int unicorn_refstats(int argc, char **argv)
   //Set default statistics if not provided
   if (!opts.statstr)
     opts.statstr = strdup("RefLen,RefNReads,RefNAlns");
-  if (!opts.oprefix)
-    opts.oprefix = strdup("/dev/stdout");
+  if (!opts.oprefix) ofp = stdout;
+  else {
+    strcpy(OBUFF, opts.oprefix);
+    strcat(OBUFF, ".stats.txt");
+    ofp = fopen(OBUFF, "w");
+    if (!ofp) goto exit;
+  }
   ret = -2;
   
   //Load bam data via unicorn API
   fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__, opts.ifile);
-  unicorn_t *u = unicorn_init(opts.threads, opts.ifile);
+  u = unicorn_init(opts.threads, opts.ifile);
   if (!u) goto exit;
   fprintf(stderr, "[unicorn::%s] Found %d reference sequence(s).\n",
                   __func__,
                   unicorn_getrefn(u));
-  //Parse the statistics string
-  unicorn_stats_t *stats = unicorn_stats_init(opts.statstr);
+  ret = -3;
+  //Parse the statistics string and initialize stat object
+  stats = unicorn_refstat_init(opts.statstr);
   if (!stats) goto exit; 
+
+  if ( (ret = unicorn_refstat_compute(u, stats)) )
+    goto exit;
   
-  unicorn_destroy(u); 
-  //unicorn_stat_destroy(stats);
-  
+  fprintf(stderr, "[unicorn::%s] %u alignments\n", __func__,
+                                                   unicorn_refstat_gettaln(stats));
+  fprintf(stderr, "[unicorn::%s] %u reads\n", __func__, 
+                                              unicorn_refstat_gettread(stats));
+  unicorn_refstat_print(u, stats, ofp);
   ret = 0;
   exit:
     if (ret < 0) {
@@ -99,7 +114,10 @@ static int unicorn_refstats(int argc, char **argv)
     if (opts.ifile) free(opts.ifile);
     if (opts.oprefix) free(opts.oprefix);
     if (opts.statstr) free(opts.statstr);
-  return ret;
+    if (u) unicorn_destroy(u);
+    if (stats) unicorn_refstat_destroy(stats);
+    if (ofp && opts.oprefix) fclose(ofp);
+    return ret;
 }
 
 int main(int argc, char **argv)
@@ -110,7 +128,7 @@ int main(int argc, char **argv)
     return 1;
   }
   else if (strcmp(argv[1], "alnstats") == 0) {
-    return unicorn_alnstats(argc, argv);
+    //return unicorn_alnstats(argc, argv);
   } else if (strcmp(argv[1], "refstats") == 0) {
     return unicorn_refstats(argc, argv);
   } else {

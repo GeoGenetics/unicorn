@@ -1,5 +1,6 @@
 CPP=g++
 CC=gcc
+CFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g
 SRC=$(wildcard src/*.c)
 OBJ=$(SRC:.c=.o)
 LOBJ=$(wildcard src/unicorn_*.o)
@@ -24,7 +25,7 @@ libunicorn: $(OBJ)
 	cp src/unicorn.h .
 
 unicornc: src/main_unicorn.c $(OBJ)
-	$(CC) -o unicorn $< libunicorn.a $(HTSIPTH) $(HTSLPTH) -Isrc -Wall -Wextra -pedantic -std=c11 -g -lhts
+	$(CC) -o unicorn $< libunicorn.a $(HTSIPTH) $(HTSLPTH) -Isrc $(CFLAGS) -lhts -lm
 
 unicorncpp: src/main_unicorn.cpp
 	$(CPP) -o $@ $< $(HTSIPTH) $(HTSLPTH) -Wall -Wextra -pedantic -std=c++11 -g -lhts

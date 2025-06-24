@@ -35,28 +35,37 @@ For example:
     */
 typedef struct unicorn_t *unicorn_t;
 
-/* unicron's statistics
-Contains the statistics to be computed over a unicron_t object.
-*/
-typedef struct unicorn_stats_t {
-    uint64_t REFLEN:1;
-    uint64_t REFNREADS:1;
-    uint64_t REFNALNS:1;
-    uint64_t RESERVED:61; // Reserved for future use
-} unicorn_stats_t;
-
-
-/* Initializer a unicorn type*/
+/* Initializer a unicorn object*/
 unicorn_t *unicorn_init(int threads, const char *ifile);
-/* Destroy a unicorn type*/
 void unicorn_destroy(unicorn_t *unicorn);
 
 /* Query unicorn_t memebers*/
 int unicorn_getrefn(unicorn_t *unicorn);
 
 
-/* unicorn stats methods*/
-unicorn_stats_t *unicorn_stats_init(const char *statstr);
+/**************************************************** 
+unicron's BAM statistic computation interface
 
-// Main program function
-int unicorn_alnstats(int argc, char **argv);
+
+****************************************************/
+
+/*
+unicron's reference based statistics
+This opaque structure is accessed via the unicorn_stats_* functions.
+*/
+typedef struct unicorn_refstat_t *unicorn_refstat_t;
+
+/* Initialize a refstats object */
+unicorn_refstat_t *unicorn_refstat_init(const char *statstr);
+void unicorn_refstat_destroy(unicorn_refstat_t *stats);
+
+/* Compute reference statistics */
+int unicorn_refstat_compute( unicorn_t *unicorn, unicorn_refstat_t *stats);
+void unicorn_refstat_print(const unicorn_t *u,
+                           const unicorn_refstat_t *stats,
+                           FILE *fp);
+
+//Get total number of alignments
+uint32_t unicorn_refstat_gettaln(const unicorn_refstat_t *stats);
+//Get total number of reads
+uint32_t unicorn_refstat_gettread(const unicorn_refstat_t *stats);

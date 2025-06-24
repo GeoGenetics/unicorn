@@ -4,14 +4,6 @@
 
 #include "unicorn_internal.h"
 
-typedef struct {
-    int  threads;
-    char *ifile;
-    htsThreadPool p;
-    htsFile   *_FP;
-    bam_hdr_t *hdr;
-} unicorn_t;
-
 void unicorn_destroy(unicorn_t *u)
 {
     if (u) {
