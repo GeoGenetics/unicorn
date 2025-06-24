@@ -22,9 +22,11 @@ make
 ```
 
 ## Alternative htslib
+If htslib is not in a system-wide path, you can specify manualy with:
 ```
 make HTSSRC=/path/to/htslib/
 ```
+Make sure `/path/to/htslib` is searchable for loading shared libraries.
 
 # Developers
 
