@@ -32,3 +32,6 @@ typedef struct {
     htsFile   *_FP;
     bam_hdr_t *hdr;
 } unicorn_t;
+
+#define STATSTR "Id\tLength\tn_alns\tn_reads\tm_readl\tstd_readl\tmd_readl\t\
+                 readl_min\treadl_max\tm_alnnm\tm_alnani\tstd_alnani\tmd_alnani\n"
