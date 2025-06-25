@@ -9,4 +9,5 @@ src/*.o
 .DS_Store
 src/.DS_Store
 *.dSYM
+src/libunicorn/*.o
 
