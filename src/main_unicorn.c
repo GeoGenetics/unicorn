@@ -20,8 +20,8 @@ static void unicorn_usage(FILE *fp)
 {
     fprintf(fp, "./unicorn command [options] -b <in.bam>|<in.sam>|<in.cram>\n");
     fprintf(fp, "Commands:\n"\
-            "  alnstats    Compute per alingments statitics such as:\n"\
-            "                  # alingments, ANI, GC, etc.\n"\
+            //"  alnstats    Compute per alingments statitics such as:\n"
+            //"                  # alingments, ANI, GC, etc.\n"
             "  refstats    Compute per reference statistics such as\n"\
             "                  # alignments, # reads, mean read length, etc.\n");
 }
@@ -32,9 +32,9 @@ static void refstats_usage(FILE *fp)
     fprintf(fp, "Options:\n"\
             "  -b <str>   input bam|sam|cram\n"\
             "  -o <str>   output prefix\n"\
-            "  -t <int>   number of threads [4]\n"\
-            "  -s <str1,str2,...>  comma separated list of statistics to compute. [RefLen,RefNReads,RefNAlns]\n"\
-            "                      man unicron.1 for all options.\n"\
+            //"  -t <int>   number of threads [4]\n"
+            //"  -s <str1,str2,...>  comma separated list of statistics to compute. [RefLen,RefNReads,RefNAlns]\n"
+            //"                      man unicron.1 for all options.\n"
             "  -h         print this help message\n");
 }
 
