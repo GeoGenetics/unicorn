@@ -27,7 +27,7 @@ typedef struct _refSTAT_T {
   float        REFREADE;   // Mean read length
   float        REFREADV;   // Read length variance
   uint32_t     REFREADD;   // Read length median
-  float        REFREADO;   // Read length mode 
+  uint32_t     REFREADO;   // Read length mode 
   float        _M;         // Sum of squares of difference from mean
   uint32_t     REFREADMIN;
   uint32_t     REFREADMAX;
@@ -59,6 +59,8 @@ typedef struct unicorn_refstats_t {
   uint64_t _naln;
 } unicorn_refstat_t;
 
+
+//TODO change to macro
 static inline float _fMEDIAN(float *v, uint32_t n)
 {
   if ( n%2 )
@@ -66,11 +68,35 @@ static inline float _fMEDIAN(float *v, uint32_t n)
   return (v[n/2 - 1] + v[n/2]) / 2.0;
 }
 
+//TODO change to macro
 static inline uint32_t _udMEDIAN(uint32_t *v, uint32_t n)
 {
   if ( n%2 )
     return v[n/2];
   return (v[n/2 - 1] + v[n/2]) / 2.0; 
+}
+
+static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
+{
+  uint32_t val = v[0], _val;
+  uint32_t freq = 0, _mfreq = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    if (v[i] != val) {
+      if (freq > _mfreq) {
+        _mfreq = freq;
+        _val = val;
+      }
+      freq = 0;
+      val = v[i];
+      continue;
+    }
+    freq++;
+  }
+  if (freq > _mfreq) {
+    _mfreq = freq;
+    _val = val;
+  }
+  return _val;
 }
 
 //Computes ANI of alignment record, stores edit distance (nm) in *NM
@@ -85,21 +111,23 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
   return ani;
 }
 
+//TODO modularize
 int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
 {
   int ret = -1, absent;
+  if (!u || !stats) return -1;
   bam1_t *b = bam_init1();
   uint64_t naln = 0;
   //Loop over alignments
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     naln++;
-    int32_t tid  = b->core.tid;
+    int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
-    khint_t k = refmap_get(stats->_refmap, tid);
     _refSTAT_T refstat = {0};
+    khint_t k = refmap_get(stats->_refmap, tid); //query hash map
     if ( k == kh_end(stats->_refmap) ) {
-      // New reference sequence, initialize stats
+      // New reference sequence, initialize stats and insert in map
       refstat.READSET = refset_init();
       kv_init(refstat.vANI);
       refstat.REFLEN = u->hdr->target_len[tid];
@@ -107,17 +135,18 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
       k = refmap_put(stats->_refmap, tid, &absent);
       kh_val(stats->_refmap, k) = refstat;
     }
-    // Existing reference sequence, update stats
+    // update stats
     refstat = kh_val(stats->_refmap, k);
     uint32_t naln = ++refstat.REFNALNS;
     //Add read name to read set to count number of reads to ref
     khint_t _queryhash = kh_hash_str(bam_get_qname(b));
     refset_put(refstat.READSET, _queryhash, &absent);
+    
+    //mean, median, and variance  Welford's online algorithm
+    //Read length
     float mean, delta;
-    //read length mean and std  Welford's online algorithm
     uint32_t n = kh_size(refstat.READSET);
     mean = refstat.REFREADE;
-    //read length std
     kv_push(uint32_t, refstat.vRLEN, qlen);
     delta = qlen - mean;
     refstat.REFREADE += delta/n;
@@ -125,7 +154,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     refstat.REFREADV = refstat._M / (n-1);
     refstat.REFREADMIN = qlen < refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
     refstat.REFREADMAX = qlen > refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
-    //Alignment ANI and NM
+    //Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
     kv_push(float, refstat.vANI, ani);
@@ -134,15 +163,15 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     refstat.REFALNANIE += delta/naln;
     refstat._MANI = delta * (ani - refstat.REFALNANIE);
     refstat.REFALNANIV = refstat._MANI / (naln-1);
-    //NM
+    //Alignment NM
     mean = refstat.REFALNNM;
     delta = NM-mean;
     refstat.REFALNNM += delta/naln;
     kh_val(stats->_refmap, k) = refstat;
   }
-  //Sort vectors
+  //TODO parallelize
   khint_t k;
-  //Loop over references
+  //Loop over references and sort arrays
   kh_foreach(stats->_refmap, k) {
     _refSTAT_T refstat = kh_val(stats->_refmap, k);
     floatq_t   qANI    = refstat.vANI;
@@ -151,7 +180,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     ks_introsort(_suint32, qRLEN.n, qRLEN.a);
     kh_val(stats->_refmap, k).REFALNANID = _fMEDIAN(qANI.a, qANI.n);
     kh_val(stats->_refmap, k).REFREADD   = _udMEDIAN(qRLEN.a, qRLEN.n);
-}
+    kh_val(stats->_refmap, k).REFREADO   = _udMODE(qRLEN.a, qRLEN.n);
+  }
 
   if (!naln) goto exit; // No alignments found
   stats->_naln = naln;
@@ -215,7 +245,7 @@ void unicorn_refstat_print(const unicorn_t *u,
     khint_t k;
     kh_foreach(stats->_refmap, k) {
       _refSTAT_T v = kh_val(stats->_refmap, k);   
-      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%f\t%f\t%f\t%f\n",
+      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\n",
                   hdr->target_name[kh_key(stats->_refmap, k)],
                   v.REFLEN,
                   v.REFNALNS,
@@ -223,6 +253,7 @@ void unicorn_refstat_print(const unicorn_t *u,
                   v.REFREADE,
                   sqrtf(v.REFREADV),
                   v.REFREADD,
+                  v.REFREADO,
                   v.REFREADMIN,
                   v.REFREADMAX,
                   v.REFALNNM,
