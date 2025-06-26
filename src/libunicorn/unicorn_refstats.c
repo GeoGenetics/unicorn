@@ -1,9 +1,12 @@
 #define _XOPEN_SOURCE 700
 #include <math.h>
+#include <unistd.h>
 #include "unicorn_internal.h"
 #include "klib/khashl.h"
 #include "klib/kvec.h"
 #include "klib/ksort.h"
+
+#define MINALNS 5
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 
@@ -22,24 +25,28 @@ KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
 
 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
 #define kh_range_eq(a, b) ((a).pos == (b).pos)
+//#define ks_lt_urange(a, b) ((a).pos < (b).pos)
 
-typedef struct _urange {
-    //khint_t qhash;
-    hts_pos_t pos;
-    hts_pos_t l;
-} _urange;
 
-//KHASHL_SET_INIT(static,               //Scope
-//                urangeset_t, urangeset, //type and prefix
-//                _urange,             //key type 
-//                kh_range_hash, kh_range_eq) //hash and equality functions
+typedef struct _urangeevent {
+    uint64_t pos:63;
+    uint8_t e:1;
+} _urangeevent;
 
-typedef kvec_t(_urange) urangeq_t;
+static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
+{
+    if (a.pos != b.pos)
+        return a.pos < b.pos;
+    return a.e > b.e; 
+}
+
+KSORT_INIT(_surange, _urangeevent, _eventlt)
+
+typedef kvec_t(_urangeevent) ueventq_t;
 
 typedef struct _refSTAT_T {
   uint32_t     REFLEN;     // Length of the reference sequence
   uint32_t     REFNALNS;   // Number of alignments mapped to the reference
-  uint32_t     REFNREADS;  // Number of reads mapped to the reference
   //Read length data
   float        REFREADE;   // Mean read length
   float        REFREADV;   // Read length variance
@@ -50,16 +57,19 @@ typedef struct _refSTAT_T {
   uint32_t     REFREADMAX;
   _refKHASHC_T *READSET;   // Hash set of read IDs mapped to the reference
   //Alignment data
-  float        REFALNNM;   //mean edit distance
-  float        REFALNANIE; //mean Average nucleotide identity(ANI)
-  float        REFALNANIV; //std ANI
-  float        REFALNANID; //median ANI
-  float        REFALNANIO; //Mode ANI
-  float        _MANI;
+  float        REFALNNM;   // mean edit distance
+  float        REFALNANIE; // mean Average nucleotide identity(ANI)
+  float        REFALNANIV; // std ANI
+  float        REFALNANID; // median ANI
+  float        REFALNANIO; // Mode ANI
+  float        _MANI;      // See _M
+  //Coverage
+  uint64_t     REFCOVB;    // number of covered bases
+  float        REFMCOV;    // mean cov
   //Data arrays
-  floatq_t     vANI;
-  uint32q_t    vRLEN;
-  urangeq_t    vRANGE;
+  floatq_t     aANI;
+  uint32q_t    aRLEN;
+  ueventq_t    aEVENT;     // For coverage computation
 } _refSTAT_T;
 
 KHASHL_MAP_INIT(static,                        //Scope
@@ -73,6 +83,7 @@ typedef struct unicorn_refstats_t {
   uint64_t REFNREADS:1;
   uint64_t REFNALNS: 1;
   uint64_t RESERVED:61; // Reserved for future use
+  //Data
   _refKHASH_T *_refmap; // Hash table for reference statistics
   uint64_t _naln;
 } unicorn_refstat_t;
@@ -129,6 +140,81 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
   return ani;
 }
 
+/**
+ * Calculates coverage metrics from a sorted list of events.
+ *
+ * @param events - Event queue
+ * @param l      - Reference sequence length
+ * @param *covbases - Return value for total covered bases
+ * @param *meancov  - Return value for mean coverage
+ */
+ static void _refcoverage(ueventq_t events, uint64_t l, uint64_t *covbases, float *meancov)
+{
+    // Initialize accumulators
+    uint64_t tcovbases = 0; //Total covered bases
+    uint64_t tdepthsum = 0; //Total depth sum. This is the "area under the coverage graph"
+    // Handle the edge case of no events
+    if ( !events.n || !l) {
+        *covbases = 0;
+        *meancov  = 0.0;
+        return;
+    }
+    // Initialize sweep-line state
+    uint32_t current_depth = 0;
+    uint64_t last_pos = events.a[0].pos;
+    // Sweep through all events
+    for (uint64_t i = 0; i < events.n; ++i) {
+        uint64_t current_pos = events.a[i].pos;
+        uint32_t segment_length = current_pos - last_pos;
+        // If the segment has length and was covered, accumulate metrics
+        if ( segment_length  && current_depth ) {
+            // Add to the total number of unique covered bases (breadth)
+            tcovbases += segment_length;
+            // Add the area of this segment (length * depth) to the total sum
+            tdepthsum += segment_length * current_depth;
+        }
+        // Update state based on the current event
+        current_depth += events.a[i].e ? 1 : -1;
+        last_pos = current_pos;
+    }
+    // Store the final calculated values in the output pointers
+    *covbases = tcovbases;
+    *meancov  = (double)tdepthsum / (double)l;
+}
+
+static void _refmapstats(_refKHASH_T *refmap)
+{
+  //TODO parallelize
+  uint32_t del = 0;
+  khint_t k;
+  //Loop over references and sort arrays
+  kh_foreach(refmap, k) {
+    if ( kh_val(refmap, k).REFNALNS < MINALNS ) {
+        refset_destroy(kh_val(refmap, k).READSET);
+        refmap_del(refmap, k);
+        del++;
+        continue;
+    }
+    //fprintf(stderr, "naln\t%u\n", kh_val(refmap, k).REFNALNS);
+    _refSTAT_T refstat = kh_val(refmap, k);
+    ueventq_t aEVENT = refstat.aEVENT;
+    floatq_t  aANI  = refstat.aANI;
+    uint32q_t aRLEN = refstat.aRLEN;
+    //Sort arrays
+    ks_introsort(_sfloat,  aANI.n,  aANI.a);
+    ks_introsort(_suint32, aRLEN.n, aRLEN.a);
+    ks_introsort(_surange, aEVENT.n, aEVENT.a);
+    kh_val(refmap, k).REFALNANID = _fMEDIAN(aANI.a, aANI.n);
+    kh_val(refmap, k).REFREADD   = _udMEDIAN(aRLEN.a, aRLEN.n);
+    kh_val(refmap, k).REFREADO   = _udMODE(aRLEN.a, aRLEN.n);
+    //Get coverage values
+    uint64_t covbases;
+    float    meancov;
+    _refcoverage(aEVENT, kh_val(refmap, k).REFLEN, &covbases, &meancov);
+  }
+  fprintf(stderr, "DELETED: %u\n", del);
+}
+
 //TODO modularize
 int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
 {
@@ -143,12 +229,13 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
     _refSTAT_T refstat = {0};
-    khint_t k = refmap_get(stats->_refmap, tid); //query hash map
+    khint_t k = refmap_get(stats->_refmap, tid); //query reference map
     if ( k == kh_end(stats->_refmap) ) {
       // New reference sequence, initialize stats and insert in map
-      refstat.READSET = refset_init();
-      kv_init(refstat.vANI);
-      kv_init(refstat.vRANGE);
+      refstat.READSET = refset_init(); //Unique queryIDs
+      kv_init(refstat.aANI);
+      kv_init(refstat.aEVENT);
+      kv_init(refstat.aRLEN);
       refstat.REFLEN = u->hdr->target_len[tid];
       refstat.REFREADMIN = 0xffffffffU;
       k = refmap_put(stats->_refmap, tid, &absent);
@@ -160,28 +247,29 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     //Add read name to read set to count number of reads to ref
     khint_t _queryhash = kh_hash_str(bam_get_qname(b));
     refset_put(refstat.READSET, _queryhash, &absent);
-    //Add alignment position and length
+    //Add alignment event, for coverage sweep line algorith
     if (absent) { //Only first instance of the query (no multiple mappings to same ref)
-        _urange r = {b->core.pos, b->core.l_qseq};
-        kv_push(_urange, refstat.vRANGE, r);
+        _urangeevent s = {b->core.pos, 1};
+        _urangeevent e = {bam_endpos(b), 0};
+        kv_push(_urangeevent, refstat.aEVENT, s);
+        kv_push(_urangeevent, refstat.aEVENT, e);
     }
- 
     //mean, median, and variance  Welford's online algorithm
     //Read length
     float mean, delta;
     uint32_t n = kh_size(refstat.READSET);
-    mean = refstat.REFREADE;
-    kv_push(uint32_t, refstat.vRLEN, qlen);
-    delta = qlen - mean;
-    refstat.REFREADE += delta/n;
-    refstat._M += delta * (qlen - refstat.REFREADE);
-    refstat.REFREADV = refstat._M / (n-1);
+    mean = refstat.REFREADE; //Get running mean
+    kv_push(uint32_t, refstat.aRLEN, qlen);
+    delta = qlen - mean;                             //Compute difference
+    refstat.REFREADE += delta/n;                     //New mean
+    refstat._M += delta * (qlen - refstat.REFREADE); //Keep track of m
+    refstat.REFREADV = refstat._M / (n-1);           //Running variance
     refstat.REFREADMIN = qlen < refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
     refstat.REFREADMAX = qlen > refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
     //Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
-    kv_push(float, refstat.vANI, ani);
+    kv_push(float, refstat.aANI, ani);
     mean = refstat.REFALNANIE;
     delta = ani-mean;
     refstat.REFALNANIE += delta/naln;
@@ -191,26 +279,12 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     mean = refstat.REFALNNM;
     delta = NM-mean;
     refstat.REFALNNM += delta/naln;
-    //
-    
+    //Don't loose your stats value
     kh_val(stats->_refmap, k) = refstat;
   }
-  //TODO parallelize
-  khint_t k;
-  //Loop over references and sort arrays
-  kh_foreach(stats->_refmap, k) {
-    _refSTAT_T refstat = kh_val(stats->_refmap, k);
-    fprintf(stderr, "%s\t%lu\n", u->hdr->target_name[kh_key(stats->_refmap, k)], refstat.vRANGE.n);
-    floatq_t   qANI    = refstat.vANI;
-    uint32q_t  qRLEN   = refstat.vRLEN;
-    ks_introsort(_sfloat, qANI.n, qANI.a);
-    ks_introsort(_suint32, qRLEN.n, qRLEN.a);
-    kh_val(stats->_refmap, k).REFALNANID = _fMEDIAN(qANI.a, qANI.n);
-    kh_val(stats->_refmap, k).REFREADD   = _udMEDIAN(qRLEN.a, qRLEN.n);
-    kh_val(stats->_refmap, k).REFREADO   = _udMODE(qRLEN.a, qRLEN.n);
-  }
-
   if (!naln) goto exit; // No alignments found
+  fprintf(stderr, "size of refmap: %u\n", kh_size(stats->_refmap));
+  _refmapstats(stats->_refmap);
   stats->_naln = naln;
   bam_destroy1(b);
   ret = 0;
@@ -270,6 +344,7 @@ void unicorn_refstat_print(const unicorn_t *u,
     sam_hdr_t *hdr = u->hdr;
     fprintf(fp, STATSTR);
     khint_t k;
+    fprintf(stderr, "Size of refmap: %u\n", kh_size(stats->_refmap));
     kh_foreach(stats->_refmap, k) {
       _refSTAT_T v = kh_val(stats->_refmap, k);   
       fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\n",
