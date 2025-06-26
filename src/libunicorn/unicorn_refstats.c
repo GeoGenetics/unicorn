@@ -19,6 +19,23 @@ KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
 /******************
  * Per reference stats
 */
+
+#define kh_range_hash(r) kh_hash_dummy((r).qhash)
+#define kh_range_eq(a, b) ((a).pos == (b).pos)
+
+typedef struct _urange {
+    //khint_t qhash;
+    hts_pos_t pos;
+    hts_pos_t l;
+} _urange;
+
+//KHASHL_SET_INIT(static,               //Scope
+//                urangeset_t, urangeset, //type and prefix
+//                _urange,             //key type 
+//                kh_range_hash, kh_range_eq) //hash and equality functions
+
+typedef kvec_t(_urange) urangeq_t;
+
 typedef struct _refSTAT_T {
   uint32_t     REFLEN;     // Length of the reference sequence
   uint32_t     REFNALNS;   // Number of alignments mapped to the reference
@@ -39,9 +56,10 @@ typedef struct _refSTAT_T {
   float        REFALNANID; //median ANI
   float        REFALNANIO; //Mode ANI
   float        _MANI;
-  //Data vectors for median computation
+  //Data arrays
   floatq_t     vANI;
   uint32q_t    vRLEN;
+  urangeq_t    vRANGE;
 } _refSTAT_T;
 
 KHASHL_MAP_INIT(static,                        //Scope
@@ -130,6 +148,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
       // New reference sequence, initialize stats and insert in map
       refstat.READSET = refset_init();
       kv_init(refstat.vANI);
+      kv_init(refstat.vRANGE);
       refstat.REFLEN = u->hdr->target_len[tid];
       refstat.REFREADMIN = 0xffffffffU;
       k = refmap_put(stats->_refmap, tid, &absent);
@@ -141,7 +160,12 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     //Add read name to read set to count number of reads to ref
     khint_t _queryhash = kh_hash_str(bam_get_qname(b));
     refset_put(refstat.READSET, _queryhash, &absent);
-    
+    //Add alignment position and length
+    if (absent) { //Only first instance of the query (no multiple mappings to same ref)
+        _urange r = {b->core.pos, b->core.l_qseq};
+        kv_push(_urange, refstat.vRANGE, r);
+    }
+ 
     //mean, median, and variance  Welford's online algorithm
     //Read length
     float mean, delta;
@@ -167,6 +191,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     mean = refstat.REFALNNM;
     delta = NM-mean;
     refstat.REFALNNM += delta/naln;
+    //
+    
     kh_val(stats->_refmap, k) = refstat;
   }
   //TODO parallelize
@@ -174,6 +200,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
   //Loop over references and sort arrays
   kh_foreach(stats->_refmap, k) {
     _refSTAT_T refstat = kh_val(stats->_refmap, k);
+    fprintf(stderr, "%s\t%lu\n", u->hdr->target_name[kh_key(stats->_refmap, k)], refstat.vRANGE.n);
     floatq_t   qANI    = refstat.vANI;
     uint32q_t  qRLEN   = refstat.vRLEN;
     ks_introsort(_sfloat, qANI.n, qANI.a);

@@ -11,3 +11,5 @@ src/.DS_Store
 *.dSYM
 src/libunicorn/*.o
 
+other_code
+testing
