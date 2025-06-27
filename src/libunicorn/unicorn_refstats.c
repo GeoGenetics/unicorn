@@ -66,6 +66,8 @@ typedef struct _refSTAT_T {
   //Coverage
   uint64_t     REFCOVB;    // number of covered bases
   float        REFMCOV;    // mean cov
+  float        REFMONCOV;  // Mean coverage of covered bases
+  float        REFVONCOV;  // Variance of coverage of covered bases
   //Data arrays
   floatq_t     aANI;
   uint32q_t    aRLEN;
@@ -148,7 +150,9 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
  * @param *covbases - Return value for total covered bases
  * @param *meancov  - Return value for mean coverage
  */
- static void _refcoverage(ueventq_t events, uint64_t l, uint64_t *covbases, float *meancov)
+ static void _refcoverage(ueventq_t events, uint64_t l,
+                          uint64_t *covbases, float *meancov,
+                         float *meanoncov, float *varoncov)
 {
     // Initialize accumulators
     uint64_t tcovbases = 0; //Total covered bases
@@ -161,7 +165,7 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
     }
     // Initialize sweep-line state
     uint32_t current_depth = 0;
-    uint64_t last_pos = events.a[0].pos;
+    uint64_t last_pos = events.a[0].pos, sumsqdepth = 0;
     // Sweep through all events
     for (uint64_t i = 0; i < events.n; ++i) {
         uint64_t current_pos = events.a[i].pos;
@@ -171,31 +175,30 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
             // Add to the total number of unique covered bases (breadth)
             tcovbases += segment_length;
             // Add the area of this segment (length * depth) to the total sum
-            tdepthsum += segment_length * current_depth;
+            tdepthsum  += segment_length * current_depth;
+            sumsqdepth += segment_length * current_depth * current_depth;
         }
         // Update state based on the current event
         current_depth += events.a[i].e ? 1 : -1;
         last_pos = current_pos;
     }
+    double meansqcovb = (double)sumsqdepth / (double)tcovbases;
+
     // Store the final calculated values in the output pointers
-    *covbases = tcovbases;
-    *meancov  = (double)tdepthsum / (double)l;
+    *covbases  = tcovbases;
+    *meancov   = (double)tdepthsum / (double)l;
+    *meanoncov = (double)tdepthsum / (double)tcovbases;
+    *varoncov  = meansqcovb - ((*meanoncov) * (*meanoncov));
+        
+
 }
 
-static void _refmapstats(_refKHASH_T *refmap)
+static void _refmapstats(_refKHASH_T *refmap, bam_hdr_t *h)
 {
   //TODO parallelize
-  uint32_t del = 0;
   khint_t k;
   //Loop over references and sort arrays
-  kh_foreach(refmap, k) {
-    if ( kh_val(refmap, k).REFNALNS < MINALNS ) {
-        refset_destroy(kh_val(refmap, k).READSET);
-        refmap_del(refmap, k);
-        del++;
-        continue;
-    }
-    //fprintf(stderr, "naln\t%u\n", kh_val(refmap, k).REFNALNS);
+  kh_foreach(refmap, k) { 
     _refSTAT_T refstat = kh_val(refmap, k);
     ueventq_t aEVENT = refstat.aEVENT;
     floatq_t  aANI  = refstat.aANI;
@@ -209,11 +212,14 @@ static void _refmapstats(_refKHASH_T *refmap)
     kh_val(refmap, k).REFREADO   = _udMODE(aRLEN.a, aRLEN.n);
     //Get coverage values
     uint64_t covbases;
-    float    meancov;
-    _refcoverage(aEVENT, kh_val(refmap, k).REFLEN, &covbases, &meancov);
+    float    meancov, meanoncov, varoncov;
+    _refcoverage(aEVENT, kh_val(refmap, k).REFLEN, &covbases, &meancov, &meanoncov, &varoncov);
+    kh_val(refmap, k).REFCOVB   = covbases;
+    kh_val(refmap, k).REFMCOV   = meancov;
+    kh_val(refmap, k).REFMONCOV = meanoncov;
+    kh_val(refmap, k).REFVONCOV = varoncov;
   }
-  fprintf(stderr, "DELETED: %u\n", del);
-}
+}     
 
 //TODO modularize
 int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
@@ -283,8 +289,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     kh_val(stats->_refmap, k) = refstat;
   }
   if (!naln) goto exit; // No alignments found
-  fprintf(stderr, "size of refmap: %u\n", kh_size(stats->_refmap));
-  _refmapstats(stats->_refmap);
+  _refmapstats(stats->_refmap, u->hdr);
   stats->_naln = naln;
   bam_destroy1(b);
   ret = 0;
@@ -344,10 +349,9 @@ void unicorn_refstat_print(const unicorn_t *u,
     sam_hdr_t *hdr = u->hdr;
     fprintf(fp, STATSTR);
     khint_t k;
-    fprintf(stderr, "Size of refmap: %u\n", kh_size(stats->_refmap));
     kh_foreach(stats->_refmap, k) {
       _refSTAT_T v = kh_val(stats->_refmap, k);   
-      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\n",
+      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%llu\t%f\t%f\t%f\t%f\t%f\n",
                   hdr->target_name[kh_key(stats->_refmap, k)],
                   v.REFLEN,
                   v.REFNALNS,
@@ -361,7 +365,13 @@ void unicorn_refstat_print(const unicorn_t *u,
                   v.REFALNNM,
                   v.REFALNANIE,
                   sqrtf(v.REFALNANIV),
-                  v.REFALNANID );
+                  v.REFALNANID,
+                  v.REFCOVB,
+                  v.REFMCOV,
+                  (double)v.REFCOVB/(double)v.REFLEN,
+                  v.REFMONCOV,
+                  sqrtf(v.REFVONCOV),
+                  sqrtf(v.REFVONCOV)/v.REFMONCOV);
     }
 }
 

@@ -34,4 +34,5 @@ typedef struct {
 } unicorn_t;
 
 #define STATSTR "Id\tLength\tn_alns\tn_reads\tm_readl\tstd_readl\tmd_readl\t\
-                 mo_readl\treadl_min\treadl_max\tm_alnnm\tm_alnani\tstd_alnani\tmd_alnani\n"
+                 mo_readl\treadl_min\treadl_max\tm_alnnm\tm_alnani\tstd_alnani\t\
+                 md_alnani\tn_covbases\tm_cov\tbreath_cov\tm_covcovered\tstd_covcovered\tevenness_cov\n"
