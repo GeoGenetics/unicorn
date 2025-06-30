@@ -6,7 +6,7 @@
 #include "klib/kvec.h"
 #include "klib/ksort.h"
 
-#define MINNREADS 5
+#define MINNREADS 50
 #define MAXNALNS  0xffffffffU
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
@@ -87,6 +87,8 @@ typedef struct unicorn_refstats_t {
   uint64_t REFNREADS:1;
   uint64_t REFNALNS: 1;
   uint64_t RESERVED:61; // Reserved for future use
+  //Flags
+  uint8_t fc: 1;          //Filter computed flag
   //Data
   _refKHASH_T *_refmap; // Hash table for reference statistics
   uint64_t _nalns;
@@ -159,14 +161,14 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
 }
 
 /**
- * Calculates coverage metrics from a sorted list of events.
- *
- * @param events - Event queue
- * @param l      - Reference sequence length
- * @param *covbases - Return value for total covered bases
- * @param *meancov  - Return value for mean coverage
- */
- static void _refcoverage(ueventq_t events, uint64_t l,
+* Calculates coverage metrics from a sorted list of events.
+*
+* @param events - Event queue
+* @param l      - Reference sequence length
+* @param *covbases - Return value for total covered bases
+* @param *meancov  - Return value for mean coverage
+*/
+static void _refcoverage(ueventq_t events, uint64_t l,
                           uint64_t *covbases, float *meancov,
                          float *meanoncov, float *varoncov)
 {
@@ -205,8 +207,6 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
     *meancov   = (double)tdepthsum / (double)l;
     *meanoncov = (double)tdepthsum / (double)tcovbases;
     *varoncov  = meansqcovb - ((*meanoncov) * (*meanoncov));
-        
-
 }
 
 static void _refmapstats(unicorn_refstat_t *stats)
@@ -261,11 +261,13 @@ static void _refmapstats(unicorn_refstat_t *stats)
 int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
 {
   int ret = -1, absent;
-  if (!u || !stats) return -1;
+  if (!u || !stats) goto exit;
+  ret = -2;
   bam1_t *b = bam_init1();
   uint64_t naln = 0;
-  //Loop over alignments
+  //Loop over alignments //TODO refector
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
+    
     if (_unmapped(b)) continue;
     naln++;
     int32_t tid   = b->core.tid;
@@ -303,7 +305,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     mean = refstat.REFREADE; //Get running mean
     kv_push(uint32_t, refstat.aRLEN, qlen);
     delta = qlen - mean;                             //Compute difference
-    refstat.REFREADE += delta/n;                     //New mean
+    refstat.REFREADE += delta/n;                     //Running mean
     refstat._M += delta * (qlen - refstat.REFREADE); //Keep track of m
     refstat.REFREADV = refstat._M / (n-1);           //Running variance
     refstat.REFREADMIN = qlen < refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
@@ -328,6 +330,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
   stats->_nalns = naln;
   _refmapstats(stats);
   bam_destroy1(b);
+  stats->fc = 1;
   ret = 0;
   exit:
     return ret;
@@ -343,6 +346,9 @@ void unicorn_refstat_destroy(unicorn_refstat_t *stats)
           _refSTAT_T v = kh_val(stats->_refmap, k);
           if (v.READSET)
             refset_destroy(v.READSET);
+          kv_destroy(v.aANI);
+          kv_destroy(v.aEVENT);
+          kv_destroy(v.aRLEN);
         }
         refmap_destroy(stats->_refmap);
       }
@@ -350,7 +356,6 @@ void unicorn_refstat_destroy(unicorn_refstat_t *stats)
   }
 }
 
-//TODO add a flag to indicate if a filter has been applied
 unicorn_refstat_t *unicorn_refstat_init(const char *_statstr)
 {
     unicorn_refstat_t *stats = calloc(1, sizeof(unicorn_refstat_t));
@@ -378,40 +383,6 @@ unicorn_refstat_t *unicorn_refstat_init(const char *_statstr)
     return stats;
 }
 
-void unicorn_refstat_print(const unicorn_t *u,
-                           const unicorn_refstat_t *stats,
-                           FILE *fp)
-{
-    if (!stats || !fp || !u) return;
-    sam_hdr_t *hdr = u->hdr;
-    fprintf(fp, STATSTR);
-    khint_t k;
-    kh_foreach(stats->_refmap, k) {
-      _refSTAT_T v = kh_val(stats->_refmap, k);   
-      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%llu\t%f\t%f\t%f\t%f\t%f\n",
-                  hdr->target_name[kh_key(stats->_refmap, k)],
-                  v.REFLEN,
-                  v.REFNALNS,
-                  kh_size(v.READSET),
-                  v.REFREADE,
-                  sqrtf(v.REFREADV),
-                  v.REFREADD,
-                  v.REFREADO,
-                  v.REFREADMIN,
-                  v.REFREADMAX,
-                  v.REFALNNM,
-                  v.REFALNANIE,
-                  sqrtf(v.REFALNANIV),
-                  v.REFALNANID,
-                  v.REFCOVB,
-                  v.REFMCOV,
-                  (double)v.REFCOVB/(double)v.REFLEN,
-                  v.REFMONCOV,
-                  sqrtf(v.REFVONCOV),
-                  sqrtf(v.REFVONCOV)/v.REFMONCOV);
-    }
-}
-
 //TODO: Move to another compile unit
 uint32_t unicorn_refstat_gettaln(const unicorn_refstat_t *stats)
 {
@@ -436,4 +407,61 @@ uint32_t unicorn_refstat_getfaln(const unicorn_refstat_t *stats)
 int32_t unicorn_refstats_getfrefn(const unicorn_refstat_t *stats)
 {
     return kh_size(stats->_refmap);
+}
+
+//TODO maybe a macro is best?
+uint8_t unicorn_refstats_isfiltered(const unicorn_refstat_t *stats)
+{
+  return stats->fc;
+}
+
+uint8_t unicorn_refstats_filterbam(unicorn_t *u,
+                                   unicorn_refstat_t *stats)
+{
+  if (!u || !stats) return 1;
+  if (!stats->fc)   return 1;
+  if (u->_FP) sam_close(u->_FP);
+  u->_FP = hts_open(u->ifile, "r");
+  //Loop over bamfile and write alignments from references that passed filter
+  return 1;
+}
+
+void unicorn_refstat_print(const unicorn_t *u,
+                           const unicorn_refstat_t *stats,
+                           FILE *fp)
+{
+    if (!stats || !fp || !u) return;
+    if (!stats->fc) return;
+    sam_hdr_t *hdr = u->hdr;
+    fprintf(fp, STATSTR);
+    khint_t k;
+    kh_foreach(stats->_refmap, k) {
+      _refSTAT_T v = kh_val(stats->_refmap, k);   
+      float breath = v.REFCOVB/(double)v.REFLEN;
+      float expbreath =  1.0f - expf(-breath); 
+      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%lu\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+                  hdr->target_name[kh_key(stats->_refmap, k)],//1
+                  v.REFLEN,                                   //2
+                  v.REFNALNS,                                 //3
+                  kh_size(v.READSET),                         //4
+                  v.REFREADE,                                 //5
+                  sqrtf(v.REFREADV),                          //6
+                  v.REFREADD,                                 //7
+                  v.REFREADO,                                 //8
+                  v.REFREADMIN,                               //9
+                  v.REFREADMAX,                               //10
+                  v.REFALNNM,                                 //11
+                  v.REFALNANIE,                               //12
+                  sqrtf(v.REFALNANIV),                        //13
+                  v.REFALNANID,                               //14
+                  v.REFCOVB,                                  //15
+                  v.REFMCOV,                                  //16
+                  breath,                                     //17
+                  expbreath,                                  //18
+                  breath/expbreath,                           //19
+                  v.REFMONCOV,                                //20
+                  sqrtf(v.REFVONCOV),                         //21
+                  sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
+                  1000.0f * breath);                          //23
+    }
 }

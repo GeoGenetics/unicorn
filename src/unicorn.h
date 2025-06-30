@@ -27,51 +27,61 @@ SOFTWARE.
 
 /* unicorn's IO interface
 This is an opaque structure.
-Memebers and methods are accessed via the unicron_* functions.
+Members and methods are accessed via the unicron_* functions.
 For example:
     unicorn_t *u = unicorn_init(4, "input.bam");
     fprintf(stderr, "%d references in input.bam\n", unicron_getrefn(u));
-    unicron_destroy(u);
+    unicorn_destroy(u);
     */
 typedef struct unicorn_t *unicorn_t;
 
-/* Initializer a unicorn object*/
+/* Initialise a unicorn object*/
 unicorn_t *unicorn_init(int threads, const char *ifile);
-void unicorn_destroy(unicorn_t *unicorn);
+void unicorn_destroy(unicorn_t *u);
 
-/* Query unicorn_t memebers*/
+/* Get number of references in b|s|cram header*/
 int unicorn_getrefn(unicorn_t *unicorn);
 
 
 /**************************************************** 
-unicron's BAM statistic computation interface
+unicorn's BAM statistic computation interface
 
 
 ****************************************************/
 
 /*
-unicron's reference based statistics
-This opaque structure is accessed via the unicorn_stats_* functions.
+unicorn's reference based statistics
+This opaque structure is accessed via the unicorn_refstats_* functions.
 */
 typedef struct unicorn_refstat_t *unicorn_refstat_t;
 
-/* Initialize a refstats object */
+/* Initialize a refstats object
+    @param statstr - String indicating which statistics to compute
+    @returns - unicorn_refstat_t* on success NULL on error
+*/
 unicorn_refstat_t *unicorn_refstat_init(const char *statstr);
 void unicorn_refstat_destroy(unicorn_refstat_t *stats);
 
 /* Compute reference statistics */
-int unicorn_refstat_compute( unicorn_t *unicorn, unicorn_refstat_t *stats);
+int unicorn_refstat_compute( unicorn_t *u, unicorn_refstat_t *stats);
+/* Print statistics table to fp*/
 void unicorn_refstat_print(const unicorn_t *u,
                            const unicorn_refstat_t *stats,
                            FILE *fp);
 
 //Get total number of alignments
-uint32_t unicorn_refstat_gettaln(const unicorn_refstat_t *stats);
+uint32_t unicorn_refstat_gettaln(   const unicorn_refstat_t *stats);
 //Get total number of reads
-uint32_t unicorn_refstat_gettread(const unicorn_refstat_t *stats);
+uint32_t unicorn_refstat_gettread(  const unicorn_refstat_t *stats);
 //Get total number of filtered alignments
-uint32_t unicorn_refstat_getfaln(const unicorn_refstat_t *stats);
+uint32_t unicorn_refstat_getfaln(   const unicorn_refstat_t *stats);
 //Get total number of filtered reads
-uint32_t unicorn_refstat_getfread(const unicorn_refstat_t *stats);
+uint32_t unicorn_refstat_getfread(  const unicorn_refstat_t *stats);
 //Get total number of filtered references
-uint32_t unicorn_refstats_getfrefn(const unicorn_refstat_t *stats);
+uint32_t unicorn_refstats_getfrefn( const unicorn_refstat_t *stats);
+//Check if a filter has been run through a unicorn object
+uint8_t unicorn_refstats_isfiltered(const unicorn_refstat_t *stats);
+
+/* B|S manipulation routines */
+uint8_t unicorn_refstats_filterbam(unicorn_t *u,
+                                   unicorn_refstat_t *stats);

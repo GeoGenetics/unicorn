@@ -94,12 +94,15 @@ static int unicorn_refstats(int argc, char **argv)
   //Parse the statistics string and initialize stat object
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
   stats = unicorn_refstat_init(opts.statstr);
-  if (!stats) goto exit; 
+  if (!stats) goto exit;
+  ret = -4; 
+  //Compute statistics
   if ( (ret = unicorn_refstat_compute(u, stats)) )
     goto exit;
+  
   uint32_t taln, faln, tread, fread;
-  taln = unicorn_refstat_gettaln(stats);
-  faln = unicorn_refstat_getfaln(stats);
+  taln  = unicorn_refstat_gettaln(stats);
+  faln  = unicorn_refstat_getfaln(stats);
   tread = unicorn_refstat_gettread(stats);
   fread = unicorn_refstat_getfread(stats);
   fprintf(stderr, "\t%u alignments, %u passed filters (%f)\n",
@@ -111,7 +114,10 @@ static int unicorn_refstats(int argc, char **argv)
                   fread,
                   (float)fread/tread);
   fprintf(stderr, "\tout of %u references\n", unicorn_refstats_getfrefn(stats));
+  fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   unicorn_refstat_print(u, stats, ofp);
+  fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
+  unicorn_refstats_filterbam(u, stats);
   ret = 0;
   exit:
     if (ret < 0) {

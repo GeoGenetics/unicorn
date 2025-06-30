@@ -28,11 +28,54 @@ SOFTWARE.
 typedef struct {
     int  threads;
     char *ifile;
+    char *outabam;
     htsThreadPool p;
     htsFile   *_FP;
     bam_hdr_t *hdr;
 } unicorn_t;
 
-#define STATSTR "Id\tLength\tn_alns\tn_reads\tm_readl\tstd_readl\tmd_readl\t\
-                 mo_readl\treadl_min\treadl_max\tm_alnnm\tm_alnani\tstd_alnani\t\
-                 md_alnani\tn_covbases\tm_cov\tbreath_cov\tm_covcovered\tstd_covcovered\tevenness_cov\n"
+#define STATSTR "Id\t"\
+                "Length\t"\
+                "n_alns\t"\
+                "n_reads\t"\
+                "m_readl\t"\
+                "std_readl\t"\
+                "md_readl\t"\
+                "mo_readl\t"\
+                "readl_min\t"\
+                "readl_max\t"\
+                "m_alnnm\t"\
+                "m_alnani\t"\
+                "std_alnani\t"\
+                "md_alnani\t"\
+                "n_covbases\t"\
+                "m_cov\t"\
+                "breath_cov\t"\
+                "exp_breath\t"\
+                "breath_ratio\t"\
+                "m_covcovered\t"\
+                "std_covcovered\t"\
+                "evenness_cov\t"\
+                "site_density\n"
+/* unicorn statistics
+1. Id
+2. Length
+3. n_alns
+4. n_reads
+5. m_readl
+6. std_readl
+7. md_readl
+8. mo_readl
+9. readl_min
+10. readl_max
+11. m_alnnm
+12. m_alnani
+13. std_alnani
+14. md_alnani
+15. n_covbases
+16. m_cov
+17. breath_cov
+18. m_covcovered
+19. std_covcovered
+20. evenness_cov
+*/
