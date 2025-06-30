@@ -6,12 +6,14 @@
 #include "klib/kvec.h"
 #include "klib/ksort.h"
 
-#define MINALNS 5
+#define MINNREADS 5
+#define MAXNALNS  0xffffffffU
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 
 typedef kvec_t(float)    floatq_t;
 typedef kvec_t(uint32_t) uint32q_t;
+typedef kvec_t(int32_t)  int32q_t;
 
 KHASHL_SET_INIT(static,               //Scope
                 _refKHASHC_T, refset, //type and prefix
@@ -76,7 +78,7 @@ typedef struct _refSTAT_T {
 
 KHASHL_MAP_INIT(static,                        //Scope
                 _refKHASH_T, refmap,           //type and prefix
-                khint_t, _refSTAT_T,           //key and value types 
+                int32_t, _refSTAT_T,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
 
 typedef struct unicorn_refstats_t {
@@ -87,9 +89,23 @@ typedef struct unicorn_refstats_t {
   uint64_t RESERVED:61; // Reserved for future use
   //Data
   _refKHASH_T *_refmap; // Hash table for reference statistics
-  uint64_t _naln;
+  uint64_t _nalns;
+  uint32_t _nreads;
+  uint32_t _nfreads;
+  uint32_t _nfalns;
 } unicorn_refstat_t;
 
+//Some private functions
+static uint32_t _getreadnum(unicorn_refstat_t *stats)
+{
+  uint32_t nread = 0;
+  khint_t k;
+  kh_foreach(stats->_refmap, k) {
+    _refKHASHC_T *readset = kh_val(stats->_refmap, k).READSET; 
+    nread += kh_size(readset);
+  }
+  return nread;
+}
 
 //TODO change to macro
 static inline float _fMEDIAN(float *v, uint32_t n)
@@ -193,13 +209,26 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
 
 }
 
-static void _refmapstats(_refKHASH_T *refmap, bam_hdr_t *h)
+static void _refmapstats(unicorn_refstat_t *stats)
 {
   //TODO parallelize
+  _refKHASH_T *refmap = stats->_refmap;
   khint_t k;
+  uint32_t _treads = 0, _freads = 0, _falns = 0;
+  int32q_t rmq;
+  kv_init(rmq);
   //Loop over references and sort arrays
-  kh_foreach(refmap, k) { 
-    _refSTAT_T refstat = kh_val(refmap, k);
+  kh_foreach(refmap, k) {
+    int32_t tid = kh_key(refmap, k); //tid AKA reference id 
+    _refSTAT_T refstat = kh_val(refmap, k); //data
+    uint32_t _n = kh_size(refstat.READSET); //number of reads
+    _treads += _n;
+    if (kh_size(refstat.READSET) < MINNREADS ) { //filter
+        kv_push(int32_t, rmq, tid);
+        continue;
+    }
+    _falns  += refstat.REFNALNS;
+    _freads += _n;
     ueventq_t aEVENT = refstat.aEVENT;
     floatq_t  aANI  = refstat.aANI;
     uint32q_t aRLEN = refstat.aRLEN;
@@ -219,6 +248,13 @@ static void _refmapstats(_refKHASH_T *refmap, bam_hdr_t *h)
     kh_val(refmap, k).REFMONCOV = meanoncov;
     kh_val(refmap, k).REFVONCOV = varoncov;
   }
+  for (uint32_t i = 0; i < rmq.n; i++) {
+    k = refmap_get(refmap, rmq.a[i]);
+    refmap_del(refmap, k);
+  }
+  stats->_nreads  = _treads;
+  stats->_nfreads = _freads;
+  stats->_nfalns  = _falns;
 }     
 
 //TODO modularize
@@ -289,8 +325,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     kh_val(stats->_refmap, k) = refstat;
   }
   if (!naln) goto exit; // No alignments found
-  _refmapstats(stats->_refmap, u->hdr);
-  stats->_naln = naln;
+  stats->_nalns = naln;
+  _refmapstats(stats);
   bam_destroy1(b);
   ret = 0;
   exit:
@@ -314,6 +350,7 @@ void unicorn_refstat_destroy(unicorn_refstat_t *stats)
   }
 }
 
+//TODO add a flag to indicate if a filter has been applied
 unicorn_refstat_t *unicorn_refstat_init(const char *_statstr)
 {
     unicorn_refstat_t *stats = calloc(1, sizeof(unicorn_refstat_t));
@@ -378,16 +415,25 @@ void unicorn_refstat_print(const unicorn_t *u,
 //TODO: Move to another compile unit
 uint32_t unicorn_refstat_gettaln(const unicorn_refstat_t *stats)
 {
-  return stats->_naln;
+  return stats->_nalns;
 }
 
 uint32_t unicorn_refstat_gettread(const unicorn_refstat_t *stats)
 {
-  uint32_t nread = 0;
-  khint_t k;
-  kh_foreach(stats->_refmap, k) {
-    _refKHASHC_T *readset = kh_val(stats->_refmap, k).READSET; 
-    nread += kh_size(readset);
-  }
-  return nread;  
+  return stats->_nreads;
+}
+
+uint32_t unicorn_refstat_getfread(const unicorn_refstat_t *stats)
+{
+  return stats->_nfreads;  
+}
+
+uint32_t unicorn_refstat_getfaln(const unicorn_refstat_t *stats)
+{
+  return stats->_nfalns;  
+}
+
+int32_t unicorn_refstats_getfrefn(const unicorn_refstat_t *stats)
+{
+    return kh_size(stats->_refmap);
 }

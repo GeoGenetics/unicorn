@@ -69,3 +69,9 @@ void unicorn_refstat_print(const unicorn_t *u,
 uint32_t unicorn_refstat_gettaln(const unicorn_refstat_t *stats);
 //Get total number of reads
 uint32_t unicorn_refstat_gettread(const unicorn_refstat_t *stats);
+//Get total number of filtered alignments
+uint32_t unicorn_refstat_getfaln(const unicorn_refstat_t *stats);
+//Get total number of filtered reads
+uint32_t unicorn_refstat_getfread(const unicorn_refstat_t *stats);
+//Get total number of filtered references
+uint32_t unicorn_refstats_getfrefn(const unicorn_refstat_t *stats);

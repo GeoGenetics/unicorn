@@ -89,21 +89,28 @@ static int unicorn_refstats(int argc, char **argv)
   fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__, opts.ifile);
   u = unicorn_init(opts.threads, opts.ifile);
   if (!u) goto exit;
-  fprintf(stderr, "[unicorn::%s] Found %d reference sequence(s).\n",
-                  __func__,
-                  unicorn_getrefn(u));
+  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
   ret = -3;
   //Parse the statistics string and initialize stat object
+  fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
   stats = unicorn_refstat_init(opts.statstr);
   if (!stats) goto exit; 
-
   if ( (ret = unicorn_refstat_compute(u, stats)) )
     goto exit;
-  
-  fprintf(stderr, "[unicorn::%s] %u alignments\n", __func__,
-                                                   unicorn_refstat_gettaln(stats));
-  fprintf(stderr, "[unicorn::%s] %u reads\n", __func__, 
-                                              unicorn_refstat_gettread(stats));
+  uint32_t taln, faln, tread, fread;
+  taln = unicorn_refstat_gettaln(stats);
+  faln = unicorn_refstat_getfaln(stats);
+  tread = unicorn_refstat_gettread(stats);
+  fread = unicorn_refstat_getfread(stats);
+  fprintf(stderr, "\t%u alignments, %u passed filters (%f)\n",
+                  taln,
+                  faln, 
+                  (float)faln/taln); 
+  fprintf(stderr, "\t%u reads, %u passed filters (%f)\n",
+                  tread,
+                  fread,
+                  (float)fread/tread);
+  fprintf(stderr, "\tout of %u references\n", unicorn_refstats_getfrefn(stats));
   unicorn_refstat_print(u, stats, ofp);
   ret = 0;
   exit:
