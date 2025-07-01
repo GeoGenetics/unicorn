@@ -87,7 +87,7 @@ static int unicorn_refstats(int argc, char **argv)
   
   //Load bam data via unicorn API
   fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__, opts.ifile);
-  u = unicorn_init(opts.threads, opts.ifile);
+  u = unicorn_init(opts.threads, opts.ifile, argc, argv);
   if (!u) goto exit;
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
   ret = -3;
@@ -117,7 +117,8 @@ static int unicorn_refstats(int argc, char **argv)
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   unicorn_refstat_print(u, stats, ofp);
   fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
-  unicorn_refstats_filterbam(u, stats);
+  if ( (ret = unicorn_refstats_filterbam(u, stats)) )
+    goto exit;
   ret = 0;
   exit:
     if (ret < 0) {

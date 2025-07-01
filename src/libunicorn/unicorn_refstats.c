@@ -6,7 +6,7 @@
 #include "klib/kvec.h"
 #include "klib/ksort.h"
 
-#define MINNREADS 50
+#define MINNREADS 800
 #define MAXNALNS  0xffffffffU
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
@@ -74,6 +74,8 @@ typedef struct _refSTAT_T {
   floatq_t     aANI;
   uint32q_t    aRLEN;
   ueventq_t    aEVENT;     // For coverage computation
+  //rehead members
+  int32_t      _ntid;        // New Reference sequence ID
 } _refSTAT_T;
 
 KHASHL_MAP_INIT(static,                        //Scope
@@ -224,6 +226,10 @@ static void _refmapstats(unicorn_refstat_t *stats)
     uint32_t _n = kh_size(refstat.READSET); //number of reads
     _treads += _n;
     if (kh_size(refstat.READSET) < MINNREADS ) { //filter
+        refset_destroy(refstat.READSET);
+        kv_destroy(refstat.aANI);
+        kv_destroy(refstat.aEVENT);
+        kv_destroy(refstat.aRLEN);
         kv_push(int32_t, rmq, tid);
         continue;
     }
@@ -235,11 +241,13 @@ static void _refmapstats(unicorn_refstat_t *stats)
     //Sort arrays
     ks_introsort(_sfloat,  aANI.n,  aANI.a);
     ks_introsort(_suint32, aRLEN.n, aRLEN.a);
-    ks_introsort(_surange, aEVENT.n, aEVENT.a);
     kh_val(refmap, k).REFALNANID = _fMEDIAN(aANI.a, aANI.n);
     kh_val(refmap, k).REFREADD   = _udMEDIAN(aRLEN.a, aRLEN.n);
     kh_val(refmap, k).REFREADO   = _udMODE(aRLEN.a, aRLEN.n);
+    kv_destroy(aANI);
+    kv_destroy(aRLEN);
     //Get coverage values
+    ks_introsort(_surange, aEVENT.n, aEVENT.a);
     uint64_t covbases;
     float    meancov, meanoncov, varoncov;
     _refcoverage(aEVENT, kh_val(refmap, k).REFLEN, &covbases, &meancov, &meanoncov, &varoncov);
@@ -247,11 +255,13 @@ static void _refmapstats(unicorn_refstat_t *stats)
     kh_val(refmap, k).REFMCOV   = meancov;
     kh_val(refmap, k).REFMONCOV = meanoncov;
     kh_val(refmap, k).REFVONCOV = varoncov;
+    kv_destroy(aEVENT);
   }
   for (uint32_t i = 0; i < rmq.n; i++) {
     k = refmap_get(refmap, rmq.a[i]);
     refmap_del(refmap, k);
   }
+  kv_destroy(rmq);
   stats->_nreads  = _treads;
   stats->_nfreads = _freads;
   stats->_nfalns  = _falns;
@@ -267,7 +277,6 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
   uint64_t naln = 0;
   //Loop over alignments //TODO refector
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
-    
     if (_unmapped(b)) continue;
     naln++;
     int32_t tid   = b->core.tid;
@@ -346,9 +355,9 @@ void unicorn_refstat_destroy(unicorn_refstat_t *stats)
           _refSTAT_T v = kh_val(stats->_refmap, k);
           if (v.READSET)
             refset_destroy(v.READSET);
-          kv_destroy(v.aANI);
-          kv_destroy(v.aEVENT);
-          kv_destroy(v.aRLEN);
+          //kv_destroy(v.aANI);
+          //kv_destroy(v.aEVENT);
+          //kv_destroy(v.aRLEN);
         }
         refmap_destroy(stats->_refmap);
       }
@@ -415,39 +424,102 @@ uint8_t unicorn_refstats_isfiltered(const unicorn_refstat_t *stats)
   return stats->fc;
 }
 
+//Generate new SAM header from stats
+static sam_hdr_t *_stats2samhdr(unicorn_refstat_t *stats, sam_hdr_t *hdr)
+{
+  if (!stats || !hdr) return NULL;
+  kstring_t kstr = {0};
+  sam_hdr_t *ohdr = sam_hdr_init();
+  if (!ohdr) return NULL;
+  int ret = 1;
+  //Add HD line
+  sam_hdr_find_hd(hdr, &kstr);
+  sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+  khint_t k, ntid = 0;
+  _refKHASH_T *refmap = stats->_refmap;
+  //Loop over references in refmap and add them to the header
+  //Update ntid for each reference
+  kh_foreach(refmap, k) {
+    int32_t tid = kh_key(refmap, k);
+    if ( sam_hdr_find_line_pos(hdr, "SQ", tid, &kstr) )
+      goto exit;
+    //Add new tid
+    kh_val(refmap, k)._ntid = ntid++;
+    //Add target to new header
+    sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+  }
+  //Add RG lines
+  for (int j = 0; j < sam_hdr_count_lines(hdr, "RG"); j++) {
+    if ( sam_hdr_find_line_pos(hdr, "RG", j, &kstr) )
+            goto exit;
+    sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+  }
+  //Add PG lines
+  for (int j = 0; j < sam_hdr_count_lines(hdr, "PG"); j++)  {
+    if ( sam_hdr_find_line_pos(hdr, "PG", j, &kstr) )
+      goto exit;
+    sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+  }
+  //Add CO lines
+  for (int j = 0; j < sam_hdr_count_lines(hdr, "CO"); j++) {
+    if ( sam_hdr_find_line_pos(hdr, "CO", j, &kstr) )
+          goto exit;
+    sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+  }
+  free(kstr.s);
+  ret = 0;
+  exit:
+    if (ret) {
+      if (ohdr) sam_hdr_destroy(ohdr);
+      ohdr = NULL;
+    }
+    return ohdr;
+}
+
 uint8_t unicorn_refstats_filterbam(unicorn_t *u,
                                    unicorn_refstat_t *stats)
 {
-  if (!u || !stats) return 1;
-  if (!stats->fc)   return 1;
+  uint8_t ret = 1; //Default return value is error
+  if (!u || !stats) return ret;
+  if (!stats->fc)   return ret;
+  sam_hdr_t *ohdr = NULL;
+  bam1_t *b = bam_init1();
+  htsFile *ofp = hts_open("pene2.bam", "wb9");
+  //Create new header
+  ohdr = _stats2samhdr(stats, u->hdr);
+  if ( !ofp || !ohdr ) goto exit;
+  hts_set_opt(ofp, HTS_OPT_THREAD_POOL, &u->p);
+  //Add PG line for this program
+  char *pgstr = stringify_argv(u->argc, u->argv);
+  sam_hdr_add_pg(ohdr, "unicorn", "CL", pgstr, NULL);
+  free(pgstr);
+  
+  //Write new header to output file
+  if (sam_hdr_write(ofp, ohdr) < 0) goto exit;
+  
+  //Loop over bam, write alignments from references that passed filters
+  uint64_t naln = 0;
   if (u->_FP) sam_close(u->_FP);
   u->_FP = hts_open(u->ifile, "r");
-  htsFile *ofp = hts_open("pene.bam", "wb9");
-    if (!ofp) {
-        fprintf(stderr, "[unicorn::%s] ERROR: Failed to open output file\n", __func__);
-        return 0;
-    }
-  fprintf(stderr, "[unicorn::%s] Filtering bamfile %s\n", __func__, u->ifile);
-  bam_hdr_write(ofp, u->hdr);
-  //Loop over bamfile and write alignments from references that passed filter
-  fprintf(stderr, "PENE!!\n");
-  bam1_t *b = bam_init1();
-  _refKHASH_T *refmap = stats->_refmap;
-  khint_t k;
-  while (sam_read1(u->_FP, u->hdr, b) >= 0) {
+  sam_hdr_t *_hdr = sam_hdr_read(u->_FP);
+  while (sam_read1(u->_FP, _hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     int32_t tid = b->core.tid;
-    khint_t k = refmap_get(refmap, tid);
-    if (k == kh_end(refmap)) continue; //Reference not in map
+    khint_t k = refmap_get(stats->_refmap, tid);
+    if (k == kh_end(stats->_refmap)) continue; //Reference not in map
+    int32_t ntid = kh_val(stats->_refmap, k)._ntid; //Get new tid
+    b->core.tid = ntid; //Set new tid
     //Write alignment to output file
-    if (sam_write1(ofp, u->hdr, b) < 0) {
-      fprintf(stderr, "[unicorn::%s] WARNING Failed writing alignment\n",
-                      __func__);
-    }
+    if (sam_write1(ofp, ohdr, b) < 0) goto exit;
+    naln++;
   }
-  sam_close(ofp);
-  bam_destroy1(b);
-  return 1;
+  ret = 0;
+  exit:
+    if (ofp)  sam_close(ofp);
+    if (b)    bam_destroy1(b);
+    if (ohdr) sam_hdr_destroy(ohdr);
+    if (_hdr) sam_hdr_destroy(_hdr);
+    return ret;
 }
 
 void unicorn_refstat_print(const unicorn_t *u,

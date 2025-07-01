@@ -36,7 +36,10 @@ For example:
 typedef struct unicorn_t *unicorn_t;
 
 /* Initialise a unicorn object*/
-unicorn_t *unicorn_init(int threads, const char *ifile);
+unicorn_t *unicorn_init( int threads,
+                         const char *ifile,
+                         int argc,
+                         char **argv );
 void unicorn_destroy(unicorn_t *u);
 
 /* Get number of references in b|s|cram header*/

@@ -18,7 +18,10 @@ void unicorn_destroy(unicorn_t *u)
     }
 }
 
-unicorn_t *unicorn_init( int threads, const char *ifile )
+unicorn_t *unicorn_init( int threads,
+                         const char *ifile,
+                         int argc,
+                         char **argv )
 {
     int ret = -1;
     unicorn_t *u = calloc(1, sizeof(unicorn_t));
@@ -33,6 +36,8 @@ unicorn_t *unicorn_init( int threads, const char *ifile )
         hts_set_opt(u->_FP, HTS_OPT_THREAD_POOL, &u->p);
     }
     if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
+    u->argc = argc;
+    u->argv = argv;
     ret = 0;
     exit:
     if (ret) {

@@ -26,6 +26,8 @@ SOFTWARE.
 #include <htslib/sam.h>
 
 typedef struct {
+    int  argc;
+    char **argv;
     int  threads;
     char *ifile;
     char *outabam;
