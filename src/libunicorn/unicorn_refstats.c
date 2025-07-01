@@ -422,7 +422,31 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   if (!stats->fc)   return 1;
   if (u->_FP) sam_close(u->_FP);
   u->_FP = hts_open(u->ifile, "r");
+  htsFile *ofp = hts_open("pene.bam", "wb9");
+    if (!ofp) {
+        fprintf(stderr, "[unicorn::%s] ERROR: Failed to open output file\n", __func__);
+        return 0;
+    }
+  fprintf(stderr, "[unicorn::%s] Filtering bamfile %s\n", __func__, u->ifile);
+  bam_hdr_write(ofp, u->hdr);
   //Loop over bamfile and write alignments from references that passed filter
+  fprintf(stderr, "PENE!!\n");
+  bam1_t *b = bam_init1();
+  _refKHASH_T *refmap = stats->_refmap;
+  khint_t k;
+  while (sam_read1(u->_FP, u->hdr, b) >= 0) {
+    if (_unmapped(b)) continue;
+    int32_t tid = b->core.tid;
+    khint_t k = refmap_get(refmap, tid);
+    if (k == kh_end(refmap)) continue; //Reference not in map
+    //Write alignment to output file
+    if (sam_write1(ofp, u->hdr, b) < 0) {
+      fprintf(stderr, "[unicorn::%s] WARNING Failed writing alignment\n",
+                      __func__);
+    }
+  }
+  sam_close(ofp);
+  bam_destroy1(b);
   return 1;
 }
 
