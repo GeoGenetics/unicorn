@@ -17,18 +17,15 @@ endif
 %.o:%.c
 	$(CC) -o $(@) $*.c -g -c $(CFLAGS) $(HTSIPTH)
 
-all: libunicorn unicornc unicorncpp
+all: libunicorn unicorn
 
 libunicorn: $(OBJ)
 	ar rcs $(@).a $(OBJ)
 	cp src/unicorn.h .
 
-unicornc: src/main_unicorn.c $(OBJ)
-	$(CC) -o unicorn $< libunicorn.a $(HTSIPTH) $(HTSLPTH) -Isrc $(CFLAGS) -lhts -lm
-
-unicorncpp: src/main_unicorn.cpp
-	$(CPP) -o $@ $< $(HTSIPTH) $(HTSLPTH) -Wall -Wextra -pedantic -std=c++11 -g -lhts
+unicorn: src/main_unicorn.c $(OBJ)
+	$(CC) -o $@ $< libunicorn.a $(HTSIPTH) $(HTSLPTH) -Isrc $(CFLAGS) -lhts -lm
 
 clean:
-	rm -f $(OBJ) libunicorn.a unicorn unicorncpp
+	rm -f $(OBJ) libunicorn.a unicorn
 
