@@ -58,7 +58,9 @@ typedef struct {
                 "m_covcovered\t"\
                 "std_covcovered\t"\
                 "evenness_cov\t"\
-                "site_density\n"
+                "site_density\t"\
+                "entropy\t"\
+                "gini\n"
 /* unicorn statistics
 1. Id
 2. Length

@@ -17,6 +17,15 @@ typedef kvec_t(float)    floatq_t;
 typedef kvec_t(uint32_t) uint32q_t;
 typedef kvec_t(int32_t)  int32q_t;
 
+KHASHL_MAP_INIT(static,
+                _covhistKHASH_T,
+                covhist,
+                uint32_t,
+                uint64_t,
+                kh_hash_uint32,
+                kh_eq_generic)
+
+
 /******************
  * Reference hash set
  * This is a hash set of read IDs mapped to the reference
@@ -81,6 +90,8 @@ typedef struct _refSTAT_T {
   float        REFMCOV;    // mean cov
   float        REFMONCOV;  // Mean coverage of covered bases
   float        REFVONCOV;  // Variance of coverage of covered bases
+  float        REFENTROPY; // Coverage entropy
+  float        REFGINI;    // Coverage Gini coefficient
   //Data arrays
   floatq_t     aANI;
   //uint32q_t    aRLEN;
@@ -112,6 +123,39 @@ typedef struct unicorn_refstats_t {
 } unicorn_refstat_t;
 
 //Some private functions
+
+static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t)
+{
+  double entropy = 0.0;
+  khint_t k;
+  kh_foreach(hist, k) {
+    uint64_t count = kh_val(hist, k);
+    if (count > 0) {
+      double p = (double)count / t;
+      entropy -= p * log2(p);
+    }
+  }
+  return entropy;
+}
+
+static inline double _getgini(_covhistKHASH_T *hist, uint64_t t, float m)
+{
+  uint64_t wsum = 0;
+  khint_t ki, kj;
+  kh_foreach(hist, ki) {
+    uint32_t di = kh_key(hist, ki);
+    uint64_t li = kh_val(hist, ki);    
+    kh_foreach(hist, kj) {
+      uint32_t dj = kh_key(hist, kj);
+      uint64_t lj = kh_val(hist, kj);          
+      wsum += li * lj * abs((int)di - (int)dj);
+    }
+  }
+  if (t > 0 && m > 0)
+    return (float)(wsum / (2.0 * t * t * m));
+  return 0.0f;
+}
+
 static uint32_t _getreadnum(unicorn_refstat_t *stats)
 {
   uint32_t nread = 0;
@@ -221,18 +265,22 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
 * @param *meancov  - Return value for mean coverage
 */
 static void _refcoverage(ueventq_t events, uint64_t l,
-                          uint64_t *covbases, float *meancov,
-                         float *meanoncov, float *varoncov)
+                         uint64_t *covbases, float *meancov,
+                         float *meanoncov, float *varoncov,
+                         float *entropy, float *gini)
 {
-    // Initialize accumulators
-    uint64_t tcovbases = 0; //Total covered bases
-    uint64_t tdepthsum = 0; //Total depth sum. This is the "area under the coverage graph"
     // Handle the edge case of no events
     if ( !events.n || !l) {
         *covbases = 0;
         *meancov  = 0.0;
         return;
     }
+    // Cov frequency map for entropy and gini computation
+    _covhistKHASH_T *covhist = covhist_init();
+    // Initialize accumulators
+    uint64_t tcovbases = 0; //Total covered bases
+    uint64_t tdepthsum = 0; //Total depth sum. This is the "area under the coverage graph"
+
     // Initialize sweep-line state
     uint32_t current_depth = 0;
     uint64_t last_pos = events.a[0].pos, sumsqdepth = 0;
@@ -247,18 +295,31 @@ static void _refcoverage(ueventq_t events, uint64_t l,
             // Add the area of this segment (length * depth) to the total sum
             tdepthsum  += segment_length * current_depth;
             sumsqdepth += segment_length * current_depth * current_depth;
+            // --- NEW: HISTOGRAM LOGIC ---
+            //Add depth value to coverage histogram
+            khint_t k = covhist_get(covhist, current_depth); // Check if depth exists
+            if (k == kh_end(covhist)) { // If not, create it
+                int absent;
+                k = covhist_put(covhist, current_depth, &absent);
+                kh_val(covhist, k) = 0;
+            }
+            kh_val(covhist, k) += segment_length; // Add length to the bin
+            // --- END NEW HISTOGRAM LOGIC ---
         }
         // Update state based on the current event
         current_depth += events.a[i].e ? 1 : -1;
         last_pos = current_pos;
     }
-    double meansqcovb = (double)sumsqdepth / (double)tcovbases;
-
     // Store the final calculated values in the output pointers
     *covbases  = tcovbases;
     *meancov   = (double)tdepthsum / (double)l;
     *meanoncov = (double)tdepthsum / (double)tcovbases;
+    double meansqcovb = tcovbases?(double)sumsqdepth / tcovbases:0.0;
     *varoncov  = meansqcovb - ((*meanoncov) * (*meanoncov));
+
+    *entropy = _getentropy(covhist, tcovbases);
+    *gini = _getgini(covhist, tcovbases, *meanoncov);
+    covhist_destroy(covhist);
 }
 
 static void _refmapstats(unicorn_refstat_t *stats)
@@ -303,12 +364,16 @@ static void _refmapstats(unicorn_refstat_t *stats)
     //Get coverage values
     ks_introsort(_surange, aEVENT.n, aEVENT.a);
     uint64_t covbases;
-    float    meancov, meanoncov, varoncov;
-    _refcoverage(aEVENT, kh_val(refmap, k).REFLEN, &covbases, &meancov, &meanoncov, &varoncov);
-    kh_val(refmap, k).REFCOVB   = covbases;
-    kh_val(refmap, k).REFMCOV   = meancov;
-    kh_val(refmap, k).REFMONCOV = meanoncov;
-    kh_val(refmap, k).REFVONCOV = varoncov;
+    float    meancov, meanoncov, varoncov, entropy, gini;
+    _refcoverage(aEVENT, kh_val(refmap, k).REFLEN,
+                 &covbases, &meancov, &meanoncov, &varoncov,
+                &entropy, &gini);
+    kh_val(refmap, k).REFCOVB    = covbases;
+    kh_val(refmap, k).REFMCOV    = meancov;
+    kh_val(refmap, k).REFMONCOV  = meanoncov;
+    kh_val(refmap, k).REFVONCOV  = varoncov;
+    kh_val(refmap, k).REFENTROPY = entropy;
+    kh_val(refmap, k).REFGINI    = gini;
     kv_destroy(aEVENT);
   }
   for (uint32_t i = 0; i < rmq.n; i++) {
@@ -597,7 +662,7 @@ void unicorn_refstat_print(const unicorn_t *u,
       _refSTAT_T v = kh_val(stats->_refmap, k);   
       float breath = v.REFCOVB/(double)v.REFLEN;
       float expbreath =  1.0f - expf(-breath); 
-      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%lu\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%lu\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                   hdr->target_name[kh_key(stats->_refmap, k)],//1
                   v.REFLEN,                                   //2
                   v.REFNALNS,                                 //3
@@ -620,6 +685,8 @@ void unicorn_refstat_print(const unicorn_t *u,
                   v.REFMONCOV,                                //20
                   sqrtf(v.REFVONCOV),                         //21
                   sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
-                  1000.0f * breath);                          //23
+                  1000.0f * breath,                           //24
+                  v.REFENTROPY,                               //25
+                  v.REFGINI);                                 //26
     }
 }

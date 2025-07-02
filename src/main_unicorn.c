@@ -126,6 +126,7 @@ static int unicorn_refstats(int argc, char **argv)
   fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
   if ( (ret = unicorn_refstats_filterbam(u, stats)) )
     goto exit;
+  for (uint8_t i = 0; i < argc; ++i) free(_argv[i]);
   ret = 0;
   exit:
     if (ret < 0) {
