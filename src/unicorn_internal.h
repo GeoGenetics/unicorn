@@ -30,7 +30,7 @@ typedef struct {
     char **argv;
     int  threads;
     char *ifile;
-    char *outabam;
+    char *prefix;
     htsThreadPool p;
     htsFile   *_FP;
     bam_hdr_t *hdr;

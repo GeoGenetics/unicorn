@@ -484,7 +484,14 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   if (!stats->fc)   return ret;
   sam_hdr_t *ohdr = NULL;
   bam1_t *b = bam_init1();
-  htsFile *ofp = hts_open("pene2.bam", "wb9");
+  char OBUFF[256] = {0};
+  if (u->prefix) {
+    strcpy(OBUFF, u->prefix);
+    strcat(OBUFF, ".bam");
+  }
+  else
+    strcpy(OBUFF, "/dev/stdout");
+  htsFile *ofp = hts_open(OBUFF, "wb9");
   //Create new header
   ohdr = _stats2samhdr(stats, u->hdr);
   if ( !ofp || !ohdr ) goto exit;

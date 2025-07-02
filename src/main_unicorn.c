@@ -11,7 +11,7 @@
 
 typedef struct unicorn_opts {
   int  threads;    // Number of threads to use
-  char *oprefix;   // Output prefix for results
+  char *prefix;   // Output prefix for results
   char *ifile;     // Input file (BAM/SAM/CRAM)
   char *statstr;   // Comma separated list of statistics to compute
 } unicorn_opt_t;
@@ -51,11 +51,13 @@ static int unicorn_refstats(int argc, char **argv)
   unicorn_refstat_t *stats = NULL;
   char OBUFF[516] = {0};
   FILE *ofp = NULL;
+  char *_argv[32] = {0};
+  for (uint8_t i = 0; i < argc; ++i) _argv[i] = strdup(argv[i]);
   //Read command line options
   while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, NULL)) >= 0 ) {
     switch(c) {
       case 'o':
-        opts.oprefix = strdup(o.arg);
+        opts.prefix = strdup(o.arg);
         break;
       case 't':
         opts.threads = atoi(o.arg);
@@ -76,9 +78,9 @@ static int unicorn_refstats(int argc, char **argv)
   //Set default statistics if not provided
   if (!opts.statstr)
     opts.statstr = strdup("RefLen,RefNReads,RefNAlns");
-  if (!opts.oprefix) ofp = stdout;
+  if (!opts.prefix) ofp = stdout;
   else {
-    strcpy(OBUFF, opts.oprefix);
+    strcpy(OBUFF, opts.prefix);
     strcat(OBUFF, ".stats.txt");
     ofp = fopen(OBUFF, "w");
     if (!ofp) goto exit;
@@ -87,7 +89,12 @@ static int unicorn_refstats(int argc, char **argv)
   
   //Load bam data via unicorn API
   fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__, opts.ifile);
-  u = unicorn_init(opts.threads, opts.ifile, argc, argv);
+  //TODO simplify call, allow NULL arguments
+  u = unicorn_init(opts.threads,
+                   opts.ifile,
+                   opts.prefix,
+                   argc,
+                   _argv);
   if (!u) goto exit;
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
   ret = -3;
@@ -126,11 +133,11 @@ static int unicorn_refstats(int argc, char **argv)
       refstats_usage(stderr);
     }
     if (opts.ifile) free(opts.ifile);
-    if (opts.oprefix) free(opts.oprefix);
     if (opts.statstr) free(opts.statstr);
     if (u) unicorn_destroy(u);
     if (stats) unicorn_refstat_destroy(stats);
-    if (ofp && opts.oprefix) fclose(ofp);
+    if (ofp && opts.prefix) fclose(ofp);
+    if (opts.prefix) free(opts.prefix);
     return ret;
 }
 
