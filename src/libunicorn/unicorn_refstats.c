@@ -83,7 +83,8 @@ typedef struct _refSTAT_T {
   float        REFVONCOV;  // Variance of coverage of covered bases
   //Data arrays
   floatq_t     aANI;
-  uint32q_t    aRLEN;
+  //uint32q_t    aRLEN;
+  uint32_t     aRLEN[256]; //Count array of read lengths
   ueventq_t    aEVENT;     // For coverage computation
   //rehead members
   int32_t      _ntid;        // New Reference sequence ID
@@ -128,6 +129,44 @@ static inline float _fMEDIAN(float *v, uint32_t n)
   if ( n%2 )
     return v[n/2];
   return (v[n/2 - 1] + v[n/2]) / 2.0;
+}
+
+/*
+  Computes median fomr a count array.
+  @param *v - Count array v[n] has the count of number of instances value
+              n was observed.
+  @param n - Size of the count array
+  @mcount  - Total number of instances in the count array
+
+*/
+static uint32_t _udCAMEDIAN(uint32_t *v, uint32_t n, uint32_t mcount)
+{
+  uint32_t m = 0, count = 0;
+  for (; m < n; m++) {
+    if (v[m] == 0) continue; //Skip zero counts
+    count += v[m];
+    if (count > mcount/2) break;
+  }
+  return m;
+}
+
+/*
+  Computes meode from a count array.
+  @param *v - Count array v[n] has the count of number of instances value
+              n was observed.
+  @param n - Size of the count array
+*/
+static uint32_t _udCAMODE(uint32_t *v, uint32_t n)
+{
+  uint32_t mode = 0, max_count = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    if (v[i] == 0) continue; //Skip zero counts
+    if (v[i] > max_count) {
+      max_count = v[i];
+      mode = i;
+    }
+  }
+  return mode;
 }
 
 //TODO change to macro
@@ -240,7 +279,7 @@ static void _refmapstats(unicorn_refstat_t *stats)
         refset_destroy(refstat.READSET);
         kv_destroy(refstat.aANI);
         kv_destroy(refstat.aEVENT);
-        kv_destroy(refstat.aRLEN);
+        //kv_destroy(refstat.aRLEN);
         kv_push(int32_t, rmq, tid);
         continue;
     }
@@ -248,15 +287,19 @@ static void _refmapstats(unicorn_refstat_t *stats)
     _freads += _n;
     ueventq_t aEVENT = refstat.aEVENT;
     floatq_t  aANI  = refstat.aANI;
-    uint32q_t aRLEN = refstat.aRLEN;
+    //uint32q_t aRLEN = refstat.aRLEN;
+    uint32_t *aRLEN = refstat.aRLEN;
     //Sort arrays
     ks_introsort(_sfloat,  aANI.n,  aANI.a);
-    ks_introsort(_suint32, aRLEN.n, aRLEN.a);
+    //ks_introsort(_suint32, aRLEN.n, aRLEN.a);
     kh_val(refmap, k).REFALNANID = _fMEDIAN(aANI.a, aANI.n);
-    kh_val(refmap, k).REFREADD   = _udMEDIAN(aRLEN.a, aRLEN.n);
-    kh_val(refmap, k).REFREADO   = _udMODE(aRLEN.a, aRLEN.n);
+    //read length median and mode are computed from a count array
+    //kh_val(refmap, k).REFREADD   = _udMEDIAN(aRLEN.a, aRLEN.n);
+    //kh_val(refmap, k).REFREADO   = _udMODE(aRLEN.a, aRLEN.n);
+    kh_val(refmap, k).REFREADD = _udCAMEDIAN(aRLEN, 256, _n);
+    kh_val(refmap, k).REFREADO   = _udCAMODE(aRLEN, 256);
     kv_destroy(aANI);
-    kv_destroy(aRLEN);
+    //kv_destroy(aRLEN);
     //Get coverage values
     ks_introsort(_surange, aEVENT.n, aEVENT.a);
     uint64_t covbases;
@@ -299,7 +342,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
       refstat.READSET = refset_init(); //Unique queryIDs
       kv_init(refstat.aANI);
       kv_init(refstat.aEVENT);
-      kv_init(refstat.aRLEN);
+      //kv_init(refstat.aRLEN);
       refstat.REFLEN = u->hdr->target_len[tid];
       refstat.REFREADMIN = 0xffffffffU;
       k = refmap_put(stats->_refmap, tid, &absent);
@@ -311,25 +354,21 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     //Add read name to read set to count number of reads to ref
     khint_t _queryhash = kh_hash_str(bam_get_qname(b));
     refset_put(refstat.READSET, _queryhash, &absent);
-    //Add alignment event, for coverage sweep line algorith
-    if (absent) { //Only first instance of the query (no multiple mappings to same ref)
-        _urangeevent s = {b->core.pos, 1};
-        _urangeevent e = {bam_endpos(b), 0};
-        kv_push(_urangeevent, refstat.aEVENT, s);
-        kv_push(_urangeevent, refstat.aEVENT, e);
-    }
-    //mean, median, and variance  Welford's online algorithm
-    //Read length
     float mean, delta;
-    uint32_t n = kh_size(refstat.READSET);
-    mean = refstat.REFREADE; //Get running mean
-    kv_push(uint32_t, refstat.aRLEN, qlen);
-    delta = qlen - mean;                             //Compute difference
-    refstat.REFREADE += delta/n;                     //Running mean
-    refstat._M += delta * (qlen - refstat.REFREADE); //Keep track of m
-    refstat.REFREADV = refstat._M / (n-1);           //Running variance
-    refstat.REFREADMIN = qlen < refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
-    refstat.REFREADMAX = qlen > refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
+    //mean, median, and variance  Welford's online algorithm
+    if (absent) { //Only first instance of query, no counting same read twice
+      //Read length mean, median, mode, min, max
+      refstat.aRLEN[qlen < 256 ? qlen : 255]++; //Count read length
+      uint32_t n = kh_size(refstat.READSET);
+      mean = refstat.REFREADE;                         //Get current mean
+      delta = qlen - mean;                             //Compute difference
+      refstat.REFREADE += delta/n;                     //Running mean
+      refstat._M += delta * (qlen - refstat.REFREADE); //Keep track of m
+      refstat.REFREADV = refstat._M / (n-1);           //Running variance
+      refstat.REFREADMIN = qlen < refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
+      refstat.REFREADMAX = qlen > refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
+    }
+    //kv_push(uint32_t, refstat.aRLEN, qlen);
     //Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
@@ -339,6 +378,11 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     refstat.REFALNANIE += delta/naln;
     refstat._MANI = delta * (ani - refstat.REFALNANIE);
     refstat.REFALNANIV = refstat._MANI / (naln-1);
+    //Add alignment event, for coverage comp via sweep line algorith
+    _urangeevent s = {b->core.pos, 1};
+    _urangeevent e = {bam_endpos(b), 0};
+    kv_push(_urangeevent, refstat.aEVENT, s);
+    kv_push(_urangeevent, refstat.aEVENT, e);
     //Alignment NM
     mean = refstat.REFALNNM;
     delta = NM-mean;
