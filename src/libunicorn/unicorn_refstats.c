@@ -6,6 +6,8 @@
 #include "klib/kvec.h"
 #include "klib/ksort.h"
 
+//filters, this is temporary, in the future they will be
+//defined at runtime.
 #define MINNREADS 800
 #define MAXNALNS  0xffffffffU
 
@@ -15,37 +17,46 @@ typedef kvec_t(float)    floatq_t;
 typedef kvec_t(uint32_t) uint32q_t;
 typedef kvec_t(int32_t)  int32q_t;
 
+/******************
+ * Reference hash set
+ * This is a hash set of read IDs mapped to the reference
+ * It is used to count the number of reads mapped to the reference
+*/
 KHASHL_SET_INIT(static,               //Scope
                 _refKHASHC_T, refset, //type and prefix
                 uint64_t,             //key type 
                 kh_hash_dummy, kh_eq_generic) //hash and equality functions
-KSORT_INIT(_sfloat, float, ks_lt_generic)
-KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
-/******************
- * Per reference stats
-*/
-
 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
 #define kh_range_eq(a, b) ((a).pos == (b).pos)
 //#define ks_lt_urange(a, b) ((a).pos < (b).pos)
+// ksort
+KSORT_INIT(_sfloat, float, ks_lt_generic)
+KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
 
-
+/*
+********************************
+ * Rango object for coverage computation.
+ * Encodes start e==1 or end e==0 of range.
+*/
 typedef struct _urangeevent {
     uint64_t pos:63;
     uint8_t e:1;
 } _urangeevent;
-
 static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
 {
     if (a.pos != b.pos)
         return a.pos < b.pos;
     return a.e > b.e; 
 }
-
 KSORT_INIT(_surange, _urangeevent, _eventlt)
-
 typedef kvec_t(_urangeevent) ueventq_t;
 
+/******************
+ * Reference statistics
+ * This structure holds the statistics per reference sequence.
+ * It is used to compute the statistics for each reference sequence
+ * in the BAM file.
+*/
 typedef struct _refSTAT_T {
   uint32_t     REFLEN;     // Length of the reference sequence
   uint32_t     REFNALNS;   // Number of alignments mapped to the reference
