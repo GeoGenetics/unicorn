@@ -60,7 +60,9 @@ typedef struct {
                 "evenness_cov\t"\
                 "site_density\t"\
                 "entropy\t"\
-                "gini\n"
+                "gini\t"\
+                "n_entropy\t"\
+                "n_gini\n"
 /* unicorn statistics
 1. Id
 2. Length

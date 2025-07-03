@@ -8,7 +8,7 @@
 
 //filters, this is temporary, in the future they will be
 //defined at runtime.
-#define MINNREADS 800
+#define MINNREADS 10
 #define MAXNALNS  0xffffffffU
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
@@ -92,6 +92,8 @@ typedef struct _refSTAT_T {
   float        REFVONCOV;  // Variance of coverage of covered bases
   float        REFENTROPY; // Coverage entropy
   float        REFGINI;    // Coverage Gini coefficient
+  float        REFNENTROP; // Normalized coverage entropy
+  float        REFNGINI;   // Normalized coverage Gini coefficient
   //Data arrays
   floatq_t     aANI;
   //uint32q_t    aRLEN;
@@ -124,7 +126,7 @@ typedef struct unicorn_refstats_t {
 
 //Some private functions
 
-static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t)
+static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t, float *_ne)
 {
   double entropy = 0.0;
   khint_t k;
@@ -135,11 +137,23 @@ static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t)
       entropy -= p * log2(p);
     }
   }
+  //Max entropy is log2(n) where n is the number of unique depths
+  if ( kh_size(hist) > 0)
+    *_ne = entropy / (log2(kh_size(hist)) > 0 ? log2(kh_size(hist)) : 0.0f);
+  else
+    *_ne = 1.0f;
   return entropy;
 }
 
-static inline double _getgini(_covhistKHASH_T *hist, uint64_t t, float m)
+static inline double _getgini(_covhistKHASH_T *hist,
+                              uint64_t t,
+                              float m,
+                              float *_ng)
 {
+  if (!t || !m) {
+    *_ng = 0.0f;
+    return 0.0f;
+  }
   uint64_t wsum = 0;
   khint_t ki, kj;
   kh_foreach(hist, ki) {
@@ -151,9 +165,14 @@ static inline double _getgini(_covhistKHASH_T *hist, uint64_t t, float m)
       wsum += li * lj * abs((int)di - (int)dj);
     }
   }
-  if (t > 0 && m > 0)
-    return (float)(wsum / (2.0 * t * t * m));
-  return 0.0f;
+  float gini = (float)(wsum / (2.0 * t * t * m));
+  //Max gini is (t-1)/t meaning maximum inequality
+  float mgini = ((double)t-1)/t;
+  if (mgini > 0.0f)
+    *_ng = gini / mgini;
+  else
+    *_ng = 0.0f;
+  return gini;
 }
 
 static uint32_t _getreadnum(unicorn_refstat_t *stats)
@@ -176,11 +195,11 @@ static inline float _fMEDIAN(float *v, uint32_t n)
 }
 
 /*
-  Computes median fomr a count array.
-  @param *v - Count array v[n] has the count of number of instances value
+  Computes median from a count array.
+  @param *v - Count array v[n] has the count of the number of instances value
               n was observed.
-  @param n - Size of the count array
-  @mcount  - Total number of instances in the count array
+  @param n  - Size of the count array
+  @mcount   - Total number of instances in the count array
 
 */
 static uint32_t _udCAMEDIAN(uint32_t *v, uint32_t n, uint32_t mcount)
@@ -259,15 +278,14 @@ static inline float _ANINM(bam1_t *b, uint32_t *NM)
 /**
 * Calculates coverage metrics from a sorted list of events.
 *
-* @param events - Event queue
+* @param events - Event kvec queue
 * @param l      - Reference sequence length
-* @param *covbases - Return value for total covered bases
-* @param *meancov  - Return value for mean coverage
 */
 static void _refcoverage(ueventq_t events, uint64_t l,
                          uint64_t *covbases, float *meancov,
                          float *meanoncov, float *varoncov,
-                         float *entropy, float *gini)
+                         float *entropy, float *gini,
+                         float *nentropy, float *ngini)
 {
     // Handle the edge case of no events
     if ( !events.n || !l) {
@@ -279,34 +297,31 @@ static void _refcoverage(ueventq_t events, uint64_t l,
     _covhistKHASH_T *covhist = covhist_init();
     // Initialize accumulators
     uint64_t tcovbases = 0; //Total covered bases
-    uint64_t tdepthsum = 0; //Total depth sum. This is the "area under the coverage graph"
-
+    uint64_t tdepthsum = 0; //Total depth sum.
     // Initialize sweep-line state
     uint32_t current_depth = 0;
     uint64_t last_pos = events.a[0].pos, sumsqdepth = 0;
     // Sweep through all events
     for (uint64_t i = 0; i < events.n; ++i) {
         uint64_t current_pos = events.a[i].pos;
-        uint32_t segment_length = current_pos - last_pos;
+        uint32_t seglen = current_pos - last_pos; //Segment length
         // If the segment has length and was covered, accumulate metrics
-        if ( segment_length  && current_depth ) {
+        if ( seglen  && current_depth ) {
             // Add to the total number of unique covered bases (breadth)
-            tcovbases += segment_length;
+            tcovbases += seglen;
             // Add the area of this segment (length * depth) to the total sum
-            tdepthsum  += segment_length * current_depth;
-            sumsqdepth += segment_length * current_depth * current_depth;
-            // --- NEW: HISTOGRAM LOGIC ---
+            tdepthsum  += seglen * current_depth;
+            sumsqdepth += seglen * current_depth * current_depth;
             //Add depth value to coverage histogram
-            khint_t k = covhist_get(covhist, current_depth); // Check if depth exists
-            if (k == kh_end(covhist)) { // If not, create it
+            khint_t k = covhist_get(covhist, current_depth);
+            if (k == kh_end(covhist)) { //Add depth value if not present
                 int absent;
                 k = covhist_put(covhist, current_depth, &absent);
                 kh_val(covhist, k) = 0;
             }
-            kh_val(covhist, k) += segment_length; // Add length to the bin
-            // --- END NEW HISTOGRAM LOGIC ---
+            kh_val(covhist, k) += seglen; //Increase length value for this depth
         }
-        // Update state based on the current event
+        //Increase or decrease the current depth based on the event type
         current_depth += events.a[i].e ? 1 : -1;
         last_pos = current_pos;
     }
@@ -316,9 +331,11 @@ static void _refcoverage(ueventq_t events, uint64_t l,
     *meanoncov = (double)tdepthsum / (double)tcovbases;
     double meansqcovb = tcovbases?(double)sumsqdepth / tcovbases:0.0;
     *varoncov  = meansqcovb - ((*meanoncov) * (*meanoncov));
-
-    *entropy = _getentropy(covhist, tcovbases);
-    *gini = _getgini(covhist, tcovbases, *meanoncov);
+    float _normentropy, _normgini;
+    *entropy  = _getentropy(covhist, tcovbases, &_normentropy);
+    *nentropy = _normentropy;
+    *gini     = _getgini(covhist, tcovbases, *meanoncov, &_normgini);
+    *ngini    = _normgini;
     covhist_destroy(covhist);
 }
 
@@ -364,16 +381,18 @@ static void _refmapstats(unicorn_refstat_t *stats)
     //Get coverage values
     ks_introsort(_surange, aEVENT.n, aEVENT.a);
     uint64_t covbases;
-    float    meancov, meanoncov, varoncov, entropy, gini;
+    float    meancov, meanoncov, varoncov, entropy, gini, nent, ngini;
     _refcoverage(aEVENT, kh_val(refmap, k).REFLEN,
                  &covbases, &meancov, &meanoncov, &varoncov,
-                &entropy, &gini);
+                &entropy, &gini, &nent, &ngini);
     kh_val(refmap, k).REFCOVB    = covbases;
     kh_val(refmap, k).REFMCOV    = meancov;
     kh_val(refmap, k).REFMONCOV  = meanoncov;
     kh_val(refmap, k).REFVONCOV  = varoncov;
     kh_val(refmap, k).REFENTROPY = entropy;
     kh_val(refmap, k).REFGINI    = gini;
+    kh_val(refmap, k).REFNENTROP = nent;
+    kh_val(refmap, k).REFNGINI   = ngini;
     kv_destroy(aEVENT);
   }
   for (uint32_t i = 0; i < rmq.n; i++) {
@@ -599,10 +618,11 @@ static sam_hdr_t *_stats2samhdr(unicorn_refstat_t *stats, sam_hdr_t *hdr)
 uint8_t unicorn_refstats_filterbam(unicorn_t *u,
                                    unicorn_refstat_t *stats)
 {
-  uint8_t ret = 1; //Default return value is error
+  uint8_t ret = 1;
   if (!u || !stats) return ret;
   if (!stats->fc)   return ret;
   sam_hdr_t *ohdr = NULL;
+  sam_hdr_t *_hdr = NULL;
   bam1_t *b = bam_init1();
   char OBUFF[256] = {0};
   if (u->prefix) {
@@ -625,10 +645,9 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   if (sam_hdr_write(ofp, ohdr) < 0) goto exit;
   
   //Loop over bam, write alignments from references that passed filters
-  uint64_t naln = 0;
   if (u->_FP) sam_close(u->_FP);
   u->_FP = hts_open(u->ifile, "r");
-  sam_hdr_t *_hdr = sam_hdr_read(u->_FP);
+  _hdr = sam_hdr_read(u->_FP);
   while (sam_read1(u->_FP, _hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     int32_t tid = b->core.tid;
@@ -638,7 +657,6 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
     b->core.tid = ntid; //Set new tid
     //Write alignment to output file
     if (sam_write1(ofp, ohdr, b) < 0) goto exit;
-    naln++;
   }
   ret = 0;
   exit:
@@ -662,7 +680,7 @@ void unicorn_refstat_print(const unicorn_t *u,
       _refSTAT_T v = kh_val(stats->_refmap, k);   
       float breath = v.REFCOVB/(double)v.REFLEN;
       float expbreath =  1.0f - expf(-breath); 
-      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%lu\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%lu\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                   hdr->target_name[kh_key(stats->_refmap, k)],//1
                   v.REFLEN,                                   //2
                   v.REFNALNS,                                 //3
@@ -687,6 +705,8 @@ void unicorn_refstat_print(const unicorn_t *u,
                   sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
                   1000.0f * breath,                           //24
                   v.REFENTROPY,                               //25
-                  v.REFGINI);                                 //26
+                  v.REFGINI,                                  //26        
+                  v.REFNENTROP,                               //27
+                  v.REFNGINI);                                //28
     }
 }
