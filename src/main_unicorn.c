@@ -51,8 +51,8 @@ static int unicorn_refstats(int argc, char **argv)
   unicorn_refstat_t *stats = NULL;
   char OBUFF[516] = {0};
   FILE *ofp = NULL;
-  char *_argv[32] = {0};
-  for (uint8_t i = 0; i < argc; ++i) _argv[i] = strdup(argv[i]);
+  char *_argv[64] = {0};
+  for (uint8_t i = 0; i < (argc > 64) ? 64 : argc; ++i) _argv[i] = strdup(argv[i]);
   //Read command line options
   while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, NULL)) >= 0 ) {
     switch(c) {
@@ -126,19 +126,19 @@ static int unicorn_refstats(int argc, char **argv)
   fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
   if ( (ret = unicorn_refstats_filterbam(u, stats)) )
     goto exit;
-  for (uint8_t i = 0; i < argc; ++i) free(_argv[i]);
+  for (uint8_t i = 0; i < (argc > 64) ? 64 : argc; ++i) free(_argv[i]);
   ret = 0;
   exit:
     if (ret < 0) {
       fprintf(stderr, "[unicorn::%s] Error: %d\n",__func__, ret);
       refstats_usage(stderr);
     }
-    if (opts.ifile) free(opts.ifile);
+    if (opts.ifile)   free(opts.ifile);
     if (opts.statstr) free(opts.statstr);
-    if (u) unicorn_destroy(u);
+    if (opts.prefix)  free(opts.prefix);
+    if (u)     unicorn_destroy(u);
     if (stats) unicorn_refstat_destroy(stats);
-    if (ofp && opts.prefix) fclose(ofp);
-    if (opts.prefix) free(opts.prefix);
+    if (ofp)   fclose(ofp);
     return ret;
 }
 

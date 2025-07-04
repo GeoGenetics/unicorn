@@ -138,8 +138,9 @@ static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t, float *_ne)
     }
   }
   //Max entropy is log2(n) where n is the number of unique depths
-  if ( kh_size(hist) > 0)
-    *_ne = entropy / (log2(kh_size(hist)) > 0 ? log2(kh_size(hist)) : 0.0f);
+  float me = log2(kh_size(hist));
+  if ( kh_size(hist) > 1)
+    *_ne = entropy / me;
   else
     *_ne = 1.0f;
   return entropy;
@@ -448,7 +449,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
       delta = qlen - mean;                             //Compute difference
       refstat.REFREADE += delta/n;                     //Running mean
       refstat._M += delta * (qlen - refstat.REFREADE); //Keep track of m
-      refstat.REFREADV = refstat._M / (n-1);           //Running variance
+      refstat.REFREADV = 0.0f;                         //Running variance
       refstat.REFREADMIN = qlen < refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
       refstat.REFREADMAX = qlen > refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
     }
@@ -461,7 +462,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     delta = ani-mean;
     refstat.REFALNANIE += delta/naln;
     refstat._MANI = delta * (ani - refstat.REFALNANIE);
-    refstat.REFALNANIV = refstat._MANI / (naln-1);
+    refstat.REFALNANIV = naln ? (refstat._MANI / (naln-1)) : 0.0f;
     //Add alignment event, for coverage comp via sweep line algorith
     _urangeevent s = {b->core.pos, 1};
     _urangeevent e = {bam_endpos(b), 0};
