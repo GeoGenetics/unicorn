@@ -127,7 +127,7 @@ static int unicorn_refstats(int argc, char **argv)
                   fread,
                   (float)fread/tread);
   fprintf(stderr, "\tout of %u references\n", unicorn_refstats_getfrefn(stats));
-  fprintf(stderr, "\t%lu seconds\n", (double)ns/1000000000.f);
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   unicorn_refstat_print(u, stats, ofp);
   fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);

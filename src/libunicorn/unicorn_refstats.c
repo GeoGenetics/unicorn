@@ -68,7 +68,7 @@ typedef kvec_t(_urangeevent) ueventq_t;
 */
 typedef struct _refSTAT_T {
   uint32_t     REFLEN;     // Length of the reference sequence
-  uint32_t     REFNALNS;   // Number of alignments mapped to the reference
+  uint64_t     REFNALNS;   // Number of alignments mapped to the reference
   //Read length data
   float        REFREADE;   // Mean read length
   float        REFREADV;   // Read length variance
@@ -681,7 +681,7 @@ void unicorn_refstat_print(const unicorn_t *u,
       _refSTAT_T v = kh_val(stats->_refmap, k);   
       float breath = v.REFCOVB/(double)v.REFLEN;
       float expbreath =  1.0f - expf(-breath); 
-      fprintf(fp, "%s\t%u\t%u\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%lu\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+      fprintf(fp, "%s\t%u\t%lu\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%lu\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                   hdr->target_name[kh_key(stats->_refmap, k)],//1
                   v.REFLEN,                                   //2
                   v.REFNALNS,                                 //3
