@@ -52,7 +52,8 @@ static int unicorn_refstats(int argc, char **argv)
   char OBUFF[516] = {0};
   FILE *ofp = NULL;
   char *_argv[64] = {0};
-  for (uint8_t i = 0; i < (argc > 64) ? 64 : argc; ++i) _argv[i] = strdup(argv[i]);
+  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
+    _argv[i] = strdup(argv[i]);
   //Read command line options
   while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, NULL)) >= 0 ) {
     switch(c) {
@@ -126,7 +127,8 @@ static int unicorn_refstats(int argc, char **argv)
   fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
   if ( (ret = unicorn_refstats_filterbam(u, stats)) )
     goto exit;
-  for (uint8_t i = 0; i < (argc > 64) ? 64 : argc; ++i) free(_argv[i]);
+  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
+    free(_argv[i]);
   ret = 0;
   exit:
     if (ret < 0) {
