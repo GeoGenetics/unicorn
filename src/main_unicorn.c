@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "klib/ketopt.h"
 #define OPT_STR "b:o:t:s:h"
@@ -44,6 +45,8 @@ Compute per reference statistics
 static int unicorn_refstats(int argc, char **argv)
 {
   int c, ret = -1;
+  struct timespec start, stop;
+  uint64_t ns;
   ketopt_t o = KETOPT_INIT;
   unicorn_opt_t opts = {0};
   opts.threads = 4;
@@ -105,9 +108,11 @@ static int unicorn_refstats(int argc, char **argv)
   if (!stats) goto exit;
   ret = -4; 
   //Compute statistics
+  clock_gettime(CLOCK_MONOTONIC, &start);
   if ( (ret = unicorn_refstat_compute(u, stats)) )
     goto exit;
-  
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   uint32_t taln, faln, tread, fread;
   taln  = unicorn_refstat_gettaln(stats);
   faln  = unicorn_refstat_getfaln(stats);
@@ -122,6 +127,7 @@ static int unicorn_refstats(int argc, char **argv)
                   fread,
                   (float)fread/tread);
   fprintf(stderr, "\tout of %u references\n", unicorn_refstats_getfrefn(stats));
+  fprintf(stderr, "\t%lu seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   unicorn_refstat_print(u, stats, ofp);
   fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
