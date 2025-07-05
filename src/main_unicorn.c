@@ -113,26 +113,32 @@ static int unicorn_refstats(int argc, char **argv)
     goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-  uint32_t taln, faln, tread, fread;
+  uint64_t taln, faln, tread, fread;
   taln  = unicorn_refstat_gettaln(stats);
   faln  = unicorn_refstat_getfaln(stats);
   tread = unicorn_refstat_gettread(stats);
   fread = unicorn_refstat_getfread(stats);
-  fprintf(stderr, "\t%u alignments, %u passed filters (%f)\n",
+  fprintf(stderr, "\t%lu alignments, %lu passed filters (%f)\n",
                   taln,
                   faln, 
                   (float)faln/taln); 
-  fprintf(stderr, "\t%u reads, %u passed filters (%f)\n",
+  fprintf(stderr, "\t%lu reads, %lu passed filters (%f)\n",
                   tread,
                   fread,
                   (float)fread/tread);
-  fprintf(stderr, "\tout of %u references\n", unicorn_refstats_getfrefn(stats));
+  fprintf(stderr, "\tout of %lu references (%f)\n",
+                  unicorn_refstats_getfrefn(stats),
+                  (float)unicorn_refstats_getfrefn(stats)/unicorn_getrefn(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   unicorn_refstat_print(u, stats, ofp);
   fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
+  clock_gettime(CLOCK_MONOTONIC, &start);
   if ( (ret = unicorn_refstats_filterbam(u, stats)) )
     goto exit;
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     free(_argv[i]);
   ret = 0;

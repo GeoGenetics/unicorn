@@ -533,22 +533,22 @@ unicorn_refstat_t *unicorn_refstat_init(const char *_statstr)
 }
 
 //TODO: Move to another compile unit
-uint32_t unicorn_refstat_gettaln(const unicorn_refstat_t *stats)
+uint64_t unicorn_refstat_gettaln(const unicorn_refstat_t *stats)
 {
   return stats->_nalns;
 }
 
-uint32_t unicorn_refstat_gettread(const unicorn_refstat_t *stats)
+uint64_t unicorn_refstat_gettread(const unicorn_refstat_t *stats)
 {
   return stats->_nreads;
 }
 
-uint32_t unicorn_refstat_getfread(const unicorn_refstat_t *stats)
+uint64_t unicorn_refstat_getfread(const unicorn_refstat_t *stats)
 {
   return stats->_nfreads;  
 }
 
-uint32_t unicorn_refstat_getfaln(const unicorn_refstat_t *stats)
+uint64_t unicorn_refstat_getfaln(const unicorn_refstat_t *stats)
 {
   return stats->_nfalns;  
 }
