@@ -25,6 +25,10 @@ SOFTWARE.
 #include <htslib/thread_pool.h>
 #include <htslib/sam.h>
 
+#include "klib/kvec.h"
+
+typedef kvec_t(bam1_t)  bamq_t;
+
 typedef struct {
     int  argc;
     char **argv;

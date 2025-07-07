@@ -3,7 +3,6 @@
 #include <unistd.h>
 #include "unicorn_internal.h"
 #include "klib/khashl.h"
-#include "klib/kvec.h"
 #include "klib/ksort.h"
 
 //filters, this is temporary, in the future they will be
@@ -350,15 +349,14 @@ static void _refmapstats(unicorn_refstat_t *stats)
   kv_init(rmq);
   //Loop over references and sort arrays
   kh_foreach(refmap, k) {
-    int32_t tid = kh_key(refmap, k); //tid AKA reference id 
-    _refSTAT_T refstat = kh_val(refmap, k); //data
+    int32_t tid = kh_key(refmap, k);        //tid AKA reference id 
+    _refSTAT_T refstat = kh_val(refmap, k); //stats data
     uint32_t _n = kh_size(refstat.READSET); //number of reads
     _treads += _n;
     if (kh_size(refstat.READSET) < MINNREADS ) { //filter
         refset_destroy(refstat.READSET);
         kv_destroy(refstat.aANI);
         kv_destroy(refstat.aEVENT);
-        //kv_destroy(refstat.aRLEN);
         kv_push(int32_t, rmq, tid);
         continue;
     }
@@ -366,19 +364,14 @@ static void _refmapstats(unicorn_refstat_t *stats)
     _freads += _n;
     ueventq_t aEVENT = refstat.aEVENT;
     floatq_t  aANI  = refstat.aANI;
-    //uint32q_t aRLEN = refstat.aRLEN;
     uint32_t *aRLEN = refstat.aRLEN;
     //Sort arrays
     ks_introsort(_sfloat,  aANI.n,  aANI.a);
-    //ks_introsort(_suint32, aRLEN.n, aRLEN.a);
     kh_val(refmap, k).REFALNANID = _fMEDIAN(aANI.a, aANI.n);
     //read length median and mode are computed from a count array
-    //kh_val(refmap, k).REFREADD   = _udMEDIAN(aRLEN.a, aRLEN.n);
-    //kh_val(refmap, k).REFREADO   = _udMODE(aRLEN.a, aRLEN.n);
     kh_val(refmap, k).REFREADD = _udCAMEDIAN(aRLEN, 256, _n);
     kh_val(refmap, k).REFREADO   = _udCAMODE(aRLEN, 256);
     kv_destroy(aANI);
-    //kv_destroy(aRLEN);
     //Get coverage values
     ks_introsort(_surange, aEVENT.n, aEVENT.a);
     uint64_t covbases;
@@ -396,10 +389,12 @@ static void _refmapstats(unicorn_refstat_t *stats)
     kh_val(refmap, k).REFNGINI   = ngini;
     kv_destroy(aEVENT);
   }
+  fprintf(stderr, "[%s] Size BD: %u\n", __func__, kh_size(refmap));
   for (uint32_t i = 0; i < rmq.n; i++) {
     k = refmap_get(refmap, rmq.a[i]);
     refmap_del(refmap, k);
   }
+  fprintf(stderr, "[%s] Size AD: %u\n", __func__, kh_size(refmap));
   kv_destroy(rmq);
   stats->_nreads  = _treads;
   stats->_nfreads = _freads;
@@ -449,11 +444,11 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
       delta = qlen - mean;                             //Compute difference
       refstat.REFREADE += delta/n;                     //Running mean
       refstat._M += delta * (qlen - refstat.REFREADE); //Keep track of m
-      refstat.REFREADV = 0.0f;                         //Running variance
+      //TODO fix bug in variance calculation
+      refstat.REFREADV = n ? (refstat._M / (n-1)) : 0.0f; //Running variance
       refstat.REFREADMIN = qlen < refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
       refstat.REFREADMAX = qlen > refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
     }
-    //kv_push(uint32_t, refstat.aRLEN, qlen);
     //Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
