@@ -122,7 +122,8 @@ typedef struct unicorn_refstats_t {
   uint32_t _nfreads;
   uint32_t _nfalns;
   //Filters
-  uint32_t minaln; // Minimum number of alignments to consider a reference
+  uint32_t minnreads; // Minimum number of reads to consider a reference
+  uint32_t minref;    // Minimum reference length to consider
 } unicorn_refstat_t;
 
 //Some private functions
@@ -355,7 +356,7 @@ static void _refmapstats(unicorn_refstat_t *stats)
     _refSTAT_T refstat = kh_val(refmap, k); //stats data
     uint32_t _n = kh_size(refstat.READSET); //number of reads
     _treads += _n;
-    if (kh_size(refstat.READSET) < stats->minaln ) { //filter
+    if (kh_size(refstat.READSET) < stats->minnreads ) { //filter
         refset_destroy(refstat.READSET);
         kv_destroy(refstat.aANI);
         kv_destroy(refstat.aEVENT);
@@ -403,6 +404,8 @@ static void _refmapstats(unicorn_refstat_t *stats)
   stats->_nfalns  = _falns;
 }     
 
+//Check if reference is too short
+#define _reftooshort(hdr, tid, minref) ((hdr)->target_len[(tid)] < (minref) ? 1 : 0) 
 //TODO modularize
 int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
 {
@@ -414,6 +417,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
   //Loop over alignments //TODO refector
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     if (_unmapped(b)) continue;
+    if (_reftooshort(u->hdr, b->core.tid, stats->minref)) continue;
     naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
@@ -502,7 +506,9 @@ void unicorn_refstat_destroy(unicorn_refstat_t *stats)
   }
 }
 
-unicorn_refstat_t *unicorn_refstat_init(const char *_statstr, uint32_t minaln)
+unicorn_refstat_t *unicorn_refstat_init(const char *_statstr,
+                                        uint32_t minnreads,
+                                        uint32_t minrefl)
 {
     unicorn_refstat_t *stats = calloc(1, sizeof(unicorn_refstat_t));
     if (!stats) return NULL;
@@ -525,7 +531,8 @@ unicorn_refstat_t *unicorn_refstat_init(const char *_statstr, uint32_t minaln)
         return NULL;
     }
     stats->_refmap = refmap_init();
-    stats->minaln = minaln;
+    stats->minnreads = minnreads;
+    stats->minref    = minrefl;
     free(statstr);
     return stats;
 }

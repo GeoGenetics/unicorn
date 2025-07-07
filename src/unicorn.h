@@ -39,7 +39,6 @@ typedef struct unicorn_t *unicorn_t;
 unicorn_t *unicorn_init( int         threads,
                          const char *ifile,
                          char       *prefix,
-                         uint32_t    minaln,
                          int         argc,
                          char      **argv);
 
@@ -65,7 +64,9 @@ typedef struct unicorn_refstat_t *unicorn_refstat_t;
     @param statstr - String indicating which statistics to compute
     @returns - unicorn_refstat_t* on success NULL on error
 */
-unicorn_refstat_t *unicorn_refstat_init(const char *statstr, uint32_t minaln);
+unicorn_refstat_t *unicorn_refstat_init(const char *statstr,
+                                        uint32_t minnreads,
+                                        uint32_t minrefl);
 void unicorn_refstat_destroy(unicorn_refstat_t *stats);
 
 /* Compute reference statistics */
