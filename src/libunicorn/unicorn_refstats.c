@@ -392,12 +392,10 @@ static void _refmapstats(unicorn_refstat_t *stats)
     kh_val(refmap, k).REFNGINI   = ngini;
     kv_destroy(aEVENT);
   }
-  fprintf(stderr, "[%s] Size BD: %u\n", __func__, kh_size(refmap));
   for (uint32_t i = 0; i < rmq.n; i++) {
     k = refmap_get(refmap, rmq.a[i]);
     refmap_del(refmap, k);
   }
-  fprintf(stderr, "[%s] Size AD: %u\n", __func__, kh_size(refmap));
   kv_destroy(rmq);
   stats->_nreads  = _treads;
   stats->_nfreads = _freads;
@@ -443,7 +441,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     float mean, delta;
     //mean, median, and variance  Welford's online algorithm
     if (absent) { //Only first instance of query, no counting same read twice
-      //Read length mean, median, mode, min, max
+      //Read length mean, variance, median, mode, min, max
       refstat.aRLEN[qlen < 256 ? qlen : 255]++; //Count read length
       uint32_t n = kh_size(refstat.READSET);
       mean = refstat.REFREADE;                         //Get current mean
