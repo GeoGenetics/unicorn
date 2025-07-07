@@ -4,17 +4,19 @@
 #include <string.h>
 #include <time.h>
 
+//TODO long options
 #include "klib/ketopt.h"
-#define OPT_STR "b:o:t:s:h"
+#define OPT_STR "b:o:t:s:m:h"
 
 #include "version.h"
 #include "unicorn.h"
 
 typedef struct unicorn_opts {
   int  threads;    // Number of threads to use
-  char *prefix;   // Output prefix for results
+  char *prefix;    // Output prefix for results
   char *ifile;     // Input file (BAM/SAM/CRAM)
   char *statstr;   // Comma separated list of statistics to compute
+  uint32_t minaln; // Minimum number of alignments to consider a reference  
 } unicorn_opt_t;
 
 static void unicorn_usage(FILE *fp)
@@ -72,7 +74,10 @@ static int unicorn_refstats(int argc, char **argv)
         case 's':
         opts.statstr = strdup(o.arg);
         break;
-      case 'h':
+      case 'm':
+        opts.minaln = atoi(o.arg);
+        break;
+        case 'h':
         refstats_usage(stdout);
         ret = 0;
         goto exit;
@@ -90,13 +95,15 @@ static int unicorn_refstats(int argc, char **argv)
     if (!ofp) goto exit;
   }
   ret = -2;
-  
+  if (!opts.minaln)
+    opts.minaln = 1; //Set default minimum number of alignments to 1, reheads only
   //Load bam data via unicorn API
   fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__, opts.ifile);
   //TODO simplify call, allow NULL arguments
   u = unicorn_init(opts.threads,
                    opts.ifile,
                    opts.prefix,
+                   opts.minaln,
                    argc,
                    _argv);
   if (!u) goto exit;
@@ -104,7 +111,7 @@ static int unicorn_refstats(int argc, char **argv)
   ret = -3;
   //Parse the statistics string and initialize stat object
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-  stats = unicorn_refstat_init(opts.statstr);
+  stats = unicorn_refstat_init(opts.statstr, opts.minaln);
   if (!stats) goto exit;
   ret = -4; 
   //Compute statistics

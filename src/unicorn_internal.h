@@ -35,6 +35,7 @@ typedef struct {
     int  threads;
     char *ifile;
     char *prefix;
+    uint32_t minaln; // Minimum number of alignments to consider a reference
     htsThreadPool p;
     htsFile   *_FP;
     bam_hdr_t *hdr;

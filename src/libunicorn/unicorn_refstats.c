@@ -121,6 +121,8 @@ typedef struct unicorn_refstats_t {
   uint32_t _nreads;
   uint32_t _nfreads;
   uint32_t _nfalns;
+  //Filters
+  uint32_t minaln; // Minimum number of alignments to consider a reference
 } unicorn_refstat_t;
 
 //Some private functions
@@ -353,7 +355,7 @@ static void _refmapstats(unicorn_refstat_t *stats)
     _refSTAT_T refstat = kh_val(refmap, k); //stats data
     uint32_t _n = kh_size(refstat.READSET); //number of reads
     _treads += _n;
-    if (kh_size(refstat.READSET) < MINNREADS ) { //filter
+    if (kh_size(refstat.READSET) < stats->minaln ) { //filter
         refset_destroy(refstat.READSET);
         kv_destroy(refstat.aANI);
         kv_destroy(refstat.aEVENT);
@@ -500,7 +502,7 @@ void unicorn_refstat_destroy(unicorn_refstat_t *stats)
   }
 }
 
-unicorn_refstat_t *unicorn_refstat_init(const char *_statstr)
+unicorn_refstat_t *unicorn_refstat_init(const char *_statstr, uint32_t minaln)
 {
     unicorn_refstat_t *stats = calloc(1, sizeof(unicorn_refstat_t));
     if (!stats) return NULL;
@@ -523,6 +525,7 @@ unicorn_refstat_t *unicorn_refstat_init(const char *_statstr)
         return NULL;
     }
     stats->_refmap = refmap_init();
+    stats->minaln = minaln;
     free(statstr);
     return stats;
 }

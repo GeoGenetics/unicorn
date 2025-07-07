@@ -36,11 +36,12 @@ For example:
 typedef struct unicorn_t *unicorn_t;
 
 /* Initialise a unicorn object*/
-unicorn_t *unicorn_init( int threads,
+unicorn_t *unicorn_init( int         threads,
                          const char *ifile,
-                         char *prefix,
-                         int argc,
-                         char **argv);
+                         char       *prefix,
+                         uint32_t    minaln,
+                         int         argc,
+                         char      **argv);
 
 void unicorn_destroy(unicorn_t *u);
 
@@ -64,7 +65,7 @@ typedef struct unicorn_refstat_t *unicorn_refstat_t;
     @param statstr - String indicating which statistics to compute
     @returns - unicorn_refstat_t* on success NULL on error
 */
-unicorn_refstat_t *unicorn_refstat_init(const char *statstr);
+unicorn_refstat_t *unicorn_refstat_init(const char *statstr, uint32_t minaln);
 void unicorn_refstat_destroy(unicorn_refstat_t *stats);
 
 /* Compute reference statistics */

@@ -26,6 +26,7 @@ void unicorn_destroy(unicorn_t *u)
 unicorn_t *unicorn_init( int threads,
                          const char *ifile,
                          char *prefix,
+                         uint32_t minaln,
                          int argc,
                          char **argv)
 {
@@ -45,6 +46,7 @@ unicorn_t *unicorn_init( int threads,
     u->argc = argc;
     u->argv = argv;
     u->prefix = prefix;
+    u->minaln = minaln;
     ret = 0;
     exit:
     if (ret) {
