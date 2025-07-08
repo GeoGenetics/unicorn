@@ -2,132 +2,13 @@
 #include <math.h>
 #include <unistd.h>
 #include "unicorn_internal.h"
-#include "klib/khashl.h"
-#include "klib/ksort.h"
 
-//filters, this is temporary, in the future they will be
-//defined at runtime.
-#define MINNREADS 10
-#define MAXNALNS  0xffffffffU
-
-#define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
-
-typedef kvec_t(float)    floatq_t;
-typedef kvec_t(uint32_t) uint32q_t;
-typedef kvec_t(int32_t)  int32q_t;
-
-KHASHL_MAP_INIT(static,
-                _covhistKHASH_T,
-                covhist,
-                uint32_t,
-                uint64_t,
-                kh_hash_uint32,
-                kh_eq_generic)
-
-
-/******************
- * Reference hash set
- * This is a hash set of read IDs mapped to the reference
- * It is used to count the number of reads mapped to the reference
-*/
-KHASHL_SET_INIT(static,               //Scope
-                _refKHASHC_T, refset, //type and prefix
-                uint64_t,             //key type 
-                kh_hash_dummy, kh_eq_generic) //hash and equality functions
-#define kh_range_hash(r) kh_hash_dummy((r).qhash)
-#define kh_range_eq(a, b) ((a).pos == (b).pos)
-//#define ks_lt_urange(a, b) ((a).pos < (b).pos)
 // ksort
 KSORT_INIT(_sfloat, float, ks_lt_generic)
 KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
-
-/*
-********************************
- * Rango object for coverage computation.
- * Encodes start e==1 or end e==0 of range.
-*/
-typedef struct _urangeevent {
-    uint64_t pos:63;
-    uint8_t e:1;
-} _urangeevent;
-static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
-{
-    if (a.pos != b.pos)
-        return a.pos < b.pos;
-    return a.e > b.e; 
-}
 KSORT_INIT(_surange, _urangeevent, _eventlt)
-typedef kvec_t(_urangeevent) ueventq_t;
-
-/******************
- * Reference statistics
- * This structure holds the statistics per reference sequence.
- * It is used to compute the statistics for each reference sequence
- * in the BAM file.
-*/
-typedef struct _refSTAT_T {
-  uint32_t     REFLEN;     // Length of the reference sequence
-  uint64_t     REFNALNS;   // Number of alignments mapped to the reference
-  //Read length data
-  float        REFREADE;   // Mean read length
-  float        REFREADV;   // Read length variance
-  uint32_t     REFREADD;   // Read length median
-  uint32_t     REFREADO;   // Read length mode 
-  float        _M;         // Sum of squares of difference from mean
-  uint32_t     REFREADMIN;
-  uint32_t     REFREADMAX;
-  _refKHASHC_T *READSET;   // Hash set of read IDs mapped to the reference
-  //Alignment data
-  float        REFALNNM;   // mean edit distance
-  float        REFALNANIE; // mean Average nucleotide identity(ANI)
-  float        REFALNANIV; // std ANI
-  float        REFALNANID; // median ANI
-  float        REFALNANIO; // Mode ANI
-  float        _MANI;      // See _M
-  //Coverage
-  uint64_t     REFCOVB;    // number of covered bases
-  float        REFMCOV;    // mean cov
-  float        REFMONCOV;  // Mean coverage of covered bases
-  float        REFVONCOV;  // Variance of coverage of covered bases
-  float        REFENTROPY; // Coverage entropy
-  float        REFGINI;    // Coverage Gini coefficient
-  float        REFNENTROP; // Normalized coverage entropy
-  float        REFNGINI;   // Normalized coverage Gini coefficient
-  //Data arrays
-  floatq_t     aANI;
-  //uint32q_t    aRLEN;
-  uint32_t     aRLEN[256]; //Count array of read lengths
-  ueventq_t    aEVENT;     // For coverage computation
-  //rehead members
-  int32_t      _ntid;        // New Reference sequence ID
-} _refSTAT_T;
-
-KHASHL_MAP_INIT(static,                        //Scope
-                _refKHASH_T, refmap,           //type and prefix
-                int32_t, _refSTAT_T,           //key and value types 
-                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
-
-typedef struct unicorn_refstats_t {
-  //Statistics to compute  
-  uint64_t REFLEN:   1;
-  uint64_t REFNREADS:1;
-  uint64_t REFNALNS: 1;
-  uint64_t RESERVED:61; // Reserved for future use
-  //Flags
-  uint8_t fc: 1;          //Filter computed flag
-  //Data
-  _refKHASH_T *_refmap; // Hash table for reference statistics
-  uint64_t _nalns;
-  uint32_t _nreads;
-  uint32_t _nfreads;
-  uint32_t _nfalns;
-  //Filters
-  uint32_t minnreads; // Minimum number of reads to consider a reference
-  uint32_t minref;    // Minimum reference length to consider
-} unicorn_refstat_t;
 
 //Some private functions
-
 static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t, float *_ne)
 {
   double entropy = 0.0;
@@ -178,7 +59,7 @@ static inline double _getgini(_covhistKHASH_T *hist,
   return gini;
 }
 
-static uint32_t _getreadnum(unicorn_refstat_t *stats)
+static uint32_t _getreadnum(unicorn_stat_t *stats)
 {
   uint32_t nread = 0;
   khint_t k;
@@ -197,43 +78,7 @@ static inline float _fMEDIAN(float *v, uint32_t n)
   return (v[n/2 - 1] + v[n/2]) / 2.0;
 }
 
-/*
-  Computes median from a count array.
-  @param *v - Count array v[n] has the count of the number of instances value
-              n was observed.
-  @param n  - Size of the count array
-  @mcount   - Total number of instances in the count array
 
-*/
-static uint32_t _udCAMEDIAN(uint32_t *v, uint32_t n, uint32_t mcount)
-{
-  uint32_t m = 0, count = 0;
-  for (; m < n; m++) {
-    if (v[m] == 0) continue; //Skip zero counts
-    count += v[m];
-    if (count > mcount/2) break;
-  }
-  return m;
-}
-
-/*
-  Computes meode from a count array.
-  @param *v - Count array v[n] has the count of number of instances value
-              n was observed.
-  @param n - Size of the count array
-*/
-static uint32_t _udCAMODE(uint32_t *v, uint32_t n)
-{
-  uint32_t mode = 0, max_count = 0;
-  for (uint32_t i = 0; i < n; i++) {
-    if (v[i] == 0) continue; //Skip zero counts
-    if (v[i] > max_count) {
-      max_count = v[i];
-      mode = i;
-    }
-  }
-  return mode;
-}
 
 //TODO change to macro
 static inline uint32_t _udMEDIAN(uint32_t *v, uint32_t n)
@@ -342,7 +187,7 @@ static void _refcoverage(ueventq_t events, uint64_t l,
     covhist_destroy(covhist);
 }
 
-static void _refmapstats(unicorn_refstat_t *stats)
+static void _refmapstats(unicorn_stat_t *stats)
 {
   //TODO parallelize
   _refKHASH_T *refmap = stats->_refmap;
@@ -402,10 +247,9 @@ static void _refmapstats(unicorn_refstat_t *stats)
   stats->_nfalns  = _falns;
 }     
 
-//Check if reference is too short
-#define _reftooshort(hdr, tid, minref) ((hdr)->target_len[(tid)] < (minref) ? 1 : 0) 
+
 //TODO modularize
-int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
+int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 {
   int ret = -1, absent;
   if (!u || !stats) goto exit;
@@ -484,7 +328,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_refstat_t *stats)
     return ret;
 }
 
-void unicorn_refstat_destroy(unicorn_refstat_t *stats)
+void unicorn_stat_destroy(unicorn_stat_t *stats)
 {
     if (stats) {
       if (stats->_refmap) {
@@ -504,71 +348,74 @@ void unicorn_refstat_destroy(unicorn_refstat_t *stats)
   }
 }
 
-unicorn_refstat_t *unicorn_refstat_init(const char *_statstr,
-                                        uint32_t minnreads,
-                                        uint32_t minrefl)
+unicorn_stat_t *unicorn_stat_init(const char *_statstr,
+                                  uint32_t minnreads,
+                                  uint32_t minrefl)
 {
-    unicorn_refstat_t *stats = calloc(1, sizeof(unicorn_refstat_t));
+    unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
     if (!stats) return NULL;
-    char *statstr = strdup(_statstr);
     // Parse the statstr and set the corresponding flags
-    char *token = strtok(statstr, ",");
-    uint8_t flg = 0;
-    while (token) {
-        if (strcmp(token, "RefLen") == 0)
-            stats->REFLEN = flg = 1;
-        else if (strcmp(token, "RefNReads") == 0)
-            stats->REFNREADS = flg = 1;
-        else if (strcmp(token, "RefNAlns") == 0)
-            stats->REFNALNS = flg = 1;
-        token = strtok(NULL, ",");
-    }
-    if (!flg) {
-        free(statstr);
-        free(stats);
-        return NULL;
+    if (_statstr) {
+      char *statstr = strdup(_statstr);
+      char *token = strtok(statstr, ",");
+      uint8_t flg = 0;
+      while (token) {
+          if (strcmp(token, "RefLen") == 0)
+              stats->REFLEN = flg = 1;
+          else if (strcmp(token, "RefNReads") == 0)
+              stats->REFNREADS = flg = 1;
+          else if (strcmp(token, "RefNAlns") == 0)
+              stats->REFNALNS = flg = 1;
+          token = strtok(NULL, ",");
+      }
+      if (!flg) {
+          free(statstr);
+          free(stats);
+          return NULL;
+      }
+      free(statstr);
     }
     stats->_refmap = refmap_init();
     stats->minnreads = minnreads;
     stats->minref    = minrefl;
-    free(statstr);
+    memset(stats->_readlc, 0, 256*sizeof(uint32_t));
     return stats;
 }
 
 //TODO: Move to another compile unit
-uint64_t unicorn_refstat_gettaln(const unicorn_refstat_t *stats)
+uint64_t unicorn_stat_gettaln(const unicorn_stat_t *stats)
 {
   return stats->_nalns;
 }
 
-uint64_t unicorn_refstat_gettread(const unicorn_refstat_t *stats)
+uint64_t unicorn_stat_gettread(const unicorn_stat_t *stats)
 {
   return stats->_nreads;
 }
 
-uint64_t unicorn_refstat_getfread(const unicorn_refstat_t *stats)
+uint64_t unicorn_stat_getfread(const unicorn_stat_t *stats)
 {
   return stats->_nfreads;  
 }
 
-uint64_t unicorn_refstat_getfaln(const unicorn_refstat_t *stats)
+uint64_t unicorn_stat_getfaln(const unicorn_stat_t *stats)
 {
   return stats->_nfalns;  
 }
 
-int32_t unicorn_refstats_getfrefn(const unicorn_refstat_t *stats)
+int32_t unicorn_stats_getfrefn(const unicorn_stat_t *stats)
 {
     return kh_size(stats->_refmap);
 }
 
 //TODO maybe a macro is best?
-uint8_t unicorn_refstats_isfiltered(const unicorn_refstat_t *stats)
+uint8_t unicorn_refstats_isfiltered(const unicorn_stat_t *stats)
 {
   return stats->fc;
 }
 
 //Generate new SAM header from stats
-static sam_hdr_t *_stats2samhdr(unicorn_refstat_t *stats, sam_hdr_t *hdr)
+static sam_hdr_t *_stats2samhdr(unicorn_stat_t *stats, sam_hdr_t *hdr)
 {
   if (!stats || !hdr) return NULL;
   kstring_t kstr = {0};
@@ -620,7 +467,7 @@ static sam_hdr_t *_stats2samhdr(unicorn_refstat_t *stats, sam_hdr_t *hdr)
 }
 
 uint8_t unicorn_refstats_filterbam(unicorn_t *u,
-                                   unicorn_refstat_t *stats)
+                                   unicorn_stat_t *stats)
 {
   uint8_t ret = 1;
   if (!u || !stats) return ret;
@@ -672,7 +519,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
 }
 
 void unicorn_refstat_print(const unicorn_t *u,
-                           const unicorn_refstat_t *stats,
+                           const unicorn_stat_t *stats,
                            FILE *fp)
 {
     if (!stats || !fp || !u) return;

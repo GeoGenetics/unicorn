@@ -25,21 +25,137 @@ SOFTWARE.
 #include <htslib/thread_pool.h>
 #include <htslib/sam.h>
 
+#include "klib/khashl.h"
+#include "klib/ksort.h"
 #include "klib/kvec.h"
-
 typedef kvec_t(bam1_t)  bamq_t;
+typedef kvec_t(float)    floatq_t;
+typedef kvec_t(uint32_t) uint32q_t;
+typedef kvec_t(int32_t)  int32q_t;
+/*
+********************************
+ * Rango object for coverage computation.
+ * Encodes start e==1 or end e==0 of range.
+*/
+typedef struct _urangeevent {
+    uint64_t pos:63;
+    uint8_t e:1;
+} _urangeevent;
+static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
+{
+    if (a.pos != b.pos)
+        return a.pos < b.pos;
+    return a.e > b.e; 
+}
+typedef kvec_t(_urangeevent) ueventq_t;
 
 typedef struct {
     int  argc;
     char **argv;
     int  threads;
     char *ifile;
-    char *prefix;
+    char *prefix; //TODO delete this memeber
     uint32_t minaln; // Minimum number of alignments to consider a reference
     htsThreadPool p;
     htsFile   *_FP;
     bam_hdr_t *hdr;
 } unicorn_t;
+
+#define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
+//Check if reference is too short
+#define _reftooshort(hdr, tid, minref)\
+          ((hdr)->target_len[(tid)] < (minref) ? 1 : 0) 
+
+KHASHL_MAP_INIT(static,
+                _covhistKHASH_T,
+                covhist,
+                uint32_t,
+                uint64_t,
+                kh_hash_uint32,
+                kh_eq_generic)
+
+
+/******************
+ * Reference hash set
+ * This is a hash set of read IDs mapped to the reference
+ * It is used to count the number of reads mapped to the reference
+*/
+KHASHL_SET_INIT(static,               //Scope
+                _refKHASHC_T, refset, //type and prefix
+                uint64_t,             //key type 
+                kh_hash_dummy, kh_eq_generic) //hash and equality functions
+
+/******************
+ * Reference statistics
+ * This structure holds the statistics per reference sequence.
+ * It is used to compute the statistics for each reference sequence
+ * in the BAM file.
+*/
+typedef struct _refSTAT_T {
+  uint32_t     REFLEN;     // Length of the reference sequence
+  uint64_t     REFNALNS;   // Number of alignments mapped to the reference
+  //Read length data
+  float        REFREADE;   // Mean read length
+  float        REFREADV;   // Read length variance
+  uint32_t     REFREADD;   // Read length median
+  uint32_t     REFREADO;   // Read length mode 
+  float        _M;         // Sum of squares of difference from mean
+  uint32_t     REFREADMIN;
+  uint32_t     REFREADMAX;
+  _refKHASHC_T *READSET;   // Hash set of read IDs mapped to the reference
+  //Alignment data
+  float        REFALNNM;   // mean edit distance
+  float        REFALNANIE; // mean Average nucleotide identity(ANI)
+  float        REFALNANIV; // std ANI
+  float        REFALNANID; // median ANI
+  float        REFALNANIO; // Mode ANI
+  float        _MANI;      // See _M
+  //Coverage
+  uint64_t     REFCOVB;    // number of covered bases
+  float        REFMCOV;    // mean cov
+  float        REFMONCOV;  // Mean coverage of covered bases
+  float        REFVONCOV;  // Variance of coverage of covered bases
+  float        REFENTROPY; // Coverage entropy
+  float        REFGINI;    // Coverage Gini coefficient
+  float        REFNENTROP; // Normalized coverage entropy
+  float        REFNGINI;   // Normalized coverage Gini coefficient
+  //Data arrays
+  floatq_t     aANI;
+  //uint32q_t    aRLEN;
+  uint32_t     aRLEN[256]; //Count array of read lengths
+  ueventq_t    aEVENT;     // For coverage computation
+  //rehead members
+  int32_t      _ntid;        // New Reference sequence ID
+} _refSTAT_T;
+KHASHL_MAP_INIT(static,                        //Scope
+                _refKHASH_T, refmap,           //type and prefix
+                int32_t, _refSTAT_T,           //key and value types 
+                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
+                #define kh_range_hash(r) kh_hash_dummy((r).qhash)
+
+typedef struct unicorn_stats_t {
+  //Statistics to compute  
+  uint64_t REFLEN:   1;
+  uint64_t REFNREADS:1;
+  uint64_t REFNALNS: 1;
+  uint64_t RESERVED:61; // Reserved for future use
+  //Flags
+  uint8_t fc: 1;          //Filter computed flag
+  //Data
+  _refKHASH_T *_refmap; // Hash table for reference statistics
+  uint64_t _nalns;
+  uint64_t _nreads;
+  uint64_t _nfreads;
+  uint64_t _nfalns;
+  float    _mrlen; //Mean read length
+  float    _vrlen; //Variance of read length
+  uint32_t _mdrlen; //Median read length
+  uint32_t _morlen; //Mode read length
+  uint32_t _readlc[256]; //Read length count array
+  //Filters
+  uint32_t minnreads; // Minimum number of reads to consider a reference
+  uint32_t minref;    // Minimum reference length to consider
+} unicorn_stat_t;
 
 #define STATSTR "Id\t"\
                 "Length\t"\
@@ -90,3 +206,21 @@ typedef struct {
 19. std_covcovered
 20. evenness_cov
 */
+
+/*
+  Computes median from a count array.
+  @param *v - Count array v[n] has the count of the number of instances value
+              n was observed.
+  @param n  - Size of the count array
+  @mcount   - Total number of instances in the count array
+
+*/
+uint32_t _udCAMEDIAN(uint32_t *v, uint32_t n, uint32_t mcount);
+
+/*
+  Computes meode from a count array.
+  @param *v - Count array v[n] has the count of number of instances value
+              n was observed.
+  @param n - Size of the count array
+*/
+uint32_t _udCAMODE(uint32_t *v, uint32_t n);

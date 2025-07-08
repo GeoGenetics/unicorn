@@ -13,7 +13,7 @@ typedef struct unicorn_opts {
 
 
 // Add ANI to bam record 
-static int ustats_ani(bam1_t *b, bam_hdr_t *hdr)
+static int ustats_ani(bam1_t *b)
 {
   // need NM tag 
   uint8_t *nm = bam_aux_get(b, "NM");
@@ -104,7 +104,7 @@ int unicorn_alnstats(int argc, char **argv)
   bam1_t *aln = bam_init1();
   while(((ret=sam_read1(in, hdr, aln)))>0){
     naln++;
-    if  (ustats_ani(aln, hdr) ) {
+    if  (ustats_ani(aln) ) {
       fprintf(stderr, "[unicorn %s] WARNINIG: Failed to add ANI alignment\n", __func__);
       continue;
     }

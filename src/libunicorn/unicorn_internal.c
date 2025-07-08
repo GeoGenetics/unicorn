@@ -1,30 +1,26 @@
 #define _XOPEN_SOURCE 700
 #include "unicorn_internal.h"
 
-typedef struct unicorn_stats_t {
-    uint64_t REFLEN:1;
-    uint64_t REFNREADS:1;
-    uint64_t REFNALNS:1;
-    uint64_t RESERVED:61; // Reserved for future use
-} unicorn_stats_t;
-
-unicorn_stats_t *unicorn_stats_init(const char *_statstr)
+uint32_t _udCAMEDIAN(uint32_t *v, uint32_t n, uint32_t mcount)
 {
-    unicorn_stats_t *stats = calloc(1, sizeof(unicorn_stats_t));
-    if (!stats) return NULL;
-    char *statstr = strdup(_statstr);
-    // Parse the statstr and set the corresponding flags
-    char *token = strtok(statstr, ",");
-    while (token) {
-        if (strcmp(token, "RefLen") == 0) {
-            stats->REFLEN = 1;
-        } else if (strcmp(token, "RefNReads") == 0) {
-            stats->REFNREADS = 1;
-        } else if (strcmp(token, "RefNAlns") == 0) {
-            stats->REFNALNS = 1;
-        }
-        token = strtok(NULL, ",");
+  uint32_t m = 0, count = 0;
+  for (; m < n; m++) {
+    if (v[m] == 0) continue; //Skip zero counts
+    count += v[m];
+    if (count > mcount/2) break;
+  }
+  return m;
+}
+
+uint32_t _udCAMODE(uint32_t *v, uint32_t n)
+{
+  uint32_t mode = 0, max_count = 0;
+  for (uint32_t i = 0; i < n; i++) {
+    if (v[i] == 0) continue; //Skip zero counts
+    if (v[i] > max_count) {
+      max_count = v[i];
+      mode = i;
     }
-    free(statstr);
-    return stats;
+  }
+  return mode;
 }
