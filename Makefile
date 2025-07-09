@@ -26,6 +26,14 @@ libunicorn: $(OBJ)
 unicorn: src/main_unicorn.c $(OBJ)
 	$(CC) -o $@ $< libunicorn.a $(HTSIPTH) $(HTSLPTH) -Isrc $(CFLAGS) -lhts -lm
 
+test:
+	./unicorn refstats -b data/test.bam -o data/out
+	cksum=$$(cksum data/out.bam  | cut -f1 -d ' '); \
+	[ $$cksum -eq 3158363077 ] || (exit 1)
+	cksum=$$(cksum data/out.stats.txt  | cut -f1 -d ' '); \
+	[ $$cksum -eq 84514074 ] || (exit 1)
+	rm data/out.bam data/out.stats.txt
+
 clean:
 	rm -f $(OBJ) libunicorn.a unicorn
 
