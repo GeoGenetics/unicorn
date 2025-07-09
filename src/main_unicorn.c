@@ -172,8 +172,8 @@ static int unicorn_refstats(int argc, char **argv)
   ret = -3;
   //Parse the statistics string and initialize stat object
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-  //stats = unicorn_refstat_init(opts.statstr, opts.minnreads, opts.minrefl);
-  //if (!stats) goto exit;
+  stats = unicorn_stat_init(opts.statstr, opts.minnreads, opts.minrefl);
+  if (!stats) goto exit;
   ret = -4; 
   //Compute statistics
   clock_gettime(CLOCK_MONOTONIC, &start);
