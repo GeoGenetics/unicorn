@@ -1,4 +1,4 @@
-![C/C++ CI](https://github.com/jregalado/CAEG/unicorn/actions/workflows/c-cpp.yml/badge.svg?branch=unicorn)
+![C/C++ CI](https://github.com/GeoGenetics/unicorn/blob/unicorn/.github/workflows/c-cpp.yml)
 # unicorn 
 ## Alignment stat computation and filtering.
 
