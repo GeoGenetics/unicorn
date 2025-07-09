@@ -2,7 +2,6 @@ tmp/*
 vgcore*
 unicorn.h
 libunicorn.a
-data/*
 unicorn
 unicorncpp
 src/*.o
