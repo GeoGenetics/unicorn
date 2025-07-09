@@ -31,16 +31,15 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
   bam1_t *b = bam_init1();
   uint64_t nalns = 0, nreads = 0;
 	_refKHASHC_T *readset = refset_init();
+	floatmap_t   *anihist = floatmap_init();
 	uint32_t RLHIST[256] = {0}; //Read length count table
 	//Loop over alignments //TODO refector
 	//double mean, delta;
 	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		if (_unmapped(b)) continue;
-		//fprintf(stderr, "len: %u\n", u->hdr->target_len[b->core.tid]);
-		if (_reftooshort(u->hdr, b->core.tid, stats->minref)) continue;
 		uint32_t qlen = b->core.l_qseq;
+		khint_t k, _queryhash = kh_hash_str(bam_get_qname(b));
 		int absent;
-		khint_t _queryhash = kh_hash_str(bam_get_qname(b));
 		refset_put(readset, _queryhash, &absent);
 		if (absent) {
 			//New read, increment read count
@@ -48,6 +47,16 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 			RLHIST[qlen < 256 ? qlen : 255]++;
 		}
 		nalns++;
+		//Alignment ANI histogram with truncated ANI values
+    uint32_t NM;
+    float ani = _ANINM(b, &NM);
+		uint32_t ani_trunc = (uint32_t)(ani * 100.0f);
+		k = floatmap_put(anihist, ani_trunc, &absent);
+		if (absent) {
+			kh_val(anihist, k) = 1;
+			continue;
+		}
+		kh_val(anihist, k)++;
 	}
 	stats->_nalns  = nalns;
 	stats->_nreads = nreads;
@@ -55,7 +64,9 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	stats->_vrlen	 = _CTvar(RLHIST, stats->_mrlen);
 	stats->_mdrlen = _udCAMEDIAN(RLHIST, 256, stats->_nreads);
 	stats->_morlen = _udCAMODE(RLHIST, 256);
-  memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
+	stats->_anihist = anihist;
+	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
+	
 	bam_destroy1(b);
 	refset_destroy(readset);
 	stats->fc = 1;
@@ -133,16 +144,28 @@ void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
 														const char *fname)
 {
 	const char *basename = get_basename(fname);
-	fprintf(stderr, "[unicorn::%s] Printing distributions to %s.dists.txt\n",
+	fprintf(stderr, "[unicorn::%s] Printing distributions to %s.*.dist.txt\n",
 									__func__, basename);
 	if (!stats || !basename) return;
 	char OBUFF[516] = {0};
-	snprintf(OBUFF, sizeof(OBUFF), "%s.dists.txt", basename);
+	snprintf(OBUFF, sizeof(OBUFF), "%s.rlen.dists.txt", basename);
 	FILE *ofp = fopen(OBUFF, "w");
 	if (!ofp) return;
 	fprintf(ofp, "#read_length\tcount\n");
-	for (uint32_t i = 0; i < 256; i++) {
+	for (uint32_t i = 0; i < 256; i++)
 		fprintf(ofp, "%u\t%u\n", i, stats->_readlc[i]);
+	fclose(ofp);
+
+	memset(OBUFF, 0, sizeof(OBUFF));
+	snprintf(OBUFF, sizeof(OBUFF), "%s.ani.dists.txt", basename);
+	ofp = fopen(OBUFF, "w");
+	if (!ofp) return;
+	fprintf(ofp, "#ani\tcount\n");
+	khint_t k;
+	kh_foreach(stats->_anihist, k) {
+		uint32_t ani = kh_key(stats->_anihist, k);
+		uint32_t count = kh_val(stats->_anihist, k);
+		fprintf(ofp, "%f\t%u\n", ani/100.0, count);
 	}
 	fclose(ofp);
 }

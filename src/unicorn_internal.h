@@ -132,7 +132,10 @@ KHASHL_MAP_INIT(static,                        //Scope
                 int32_t, _refSTAT_T,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
                 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
-
+KHASHL_MAP_INIT(static,                        //Scope
+                floatmap_t, floatmap,           //type and prefix
+                uint32_t, uint64_t,           //key and value types 
+                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
 typedef struct unicorn_stats_t {
   //Statistics to compute  
   uint64_t REFLEN:   1;
@@ -147,11 +150,12 @@ typedef struct unicorn_stats_t {
   uint64_t _nreads;
   uint64_t _nfreads;
   uint64_t _nfalns;
-  float    _mrlen; //Mean read length
-  float    _vrlen; //Variance of read length
+  float    _mrlen;  //Mean read length
+  float    _vrlen;  //Variance of read length
   uint32_t _mdrlen; //Median read length
   uint32_t _morlen; //Mode read length
   uint32_t _readlc[256]; //Read length count array
+  floatmap_t *_anihist;   //Alignment ANI histogram
   //Filters
   uint32_t minnreads; // Minimum number of reads to consider a reference
   uint32_t minref;    // Minimum reference length to consider
@@ -224,3 +228,8 @@ uint32_t _udCAMEDIAN(uint32_t *v, uint32_t n, uint32_t mcount);
   @param n - Size of the count array
 */
 uint32_t _udCAMODE(uint32_t *v, uint32_t n);
+
+/*
+  Computes ANI of alignment record, stores edit distance (nm) in *NM
+*/
+float _ANINM(bam1_t *b, uint32_t *NM);

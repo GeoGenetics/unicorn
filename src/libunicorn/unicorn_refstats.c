@@ -111,18 +111,6 @@ static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
   return _val;
 }
 
-//Computes ANI of alignment record, stores edit distance (nm) in *NM
-static inline float _ANINM(bam1_t *b, uint32_t *NM)
-{
-  uint8_t *nm = bam_aux_get(b, "NM");
-  int _NM = bam_aux2i(nm); 
-  int query_len = b->core.l_qseq; 
-  // ANI = (1 - (NM / query_len)) * 100
-  float ani = (1.0 - ((float)_NM / query_len)) * 100;
-  *NM = _NM;
-  return ani;
-}
-
 /**
 * Calculates coverage metrics from a sorted list of events.
 *
@@ -330,20 +318,20 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 
 void unicorn_stat_destroy(unicorn_stat_t *stats)
 {
-    if (stats) {
-      if (stats->_refmap) {
-        khint_t k;
-        // Destroy read set for each reference
-        kh_foreach(stats->_refmap, k) {
-          _refSTAT_T v = kh_val(stats->_refmap, k);
-          if (v.READSET)
-            refset_destroy(v.READSET);
-          //kv_destroy(v.aANI);
-          //kv_destroy(v.aEVENT);
-          //kv_destroy(v.aRLEN);
-        }
-        refmap_destroy(stats->_refmap);
+  if (stats) {
+    if (stats->_refmap) {
+      khint_t k;
+      // Destroy read set for each reference
+      kh_foreach(stats->_refmap, k) {
+        _refSTAT_T v = kh_val(stats->_refmap, k);
+        if (v.READSET)
+          refset_destroy(v.READSET);
+        //kv_destroy(v.aANI);
+        //kv_destroy(v.aEVENT);
       }
+      refmap_destroy(stats->_refmap);
+    }
+    if (stats->_anihist) floatmap_destroy(stats->_anihist);
     free(stats);
   }
 }

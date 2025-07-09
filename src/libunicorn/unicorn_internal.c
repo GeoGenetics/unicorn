@@ -24,3 +24,15 @@ uint32_t _udCAMODE(uint32_t *v, uint32_t n)
   }
   return mode;
 }
+
+//Computes ANI of alignment record, stores edit distance (nm) in *NM
+float _ANINM(bam1_t *b, uint32_t *NM)
+{
+  uint8_t *nm = bam_aux_get(b, "NM");
+  int _NM = bam_aux2i(nm); 
+  int query_len = b->core.l_qseq; 
+  // ANI = (1 - (NM / query_len)) * 100
+  float ani = (1.0 - ((float)_NM / query_len)) * 100;
+  *NM = _NM;
+  return ani;
+}
