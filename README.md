@@ -1,4 +1,5 @@
-# unicorn
+![C/C++ CI](https://github.com/jregalado/CAEG/unicorn/actions/workflows/c-cpp.yml/badge.svg?branch=unicorn)
+# unicorn 
 ## Alignment stat computation and filtering.
 
 # Installing
