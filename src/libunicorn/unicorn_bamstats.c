@@ -48,11 +48,11 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 		}
 		nalns++;
 		//Alignment ANI histogram with truncated ANI values
-    uint32_t NM;
-    float ani = _ANINM(b, &NM);
-		uint32_t ani_trunc = (uint32_t)(ani * 100.0f);
-		k = floatmap_put(anihist, ani_trunc, &absent);
-		if (absent) {
+        uint32_t NM;
+        float ani = _ANINM(b, &NM);
+	    uint32_t ani_trunc = (uint32_t)(ani * 10.0f);
+	    k = floatmap_put(anihist, ani_trunc, &absent);
+	    if (absent) {
 			kh_val(anihist, k) = 1;
 			continue;
 		}
@@ -61,12 +61,11 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	stats->_nalns  = nalns;
 	stats->_nreads = nreads;
 	stats->_mrlen  = _CTmean(RLHIST);
-	stats->_vrlen	 = _CTvar(RLHIST, stats->_mrlen);
+	stats->_vrlen  = _CTvar(RLHIST, stats->_mrlen);
 	stats->_mdrlen = _udCAMEDIAN(RLHIST, 256, stats->_nreads);
 	stats->_morlen = _udCAMODE(RLHIST, 256);
 	stats->_anihist = anihist;
 	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
-	
 	bam_destroy1(b);
 	refset_destroy(readset);
 	stats->fc = 1;
@@ -165,7 +164,7 @@ void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
 	kh_foreach(stats->_anihist, k) {
 		uint32_t ani = kh_key(stats->_anihist, k);
 		uint32_t count = kh_val(stats->_anihist, k);
-		fprintf(ofp, "%f\t%u\n", ani/100.0, count);
+		fprintf(ofp, "%f\t%u\n", ani/10.0, count);
 	}
 	fclose(ofp);
 }
