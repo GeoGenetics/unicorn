@@ -73,6 +73,27 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	return ret;
 }
 
+/**
+ * Gets the basename of a file path.
+ *
+ * @param path The full path string.
+ * @return A pointer to the basename part of the path, or the original
+ * path if no path separator is found. Returns an empty string
+ * if the path is NULL or empty.
+ */
+static const char* get_basename(const char *path) {
+    if (path == NULL || *path == '\0')
+        return NULL;
+    // Find the last occurrence of the path separator '/'
+    const char *last_slash = strrchr(path, '/');
+    if (last_slash == NULL)
+        // No slash found, the whole path is the basename
+        return path;
+    else
+        // Return the character immediately after the slash
+        return last_slash + 1;
+}
+
 void unicorn_bamstat_print(const unicorn_t *u,
                            const unicorn_stat_t *stats,
                            FILE *fp)
@@ -82,8 +103,9 @@ void unicorn_bamstat_print(const unicorn_t *u,
     //fprintf(fp, STATSTR);
     //float breath = v.REFCOVB/(double)v.REFLEN;
     //float expbreath =  1.0f - expf(-breath); 
+    const char *basename = get_basename(u->ifile);
     fprintf(fp, "%s\t%lu\t%lu\t%f\t%f\t%u\t%u\n",
-                 u->ifile,//1
+                 basename,//1
                  stats->_nalns,                                   //2
                  stats->_nreads,
 								 stats->_mrlen,
@@ -118,26 +140,7 @@ void unicorn_bamstat_print(const unicorn_t *u,
     //}
 }
 
-/**
- * Gets the basename of a file path.
- *
- * @param path The full path string.
- * @return A pointer to the basename part of the path, or the original
- * path if no path separator is found. Returns an empty string
- * if the path is NULL or empty.
- */
-static const char* get_basename(const char *path) {
-    if (path == NULL || *path == '\0')
-        return NULL;
-    // Find the last occurrence of the path separator '/'
-    const char *last_slash = strrchr(path, '/');
-    if (last_slash == NULL)
-        // No slash found, the whole path is the basename
-        return path;
-    else
-        // Return the character immediately after the slash
-        return last_slash + 1;
-}
+
 
 void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
 														const char *fname)
