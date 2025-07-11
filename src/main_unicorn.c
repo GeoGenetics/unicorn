@@ -68,7 +68,8 @@ static void unicorn_usage(FILE *fp)
             //"                  # alingments, ANI, GC, etc.\n"
             "  refstats    Compute per reference statistics such as\n"\
             "                  # alignments, # reads, mean read length, etc.\n"\
-            "  bamstats    Compute per bam statistcs.\n");
+            "  bamstats    Compute per bam statistcs.\n"\
+            "  tidstats    Compute per taxid statistics.\n");
 }
 
 static void refstats_usage(FILE *fp)
@@ -98,6 +99,19 @@ static void bamstats_usage(FILE *fp)
             "  --filelist <str> File containing input file paths. One per line.\n"\
             "  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"\
             "                   This will create a files <inputname>.dists.txt\n");
+}
+
+static void tidstats_usage(FILE *fp)
+{
+    fprintf(fp, "./unicorn tidstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
+    fprintf(fp, "Options:\n"\
+            "  -b <str>   input bam|sam|cram\n"\
+            "  -o <str>   output prefix\n"\
+            "  -a <str>   Accession to taxid mapping file.\n"\
+            "  --filelist <str> File containing input file paths. One per line.\n"\
+            "  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"\
+            "                   This will create a files <tid>.dists.txt\n"\
+            "  --dumpacc2tax <str> Write the accession to taxid map to <str>.khash.\n");
 }
 
 /*
@@ -352,6 +366,12 @@ static int unicorn_bamstats(int argc, char **argv)
     return ret;
 }
 
+static int unicorn_tidstats(int argc, char **argv)
+{
+  tidstats_usage(stderr);
+  return -1;
+}
+
 int main(int argc, char **argv)
 {
   fprintf(stderr, "unicorn %s\n", unicorn_version());
@@ -363,6 +383,8 @@ int main(int argc, char **argv)
     return unicorn_bamstats(argc, argv);
   } else if (strcmp(argv[1], "refstats") == 0) {
     return unicorn_refstats(argc, argv);
+  } else if (strcmp(argv[1], "tidstats") == 0) {
+    return unicorn_tidstats(argc, argv);
   } else {
     unicorn_usage(stderr);
     return 0;
