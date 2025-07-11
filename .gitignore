@@ -9,6 +9,8 @@ src/*.o
 src/.DS_Store
 *.dSYM
 src/libunicorn/*.o
-
+.RData
+.Rhistory
 other_code
 testing
+.vscode

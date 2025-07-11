@@ -150,13 +150,14 @@ typedef struct unicorn_stats_t {
   uint64_t _nreads;
   uint64_t _nfreads;
   uint64_t _nfalns;
-  float    _mrlen;  //Mean read length
-  float    _vrlen;  //Variance of read length
-  uint32_t _mdrlen; //Median read length
-  uint32_t _morlen; //Mode read length
-  uint32_t _readlc[256]; //Read length count array
+  float    _mrlen;        //Mean read length
+  float    _vrlen;        //Variance of read length
+  uint32_t _mdrlen;       //Median read length
+  uint32_t _morlen;       //Mode read length
+  uint32_t _readlc[256];  //Read length count array
   floatmap_t *_anihist;   //Alignment ANI histogram
-  float   _meanani; //Mean ANI
+  float   _meanani;       //Mean ANI
+  float   _meannm;        //Mean NM
   //Filters
   uint32_t minnreads; // Minimum number of reads to consider a reference
   uint32_t minref;    // Minimum reference length to consider

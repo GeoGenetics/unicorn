@@ -34,7 +34,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	floatmap_t   *anihist = floatmap_init();
 	uint32_t RLHIST[256] = {0}; //Read length count table
 	//Loop over alignments //TODO refector
-	double meanani = 0.0, delta;
+	double meanani = 0.0, meannm = 0.0, delta;
 	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		if (_unmapped(b)) continue;
 		uint32_t qlen = b->core.l_qseq;
@@ -48,18 +48,21 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 		}
 		nalns++;
 		//Alignment ANI histogram with truncated ANI values
-        uint32_t NM;
-        float ani = _ANINM(b, &NM);
-	    uint32_t ani_trunc = (uint32_t)(ani * 10.0f);
-	    k = floatmap_put(anihist, ani_trunc, &absent);
-	    if (absent) {
+    uint32_t NM;
+    float ani = _ANINM(b, &NM);
+	  uint32_t ani_trunc = (uint32_t)(ani * 10.0f);
+	  k = floatmap_put(anihist, ani_trunc, &absent);
+	  if (absent) {
 			kh_val(anihist, k) = 1;
 			continue;
 		}
-        //ANI mean
-        delta   = ani - meanani;
-        meanani += delta / nalns;                     //Running mean
 		kh_val(anihist, k)++;
+		//ANI mean
+    delta   = ani - meanani;
+    meanani += delta / nalns;
+		//NM mean
+		delta  = NM - meannm;
+		meannm += delta / nalns;
 	}
 	stats->_nalns  = nalns;
 	stats->_nreads = nreads;
@@ -69,7 +72,8 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	stats->_morlen = _udCAMODE(RLHIST, 256);
 	stats->_anihist = anihist;
 	stats->_meanani = meanani;
-    memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
+	stats->_meannm	= meannm;
+	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
 	bam_destroy1(b);
 	refset_destroy(readset);
 	stats->fc = 1;
@@ -85,7 +89,8 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
  * path if no path separator is found. Returns an empty string
  * if the path is NULL or empty.
  */
-static const char* get_basename(const char *path) {
+static const char* get_basename(const char *path)
+{
     if (path == NULL || *path == '\0')
         return NULL;
     // Find the last occurrence of the path separator '/'
@@ -108,15 +113,16 @@ void unicorn_bamstat_print(const unicorn_t *u,
     //float breath = v.REFCOVB/(double)v.REFLEN;
     //float expbreath =  1.0f - expf(-breath); 
     const char *basename = get_basename(u->ifile);
-    fprintf(fp, "%s\t%lu\t%lu\t%f\t%f\t%u\t%u\t%f\n",
-                basename,//1
-                stats->_nalns,                                   //2
+    fprintf(fp, "%s\t%lu\t%lu\t%f\t%f\t%u\t%u\t%f\t%f\n",
+                basename,
+                stats->_nalns,
                 stats->_nreads,
-				stats->_mrlen,
-				sqrtf(stats->_vrlen),
-				stats->_mdrlen,
-				stats->_morlen,
-                stats->_meanani);
+								stats->_mrlen,
+								sqrtf(stats->_vrlen),
+								stats->_mdrlen,
+								stats->_morlen,
+                stats->_meanani,
+								stats->_meannm);
 }
 
 

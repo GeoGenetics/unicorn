@@ -32,6 +32,9 @@ test:
 	[ $$cksum -eq 3158363077 ] || (exit 1)
 	cksum=$$(cksum data/out.stats.txt  | cut -f1 -d ' '); \
 	[ $$cksum -eq 84514074 ] || (exit 1)
+	./unicorn bamstats -b data/test.bam -o data/out
+	cksum=$$(cksum data/out.stats.txt  | cut -f1 -d ' '); \
+	[ $$cksum -eq 3397468444 ] || (exit 1)
 	rm data/out.bam data/out.stats.txt
 
 clean:
