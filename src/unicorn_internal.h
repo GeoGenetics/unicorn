@@ -156,6 +156,7 @@ typedef struct unicorn_stats_t {
   uint32_t _morlen; //Mode read length
   uint32_t _readlc[256]; //Read length count array
   floatmap_t *_anihist;   //Alignment ANI histogram
+  float   _meanani; //Mean ANI
   //Filters
   uint32_t minnreads; // Minimum number of reads to consider a reference
   uint32_t minref;    // Minimum reference length to consider

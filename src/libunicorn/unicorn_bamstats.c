@@ -34,7 +34,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	floatmap_t   *anihist = floatmap_init();
 	uint32_t RLHIST[256] = {0}; //Read length count table
 	//Loop over alignments //TODO refector
-	//double mean, delta;
+	double meanani = 0.0, delta;
 	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		if (_unmapped(b)) continue;
 		uint32_t qlen = b->core.l_qseq;
@@ -56,6 +56,9 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 			kh_val(anihist, k) = 1;
 			continue;
 		}
+        //ANI mean
+        delta   = ani - meanani;
+        meanani += delta / nalns;                     //Running mean
 		kh_val(anihist, k)++;
 	}
 	stats->_nalns  = nalns;
@@ -65,7 +68,8 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	stats->_mdrlen = _udCAMEDIAN(RLHIST, 256, stats->_nreads);
 	stats->_morlen = _udCAMODE(RLHIST, 256);
 	stats->_anihist = anihist;
-	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
+	stats->_meanani = meanani;
+    memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
 	bam_destroy1(b);
 	refset_destroy(readset);
 	stats->fc = 1;
@@ -104,40 +108,15 @@ void unicorn_bamstat_print(const unicorn_t *u,
     //float breath = v.REFCOVB/(double)v.REFLEN;
     //float expbreath =  1.0f - expf(-breath); 
     const char *basename = get_basename(u->ifile);
-    fprintf(fp, "%s\t%lu\t%lu\t%f\t%f\t%u\t%u\n",
-                 basename,//1
-                 stats->_nalns,                                   //2
-                 stats->_nreads,
-								 stats->_mrlen,
-								 sqrtf(stats->_vrlen),
-								 stats->_mdrlen,
-								 stats->_morlen                                 //3
-                  //kh_size(v.READSET),                         //4
-                  //v.REFREADE,                                 //5
-                  //sqrtf(v.REFREADV),                          //6
-                  //v.REFREADD,                                 //7
-                  //v.REFREADO,                                 //8
-                  //v.REFREADMIN,                               //9
-                  //v.REFREADMAX,                               //10
-                  //v.REFALNNM,                                 //11
-                  //v.REFALNANIE,                               //12
-                  //sqrtf(v.REFALNANIV),                        //13
-                  //v.REFALNANID,                               //14
-                  //v.REFCOVB,                                  //15
-                  //v.REFMCOV,                                  //16
-                  //breath,                                     //17
-                  //expbreath,                                  //18
-                  //breath/expbreath,                           //19
-                  //v.REFMONCOV,                                //20
-                  //sqrtf(v.REFVONCOV),                         //21
-                  //sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
-                  //1000.0f * breath,                           //24
-                  //v.REFENTROPY,                               //25
-                  //v.REFGINI,                                  //26        
-                  //v.REFNENTROP,                               //27
-                  //v.REFNGINI
-									);                                //28
-    //}
+    fprintf(fp, "%s\t%lu\t%lu\t%f\t%f\t%u\t%u\t%f\n",
+                basename,//1
+                stats->_nalns,                                   //2
+                stats->_nreads,
+				stats->_mrlen,
+				sqrtf(stats->_vrlen),
+				stats->_mdrlen,
+				stats->_morlen,
+                stats->_meanani);
 }
 
 
