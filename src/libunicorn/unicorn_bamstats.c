@@ -30,7 +30,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	int ret = -2;
   bam1_t *b = bam_init1();
   uint64_t nalns = 0, nreads = 0;
-	_refKHASHC_T *readset = refset_init();
+    _refKHASHC_T *readset = refset_init();
 	floatmap_t   *anihist = floatmap_init();
 	uint32_t RLHIST[256] = {0}; //Read length count table
 	//Loop over alignments //TODO refector
@@ -128,7 +128,7 @@ void unicorn_bamstat_print(const unicorn_t *u,
 
 
 void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
-														const char *fname)
+							const char *fname)
 {
 	const char *basename = get_basename(fname);
 	fprintf(stderr, "[unicorn::%s] Printing distributions to %s.*.dist.txt\n",
