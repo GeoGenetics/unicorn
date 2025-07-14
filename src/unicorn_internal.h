@@ -27,6 +27,7 @@ SOFTWARE.
 
 #include "klib/khashl.h"
 #include "klib/ksort.h"
+#include "klib/kthread.h"
 #include "klib/kvec.h"
 typedef kvec_t(bam1_t)  bamq_t;
 typedef kvec_t(float)    floatq_t;
@@ -48,6 +49,7 @@ static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
     return a.e > b.e; 
 }
 typedef kvec_t(_urangeevent) ueventq_t;
+void unicorn_sorturange(uint32_t n, _urangeevent *a);
 
 typedef struct {
     int  argc;
@@ -158,6 +160,8 @@ typedef struct unicorn_stats_t {
   floatmap_t *_anihist;   //Alignment ANI histogram
   float   _meanani;       //Mean ANI
   float   _meannm;        //Mean NM
+  uint64_t _tlen;         //Total length of all references
+  uint64_t _clen;         //Total length of all covered bases
   //Filters
   uint32_t minnreads; // Minimum number of reads to consider a reference
   uint32_t minref;    // Minimum reference length to consider
@@ -235,3 +239,9 @@ uint32_t _udCAMODE(uint32_t *v, uint32_t n);
   Computes ANI of alignment record, stores edit distance (nm) in *NM
 */
 float _ANINM(bam1_t *b, uint32_t *NM);
+
+void _refcoverage(ueventq_t events, uint64_t l,
+                         uint64_t *covbases, float *meancov,
+                         float *meanoncov, float *varoncov,
+                         float *entropy, float *gini,
+                         float *nentropy, float *ngini);

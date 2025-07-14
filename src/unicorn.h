@@ -104,6 +104,6 @@ uint64_t unicorn_stats_getfrefn( const unicorn_stat_t *stats);
 //Check if a filter has been run through a unicorn object
 uint8_t unicorn_stats_isfiltered(const unicorn_stat_t *stats);
 
-/* B|S manipulation routines */
+/* B|Sam manipulation routines */
 uint8_t unicorn_refstats_filterbam(unicorn_t *u,
                                    unicorn_stat_t *stats);

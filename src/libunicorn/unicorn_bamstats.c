@@ -3,6 +3,18 @@
 #include <unistd.h>
 #include "unicorn_internal.h"
 
+
+
+#define docoverage 1
+
+KHASHL_MAP_INIT(static,
+								covmap_t,
+								covmap,
+								int32_t,   
+								ueventq_t,
+								kh_hash_uint32,
+								kh_eq_generic)
+
 static inline float _CTmean(uint32_t *v)
 {
 		uint32_t sum = 0, count = 0;
@@ -24,13 +36,38 @@ static inline float _CTvar(uint32_t *v, float mean)
 		return count > 1 ? sumsq / (count - 1) : 0.0f;
 }
 
+typedef struct _ktpooldata {
+	sam_hdr_t *hdr;
+	covmap_t *covmap;
+	uint64_t *covbases;
+} _ktpooldata_t;
+
+static void worker_for(void *data, long i, int tid)
+{
+	_ktpooldata_t *d = (_ktpooldata_t *)data;
+	covmap_t *covmap = d->covmap;
+	sam_hdr_t *hdr   = d->hdr;
+	uint64_t covbases;
+	float meancov, meanoncov, varoncov, entropy, gini, nentropy, ngini;
+	if (kh_exist(covmap, i)) {
+		ueventq_t covq = kh_val(covmap, i);
+		unicorn_sorturange(covq.n, covq.a);
+		_refcoverage(covq, hdr->target_len[kh_key(covmap, i)],
+                 &covbases, &meancov, &meanoncov, &varoncov,
+                 &entropy, &gini, &nentropy, &ngini);
+		d->covbases[i] = covbases;
+	}
+}
+
 int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 {
 	if (!u || !stats) return -1;
 	int ret = -2;
   bam1_t *b = bam_init1();
-  uint64_t nalns = 0, nreads = 0;
-    _refKHASHC_T *readset = refset_init();
+	covmap_t *covmap = covmap_init(); 
+	uint64_t nalns = 0, nreads = 0;
+	khint_t k;
+	_refKHASHC_T *readset = refset_init();
 	floatmap_t   *anihist = floatmap_init();
 	uint32_t RLHIST[256] = {0}; //Read length count table
 	//Loop over alignments //TODO refector
@@ -38,7 +75,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		if (_unmapped(b)) continue;
 		uint32_t qlen = b->core.l_qseq;
-		khint_t k, _queryhash = kh_hash_str(bam_get_qname(b));
+		khint_t _queryhash = kh_hash_str(bam_get_qname(b));
 		int absent;
 		refset_put(readset, _queryhash, &absent);
 		if (absent) {
@@ -52,10 +89,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     float ani = _ANINM(b, &NM);
 	  uint32_t ani_trunc = (uint32_t)(ani * 10.0f);
 	  k = floatmap_put(anihist, ani_trunc, &absent);
-	  if (absent) {
-			kh_val(anihist, k) = 1;
-			continue;
-		}
+	  if (absent) kh_val(anihist, k) = 0;
 		kh_val(anihist, k)++;
 		//ANI mean
     delta   = ani - meanani;
@@ -63,6 +97,41 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 		//NM mean
 		delta  = NM - meannm;
 		meannm += delta / nalns;
+		//Coverage
+		if (docoverage) {
+			int32_t tid = b->core.tid;
+			k = covmap_put(covmap, tid, &absent);
+			if (absent) {
+				//New reference, create a new coverage vector
+				kv_init(kh_val(covmap, k));
+			}
+			ueventq_t covq = kh_val(covmap, k);
+			_urangeevent s = {b->core.pos, 1};
+    	_urangeevent e = {bam_endpos(b), 0};
+    	kv_push(_urangeevent, covq, s);
+    	kv_push(_urangeevent, covq, e);
+			kh_val(covmap, k) = covq;
+		}
+	}
+	uint64_t tlen = 0, clen = 0;;
+	//uint64_t covbases;
+	//float meancov, meanoncov, varoncov, entropy, gini, nentropy, ngini;
+	if (docoverage) {
+		//Sort all the event queues and compute coverage metrics
+		//Like a baus
+		_ktpooldata_t d = {0};
+		d.covmap   = covmap;
+		d.hdr      = u->hdr;
+		d.covbases = calloc(kh_end(covmap), sizeof(uint64_t));		
+		void *forpool = kt_forpool_init(8);
+		kt_forpool(forpool, worker_for, &d, kh_end(covmap));
+		kt_forpool_destroy(forpool);
+		//Loop over references
+		kh_foreach(covmap, k) {
+			tlen += u->hdr->target_len[kh_key(covmap, k)];
+			clen += d.covbases[k];
+		}
+		free(d.covbases);
 	}
 	stats->_nalns  = nalns;
 	stats->_nreads = nreads;
@@ -73,6 +142,8 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	stats->_anihist = anihist;
 	stats->_meanani = meanani;
 	stats->_meannm	= meannm;
+	stats->_tlen = tlen;
+	stats->_clen = clen;
 	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
 	bam_destroy1(b);
 	refset_destroy(readset);
@@ -113,7 +184,7 @@ void unicorn_bamstat_print(const unicorn_t *u,
     //float breath = v.REFCOVB/(double)v.REFLEN;
     //float expbreath =  1.0f - expf(-breath); 
     const char *basename = get_basename(u->ifile);
-    fprintf(fp, "%s\t%lu\t%lu\t%f\t%f\t%u\t%u\t%f\t%f\n",
+    fprintf(fp, "%s\t%lu\t%lu\t%f\t%f\t%u\t%u\t%f\t%f\t%lu\t%lu\t%f\n",
                 basename,
                 stats->_nalns,
                 stats->_nreads,
@@ -122,13 +193,15 @@ void unicorn_bamstat_print(const unicorn_t *u,
 								stats->_mdrlen,
 								stats->_morlen,
                 stats->_meanani,
-								stats->_meannm);
+								stats->_meannm,
+								stats->_tlen,
+								stats->_clen,
+								(float)stats->_clen / stats->_tlen);
 }
 
 
 
-void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
-							const char *fname)
+void unicorn_bamstat_pdists(const unicorn_stat_t *stats, const char *fname)
 {
 	const char *basename = get_basename(fname);
 	fprintf(stderr, "[unicorn::%s] Printing distributions to %s.*.dist.txt\n",

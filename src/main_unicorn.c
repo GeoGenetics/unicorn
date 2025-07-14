@@ -287,7 +287,7 @@ static int unicorn_bamstats(int argc, char **argv)
     ofp = fopen(OBUFF, "w");
     if (!ofp) goto exit;
   }
-  fprintf(ofp, "#name\ttaln\ttread\tmreadl\tvreadl\tmdreadl\tmoreadl\tmani\tmnm\n");
+  fprintf(ofp, "#name\ttaln\ttread\tmreadl\tvreadl\tmdreadl\tmoreadl\tmani\tmnm\ttbases\tcovbases\tcovbreath\n");
   ret = -2;
   //Add files to queue
   strq_t fileq = {0};

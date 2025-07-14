@@ -1,8 +1,12 @@
 CPP=g++
 CC=gcc
 CFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g -Isrc
+KFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -g
 SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)
+KSRC=src/klib/kthread.c
+KOBJ=src/klib/klib.o
+
 ifndef HTSSRC
 $(info HTSSRC not defined; expecting systemwide htslib instalation)
 else
@@ -20,10 +24,13 @@ endif
 all: libunicorn unicorn
 
 libunicorn: $(OBJ)
-	ar rcs $(@).a $(OBJ)
+	ar rcs $(@).a $(OBJ) $(KOBJ)
 	cp src/unicorn.h .
 
-unicorn: src/main_unicorn.c $(OBJ)
+klib:
+	$(CC) $(KFLAGS) -c -o $(KOBJ) $(KSRC)
+
+unicorn: src/main_unicorn.c $(OBJ) klib
 	$(CC) -o $@ $< libunicorn.a $(HTSIPTH) $(HTSLPTH) -Isrc $(CFLAGS) -lhts -lm
 
 test:

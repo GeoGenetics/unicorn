@@ -6,7 +6,6 @@
 // ksort
 KSORT_INIT(_sfloat, float, ks_lt_generic)
 KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
-KSORT_INIT(_surange, _urangeevent, _eventlt)
 
 //Some private functions
 static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t, float *_ne)
@@ -117,17 +116,17 @@ static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
 * @param events - Event kvec queue
 * @param l      - Reference sequence length
 */
-static void _refcoverage(ueventq_t events, uint64_t l,
-                         uint64_t *covbases, float *meancov,
-                         float *meanoncov, float *varoncov,
-                         float *entropy, float *gini,
-                         float *nentropy, float *ngini)
+void _refcoverage(ueventq_t events, uint64_t l,
+                  uint64_t *covbases, float *meancov,
+                  float *meanoncov, float *varoncov,
+                  float *entropy, float *gini,
+                  float *nentropy, float *ngini)
 {
     // Handle the edge case of no events
     if ( !events.n || !l) {
-        *covbases = 0;
-        *meancov  = 0.0;
-        return;
+      *covbases = 0;
+      *meancov  = 0.0;
+      return;
     }
     // Cov frequency map for entropy and gini computation
     _covhistKHASH_T *covhist = covhist_init();
@@ -209,7 +208,7 @@ static void _refmapstats(unicorn_stat_t *stats)
     kh_val(refmap, k).REFREADO   = _udCAMODE(aRLEN, 256);
     kv_destroy(aANI);
     //Get coverage values
-    ks_introsort(_surange, aEVENT.n, aEVENT.a);
+    unicorn_sorturange(aEVENT.n, aEVENT.a);
     uint64_t covbases;
     float    meancov, meanoncov, varoncov, entropy, gini, nent, ngini;
     _refcoverage(aEVENT, kh_val(refmap, k).REFLEN,
@@ -314,60 +313,6 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
   ret = 0;
   exit:
     return ret;
-}
-
-void unicorn_stat_destroy(unicorn_stat_t *stats)
-{
-  if (stats) {
-    if (stats->_refmap) {
-      khint_t k;
-      // Destroy read set for each reference
-      kh_foreach(stats->_refmap, k) {
-        _refSTAT_T v = kh_val(stats->_refmap, k);
-        if (v.READSET)
-          refset_destroy(v.READSET);
-        //kv_destroy(v.aANI);
-        //kv_destroy(v.aEVENT);
-      }
-      refmap_destroy(stats->_refmap);
-    }
-    if (stats->_anihist) floatmap_destroy(stats->_anihist);
-    free(stats);
-  }
-}
-
-unicorn_stat_t *unicorn_stat_init(const char *_statstr,
-                                  uint32_t minnreads,
-                                  uint32_t minrefl)
-{
-    unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
-    if (!stats) return NULL;
-    // Parse the statstr and set the corresponding flags
-    if (_statstr) {
-      char *statstr = strdup(_statstr);
-      char *token = strtok(statstr, ",");
-      uint8_t flg = 0;
-      while (token) {
-          if (strcmp(token, "RefLen") == 0)
-              stats->REFLEN = flg = 1;
-          else if (strcmp(token, "RefNReads") == 0)
-              stats->REFNREADS = flg = 1;
-          else if (strcmp(token, "RefNAlns") == 0)
-              stats->REFNALNS = flg = 1;
-          token = strtok(NULL, ",");
-      }
-      if (!flg) {
-          free(statstr);
-          free(stats);
-          return NULL;
-      }
-      free(statstr);
-    }
-    stats->_refmap = refmap_init();
-    stats->minnreads = minnreads;
-    stats->minref    = minrefl;
-    memset(stats->_readlc, 0, 256*sizeof(uint32_t));
-    return stats;
 }
 
 //TODO: Move to another compile unit
