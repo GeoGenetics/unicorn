@@ -15,10 +15,11 @@ OBJ=$(SRC:.c=.o)
 KSRC=src/klib/kthread.c
 KOBJ=src/klib/klib.o
 LDFLAGS += $(HTSLIB)
+GIT_COMMIT := $(shell git rev-parse --short HEAD)
 
 .PHONY: clean all
 
-%.o:%.c
+%.o:%.c src/version.h
 	$(CC) -o $(@) $*.c -g -c $(CFLAGS) $(HTSIPTH)
 
 all: klib libunicorn unicorn
@@ -30,8 +31,11 @@ libunicorn: $(OBJ)
 klib:
 	$(CC) $(KFLAGS) -c -o $(KOBJ) $(KSRC) -fPIC
 
-unicorn:src/main_unicorn.c $(OBJ)
+unicorn:src/main_unicorn.c $(OBJ) src/version.h
 	$(CC) -o $@ $< libunicorn.a -Isrc $(CFLAGS) -fPIE $(LDFLAGS) -pie -lhts -lm -lpthread
+
+src/version.h: src/version.h.in
+	sed 's/@GIT_COMMIT@/$(GIT_COMMIT)/' $< > $@
 
 test:
 	./unicorn refstats -b data/test.bam -o data/out

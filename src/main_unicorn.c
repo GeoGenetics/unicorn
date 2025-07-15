@@ -374,7 +374,8 @@ static int unicorn_tidstats(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-  fprintf(stderr, "unicorn %s\n", unicorn_version());
+  fprintf(stderr, "unicorn %s %s\n", unicorn_version(), GIT_COMMIT);
+  fprintf(stderr, "\t%s\n", COMPILE_DATE);
   if (argc < 2) {
     unicorn_usage(stderr);
     return 1;
