@@ -1,0 +1,28 @@
+# conda-recipe/meta.yaml
+package:
+  name: unicorn
+  version: "1.0.0"  # Replace with your project's actual version
+
+source:
+  url: 
+  sha256: 
+
+build:
+  number: 0
+
+requirements:
+  build:
+    - {{ compiler('c') }}  # Specifies the C compiler for the target platform
+    - make                # The 'make' build tool
+
+  host:
+    - htslib >=1.10              # The library to link against during compilation
+
+  run:
+    - htslib >=1.10              # The library needed at runtime by the executable
+
+
+about:
+  home: "https://github.com/GeoGenetics/unicorn"
+  license: MIT
+  summary: "A tool for computing statistics on short read alignments."
