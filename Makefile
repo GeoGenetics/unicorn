@@ -1,37 +1,37 @@
-CPP=g++
-CC=gcc
-CFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g -Isrc
+PREFIX ?= /usr/local
+
+ifeq ($(origin HTSSRC), undefined)
+  HTSINC = -I$(PREFIX)/include
+  HTSLIB = -L$(PREFIX)/lib
+else
+  HTSINC = -I$(HTSSRC)/include
+  HTSLIB = -L$(HTSSRC)/lib
+endif
+
+CFLAGS+=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g -Isrc $(HTSINC)/include -fPIC
 KFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -g
 SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)
 KSRC=src/klib/kthread.c
 KOBJ=src/klib/klib.o
-
-ifndef HTSSRC
-$(info HTSSRC not defined; expecting systemwide htslib instalation)
-else
-HTSIPTH=-I"$(realpath $(HTSSRC)/include)"
-HTSLPTH=-L"$(realpath $(HTSSRC)/lib)"
-$(info htslib include dir is $(HTSIPTH))
-$(info htslib lib dir is $(HTSLPTH))
-endif
+LDFLAGS += $(HTSLIB)
 
 .PHONY: clean all
 
 %.o:%.c
 	$(CC) -o $(@) $*.c -g -c $(CFLAGS) $(HTSIPTH)
 
-all: libunicorn unicorn
+all: klib libunicorn unicorn
 
 libunicorn: $(OBJ)
 	ar rcs $(@).a $(OBJ) $(KOBJ)
 	cp src/unicorn.h .
 
 klib:
-	$(CC) $(KFLAGS) -c -o $(KOBJ) $(KSRC)
+	$(CC) $(KFLAGS) -c -o $(KOBJ) $(KSRC) -fPIC
 
-unicorn: src/main_unicorn.c $(OBJ) klib
-	$(CC) -o $@ $< libunicorn.a $(HTSIPTH) $(HTSLPTH) -Isrc $(CFLAGS) -lhts -lm
+unicorn:src/main_unicorn.c $(OBJ)
+	$(CC) -o $@ $< libunicorn.a -Isrc $(CFLAGS) -fPIE $(LDFLAGS) -pie -lhts -lm -lpthread
 
 test:
 	./unicorn refstats -b data/test.bam -o data/out
@@ -45,5 +45,5 @@ test:
 	rm data/out.bam data/out.stats.txt
 
 clean:
-	rm -f $(OBJ) libunicorn.a unicorn
+	rm -f $(OBJ) libunicorn.a unicorn unicorn.h $(KOBJ) data/out.bam data/out.stats.txt
 

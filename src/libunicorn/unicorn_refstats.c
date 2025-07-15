@@ -1,6 +1,4 @@
 #define _XOPEN_SOURCE 700
-#include <math.h>
-#include <unistd.h>
 #include "unicorn_internal.h"
 
 // ksort
@@ -76,8 +74,6 @@ static inline float _fMEDIAN(float *v, uint32_t n)
     return v[n/2];
   return (v[n/2 - 1] + v[n/2]) / 2.0;
 }
-
-
 
 //TODO change to macro
 static inline uint32_t _udMEDIAN(uint32_t *v, uint32_t n)

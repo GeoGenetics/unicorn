@@ -69,7 +69,7 @@ static void unicorn_usage(FILE *fp)
             "  refstats    Compute per reference statistics such as\n"\
             "                  # alignments, # reads, mean read length, etc.\n"\
             "  bamstats    Compute per bam statistcs.\n"\
-            "  tidstats    Compute per taxid statistics.\n");
+           );//"  tidstats    Compute per taxid statistics.\n");
 }
 
 static void refstats_usage(FILE *fp)
@@ -82,7 +82,7 @@ static void refstats_usage(FILE *fp)
             //"  -s <str1,str2,...>  comma separated list of statistics to compute. [RefLen,RefNReads,RefNAlns]\n"
             //"                      man unicron.1 for all options.\n"
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
-            "      For example \"--minnreads 100\" to filter out references with\n"\
+            "      For example \"--minreads 100\" to filter out references with\n"\
             "      less than 100 reads.\n"\
             "      Available filters:\n"\
             "      - --minrefl  <int>  Minimum reference length to consider [0]\n"\

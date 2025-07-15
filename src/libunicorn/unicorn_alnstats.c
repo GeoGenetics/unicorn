@@ -1,8 +1,5 @@
 #define _XOPEN_SOURCE 700
-#include <htslib/hts.h>
-#include <htslib/sam.h>
-#include <htslib/thread_pool.h>
-
+#include "unicorn_internal.h"
 #include "klib/ketopt.h"
 
 typedef struct unicorn_opts {
