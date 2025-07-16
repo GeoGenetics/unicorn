@@ -8,22 +8,22 @@
 //TODO long options
 #include "klib/ketopt.h"
 #define OPT_STR "b:o:t:s:h"
+#define TIDOPT_STR "b:o:a:n:d:h"
 static ko_longopt_t unicorn_lopts[] = {
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
     { "names",           ko_required_argument, 302 },
     { "nodes",           ko_required_argument, 303 },
     { "acc2tax",         ko_required_argument, 304 },
-    { "edit_dist_min",   ko_required_argument, 305 },
-    { "edit_dist_max",   ko_required_argument, 306 },
-    { "min_mapq",        ko_required_argument, 307 },
     { "minrefl",         ko_required_argument, 308 },
     { "minreads",        ko_required_argument, 309 },
     { "filelist",        ko_required_argument, 310 },
     { "printdists",      ko_no_argument,       311 },
+    { "dumpacc2tax",     ko_required_argument, 312 },
+    { "help",            ko_no_argument,       316 },
+    { "version",         ko_no_argument,       317 },
     { "nodump_bam"  ,    ko_no_argument,       315 },
     { "out",             ko_required_argument, 320 },
-    { "block_size",      ko_required_argument, 321 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -39,6 +39,10 @@ typedef struct unicorn_opts {
   char *ifile;        // Input file (BAM/SAM/CRAM)
   char *statstr;      // Comma separated list of statistics to compute
   char *filel;        // File containing input file paths
+  char *acc2tax;      // Accession to taxid mapping file
+  char *names;        // Taxonomy names file
+  char *nodes;        // Taxonomy nodes file
+  char *dumpacc2tax;  // Dump accession to taxid map to this file
   uint32_t minnreads; // Minimum number of reads to consider  
   uint64_t minrefl;   // Minimum reference length to consider
 } unicorn_opt_t;
@@ -69,7 +73,7 @@ static void unicorn_usage(FILE *fp)
             "  refstats    Compute per reference statistics such as\n"\
             "                  # alignments, # reads, mean read length, etc.\n"\
             "  bamstats    Compute per bam statistcs.\n"\
-           );//"  tidstats    Compute per taxid statistics.\n");
+           "  tidstats    Compute per taxid statistics.\n");
 }
 
 static void refstats_usage(FILE *fp)
@@ -107,11 +111,15 @@ static void tidstats_usage(FILE *fp)
     fprintf(fp, "Options:\n"\
             "  -b <str>   input bam|sam|cram\n"\
             "  -o <str>   output prefix\n"\
-            "  -a <str>   Accession to taxid mapping file.\n"\
+            "  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
+            "                               Providing a .khash file is much faster.\n"\
+            "  -n <str> | --names <str>   Taxonomy names file.\n"\
+            "  -d <str> | --nodes <str>   Taxonomy nodes file\n"\
             "  --filelist <str> File containing input file paths. One per line.\n"\
             "  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"\
             "                   This will create a files <tid>.dists.txt\n"\
-            "  --dumpacc2tax <str> Write the accession to taxid map to <str>.khash.\n");
+            "  --dumpacc2tax <str> Write the accession to taxid map to <str>.khash.\n"\
+            "  -h         print this help message\n");
 }
 
 /*
@@ -368,8 +376,79 @@ static int unicorn_bamstats(int argc, char **argv)
 
 static int unicorn_tidstats(int argc, char **argv)
 {
-  tidstats_usage(stderr);
-  return -1;
+  int c, ret = -1;
+  ketopt_t o = KETOPT_INIT;
+  utax_t *utax = 0;
+  unicorn_opt_t opts = {0};
+  while ( (c = ketopt(&o, argc, argv, 1, TIDOPT_STR, unicorn_lopts)) >= 0 ) {
+    switch(c) {
+      case 'b':
+        break;
+      case 'o':
+        break;
+      case 'a':
+        opts.acc2tax = strdup(o.arg);
+        break;
+      case 'n':
+        opts.names = strdup(o.arg);  
+        break;
+      case 'd':
+        opts.nodes = strdup(o.arg);
+        break;
+      case 'h':
+        tidstats_usage(stdout);
+        return 0;
+      case 302: //names
+        break;
+      case 303: //nodes
+        break;
+      case 304: //acc2tax
+        break;
+      case 310: //filelist
+      break;
+      case 311: //printdists
+        break;
+      case 312: //dumpacc2tax
+        break;
+      case ':':
+        fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
+                        __func__,
+                        argv[ o.ind - 1]);
+        break;
+      case '?':
+        fprintf(stderr, "[unicorn::%s] Unknown option %s\n",
+                        __func__,
+                        argv[ o.ind - 1 ]);
+        break;
+      }
+  }
+  fprintf(stderr, "[unicorn::%s] Options:\n"\
+                  "              acc2tax: %s\n"\
+                  "              names:   %s\n"\
+                  "              nodes:   %s\n",
+                  __func__,
+                  opts.acc2tax ? opts.acc2tax : "NULL",
+                  opts.names ? opts.names : "NULL",
+                  opts.nodes ? opts.nodes : "NULL");
+  //Load taxonomy data
+  utax = unicorn_loadtaxonomy(opts.acc2tax,
+                              opts.names,
+                              opts.nodes,
+                              &ret);
+  if (!utax) goto exit;
+  fprintf(stderr, "[unicorn::%s] Loaded taxonomy with:\n"\
+                  "              %u nodes\n"\
+                  "              %lu accessions\n",
+                  __func__,
+                  unicorn_tax_getnumnodes(utax),
+                  unicorn_tax_getnumaccs(utax));
+  ret = 0;
+  exit:
+    if (ret) {
+      fprintf(stderr, "[unicorn::%s] Error: %d\n", __func__, ret);
+    }
+    if (utax) unicorn_closetaxonomy(utax);
+    return ret;
 }
 
 int main(int argc, char **argv)

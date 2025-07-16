@@ -107,3 +107,42 @@ uint8_t unicorn_stats_isfiltered(const unicorn_stat_t *stats);
 /* B|Sam manipulation routines */
 uint8_t unicorn_refstats_filterbam(unicorn_t *u,
                                    unicorn_stat_t *stats);
+
+/**************************************************** 
+unicorn's taxonomy routines
+
+
+****************************************************/
+
+/*
+unicorn's taxonomy interface
+This is an opaque structure.
+Members and methods are accessed via the unicron_* functions
+*/
+typedef struct utax_t *utax_t;
+
+/*
+    Loads taxonomic data.
+    @param acc2tax - Accession to taxid mapping file
+    @param names   - Taxonomy names file
+    @param nodes   - Taxonomy nodes file
+    @returns - utax_t* on success NULL on error
+*/
+utax_t *unicorn_loadtaxonomy(const char *acc2tax,
+                             const char *names,
+                             const char *nodes,
+							 int *_ret);
+
+void unicorn_closetaxonomy(utax_t *utax);
+
+/*
+    Get the number of nodes in the taxonomy.
+    @param utax - The taxonomy object
+    @returns    - Number of nodes in the taxonomy
+    @note: This is the number of taxonomic nodes, not the number of accessions.
+           Use unicorn_tax_getnumaccs() to get the number of accessions.
+
+*/
+uint32_t unicorn_tax_getnumnodes(const utax_t *utax);
+
+uint64_t unicorn_tax_getnumaccs(const utax_t *utax);

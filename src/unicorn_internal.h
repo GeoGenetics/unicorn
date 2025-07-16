@@ -30,15 +30,17 @@ SOFTWARE.
 #include <htslib/hts.h>
 #include <htslib/thread_pool.h>
 #include <htslib/sam.h>
+#include <htslib/bgzf.h>
 
 #include "klib/khashl.h"
 #include "klib/ksort.h"
 #include "klib/kthread.h"
 #include "klib/kvec.h"
-typedef kvec_t(bam1_t)  bamq_t;
+typedef kvec_t(bam1_t)   bamq_t;
 typedef kvec_t(float)    floatq_t;
 typedef kvec_t(uint32_t) uint32q_t;
 typedef kvec_t(int32_t)  int32q_t;
+typedef kvec_t(char *)   charq_t;
 /*
 ********************************
  * Rango object for coverage computation.

@@ -32,7 +32,7 @@ klib:
 	$(CC) $(KFLAGS) -c -o $(KOBJ) $(KSRC) -fPIC
 
 unicorn:src/main_unicorn.c $(OBJ) src/version.h
-	$(CC) -o $@ $< libunicorn.a -Isrc $(CFLAGS) -fPIE $(LDFLAGS) -pie -lhts -lm -lpthread
+	$(CC) -o $@ $< libunicorn.a -Isrc $(CFLAGS) -fPIE $(LDFLAGS) -pie -lhts -lz -lm -lpthread
 
 src/version.h: src/version.h.in
 	sed 's/@GIT_COMMIT@/$(GIT_COMMIT)/' $< > $@

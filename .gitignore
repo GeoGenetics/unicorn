@@ -14,3 +14,4 @@ src/libunicorn/*.o
 other_code
 testing
 .vscode
+conda/v1.0.0.tar.gz
