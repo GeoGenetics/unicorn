@@ -255,3 +255,34 @@ void _refcoverage(ueventq_t events, uint64_t l,
                          float *entropy, float *gini,
                          float *nentropy, float *ngini);
 
+
+/*
+	khash IO
+*/
+/*
+    Ensemble map for string to int key-value pairs
+*/
+KHASHL_MAP_INIT(static, int2int_t, int2int,
+                uint32_t, uint32_t,
+                kh_hash_uint32, kh_eq_generic)
+KHASHL_MAP_INIT(static, int2chr_t, int2chr,
+                uint32_t, char *,
+                kh_hash_uint32, kh_eq_generic)
+KHASHL_MAP_INIT(static, chr2int_t, chr2int,
+                char *, uint32_t,
+                kh_hash_str, kh_eq_str)
+
+
+typedef struct emap_chr2int_t {
+    chr2int_t **maps;  //Submaps 1<<bits total maps
+    uint8_t   bits;   
+    uint64_t  size;    //Number of elements in the map
+    //Special flags
+    uint8_t   is_ff;   //Was the map loaded from a file?
+    charq_t 	keys;    //key array used in file loading
+} emap_chr2int_t;
+
+/*
+	Write ensemble map to file stream
+*/
+int _emapwrite(emap_chr2int_t *map, BGZF *fp);

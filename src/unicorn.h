@@ -126,14 +126,19 @@ typedef struct utax_t *utax_t;
     @param acc2tax - Accession to taxid mapping file
     @param names   - Taxonomy names file
     @param nodes   - Taxonomy nodes file
-    @returns - utax_t* on success NULL on error
+	  @param _ret    - Pointer to an int to store the return code
+	  @param v       - Verbose mode, print loading messages
+		@returns - utax_t* on success NULL on error
 */
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-							 int *_ret);
+														 int *_ret,
+														 uint8_t v);
 
 void unicorn_closetaxonomy(utax_t *utax);
+
+uint8_t unicorn_dumpacc2tax(utax_t *utax, const char *fn);
 
 /*
     Get the number of nodes in the taxonomy.

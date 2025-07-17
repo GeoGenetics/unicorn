@@ -21,7 +21,8 @@ static ko_longopt_t unicorn_lopts[] = {
     { "filelist",        ko_required_argument, 310 },
     { "printdists",      ko_no_argument,       311 },
     { "dumpacc2tax",     ko_required_argument, 312 },
-    { "help",            ko_no_argument,       316 },
+  	{ "verbose",         ko_no_argument,       313 },  
+		{ "help",            ko_no_argument,       316 },
     { "version",         ko_no_argument,       317 },
     { "nodump_bam"  ,    ko_no_argument,       315 },
     { "out",             ko_required_argument, 320 },
@@ -44,7 +45,8 @@ typedef struct unicorn_opts {
   char *names;        // Taxonomy names file
   char *nodes;        // Taxonomy nodes file
   char *dumpacc2tax;  // Dump accession to taxid map to this file
-  uint32_t minnreads; // Minimum number of reads to consider  
+  uint8_t verbose;    // Verbose mode, 
+	uint32_t minnreads; // Minimum number of reads to consider  
   uint64_t minrefl;   // Minimum reference length to consider
 } unicorn_opt_t;
 
@@ -120,6 +122,7 @@ static void tidstats_usage(FILE *fp)
             "  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"\
             "                   This will create a files <tid>.dists.txt\n"\
             "  --dumpacc2tax <str> Write the accession to taxid map to <str>.khash.\n"\
+            "  --verbose           Prints libunicorn's messages.\n"\
             "  -h         print this help message\n");
 }
 
@@ -408,7 +411,11 @@ static int unicorn_tidstats(int argc, char **argv)
       case 311: //printdists
         break;
       case 312: //dumpacc2tax
+				opts.dumpacc2tax = strdup(o.arg);
         break;
+			case 313: //verbose
+				opts.verbose = 1;
+				break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -429,19 +436,33 @@ static int unicorn_tidstats(int argc, char **argv)
                   opts.acc2tax ? opts.acc2tax : "NULL",
                   opts.names ? opts.names : "NULL",
                   opts.nodes ? opts.nodes : "NULL");
-  //Load taxonomy data
-  utax = unicorn_loadtaxonomy(opts.acc2tax,
+  //Load taxonomy
+	fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
+	utax = unicorn_loadtaxonomy(opts.acc2tax,
                               opts.names,
                               opts.nodes,
-                              &ret);
+                              &ret,
+															opts.verbose);
   if (!utax) goto exit;
   fprintf(stderr, "[unicorn::%s] Loaded taxonomy with:\n"\
                   "              %u nodes\n"\
-                  "              %"PRIu64"accessions\n",
+                  "              %"PRIu64" accessions\n",
                   __func__,
                   unicorn_tax_getnumnodes(utax),
                   unicorn_tax_getnumaccs(utax));
-  ret = 0;
+
+  
+	if (opts.dumpacc2tax) {
+		fprintf(stderr, "[unicorn::%s] Dumping accession map to %s\n",
+										__func__, opts.dumpacc2tax);
+		if (unicorn_dumpacc2tax(utax, opts.dumpacc2tax)) {
+			fprintf(stderr, "[unicorn::%s] ERROR: Failed writing accession map to %s\n",
+											__func__, opts.dumpacc2tax);
+			ret = -1;
+			goto exit;
+		}
+	}
+	ret = 0;
   exit:
     if (ret) {
       fprintf(stderr, "[unicorn::%s] Error: %d\n", __func__, ret);

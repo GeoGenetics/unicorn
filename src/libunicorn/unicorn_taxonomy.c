@@ -5,30 +5,8 @@
 #include "klib/kseq.h"
 KSTREAM_INIT(BGZF*, bgzf_read, 134217728U)
 
-KHASHL_MAP_INIT(static, int2int_t, int2int,
-                uint32_t, uint32_t,
-                kh_hash_uint32, kh_eq_generic)
-KHASHL_MAP_INIT(static, int2chr_t, int2chr,
-                uint32_t, char *,
-                kh_hash_uint32, kh_eq_generic)
-KHASHL_MAP_INIT(static, chr2int_t, chr2int,
-                char *, uint32_t,
-                kh_hash_str, kh_eq_str)
-
 #define EBITS 6U // Number of bits for ensemble maps
 #define MAXLOAD 500000U //For acc2taxid loading
-
-/*
-    Ensemble map for string to int key-value pairs
-*/
-typedef struct emap_chr2int_t {
-    chr2int_t **maps;  //Submaps 1<<bits total maps
-    uint8_t   bits;   
-    uint64_t  size;    //Number of elements in the map
-    //Special flags
-    uint8_t   is_ff;   //Was the map loaded from a file?
-    charq_t 	keys;    //key array used in file loading
-} emap_chr2int_t;
 
 static uint64_t _emapsize(emap_chr2int_t *m)
 {
@@ -320,13 +298,13 @@ static emap_chr2int_t *_csvload(BGZF *fp, uint8_t nthreads)
   p.map      = map;
   p.nthreads = nthreads;
   p.forpool  = forpool;
-  kt_forpool_destroy(forpool);
 	kstring_t kstr = {0};
   kstream_t *ks = ks_init(fp);
 	p.ks = ks;
   ks_getuntil(p.ks, '\n', &kstr, 0);
   p.fp = fp;
   kt_pipeline(3, _accmapP, &p, 3);
+  kt_forpool_destroy(forpool);
 	free(kstr.s);
   ks_destroy(ks);
 	return map;
@@ -379,7 +357,6 @@ static uint8_t tloadaccessions(const char *acc2tax,
 	else {
 		fprintf(stderr, "Should load a csv file\n");
 		utax->accmap =  _csv2_chr2intmap(acc2tax, nthreads);
-		fprintf(stderr, "Map of size: %"PRIu64"\n", _emapsize(utax->accmap));
 	}
 	return 0;
 }
@@ -394,22 +371,24 @@ void unicorn_closetaxonomy(utax_t *utax)
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-														 int *_ret)
+														 int *_ret,
+														 uint8_t v)
 {
 	*_ret = -1;
 	if (!nodes || !acc2tax || !names) return NULL;
 	utax_t *utax = calloc(1, sizeof(utax_t));
-	fprintf(stderr, "Loading nodes\n");
+	if (v) fprintf(stderr, "[libunicorn::%s] Loading nodes\n", __func__);
 	if ( tloadnodes(nodes, utax, _ret) ) goto exit;
-	fprintf(stderr, "Loading names\n");
+	if (v) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);
 	if ( tloadnames(names, utax, _ret) ) goto exit;
 	*_ret = -3;
 	if (kh_size(utax->nodemap) != kh_size(utax->namemap))
 		goto exit;
 	utax->numnodes = kh_size(utax->nodemap);
 	*_ret = -4;
-	fprintf(stderr, "Loading accessions\n");
+	if (v) fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);
 	if (tloadaccessions(acc2tax, utax, 8)) goto exit;
+	utax->numaccs = _emapsize(utax->accmap);
 	*_ret = 0;
 	exit:
 		if (*_ret) {
@@ -417,6 +396,21 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 			utax = NULL;;
 		}
 	return utax;
+}
+
+uint8_t unicorn_dumpacc2tax(utax_t *utax, const char *fn)
+{
+	if (!utax || !fn) return 1;
+	uint8_t ret = 1;
+	emap_chr2int_t *map = utax->accmap;
+	if (!map) return ret;
+	BGZF *fp = bgzf_open(fn, "w9");
+	if (!fp) return ret;
+	if (_emapwrite(map, fp)) goto exit;
+	ret = 0;
+	exit:
+		bgzf_close(fp);
+		return ret;
 }
 
 uint32_t unicorn_tax_getnumnodes(const utax_t *utax)
