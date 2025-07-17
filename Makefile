@@ -1,11 +1,11 @@
 PREFIX ?= /usr/local
 
 ifeq ($(origin HTSSRC), undefined)
-  HTSINC = -I$(PREFIX)/include
-  HTSLIB = -L$(PREFIX)/lib
+  HTSINC = -I$(PREFIX)
+  HTSLIB = -L$(PREFIX)
 else
-  HTSINC = -I$(HTSSRC)/include
-  HTSLIB = -L$(HTSSRC)/lib
+  HTSINC = -I$(HTSSRC)
+  HTSLIB = -L$(HTSSRC)
 endif
 
 CFLAGS+=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g -Isrc $(HTSINC)/include -fPIC
@@ -14,7 +14,7 @@ SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)
 KSRC=src/klib/kthread.c
 KOBJ=src/klib/klib.o
-LDFLAGS += $(HTSLIB)
+LDFLAGS += $(HTSLIB)/lib
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
 
 .PHONY: clean all

@@ -184,7 +184,7 @@ void unicorn_bamstat_print(const unicorn_t *u,
     //float breath = v.REFCOVB/(double)v.REFLEN;
     //float expbreath =  1.0f - expf(-breath); 
     const char *basename = get_basename(u->ifile);
-    fprintf(fp, "%s\t%lu\t%lu\t%f\t%f\t%u\t%u\t%f\t%f\t%lu\t%lu\t%f\n",
+    fprintf(fp, "%s\t%"PRIu64"\t%"PRIu64"\t%f\t%f\t%u\t%u\t%f\t%f\t%"PRIu64"\t%"PRIu64"\t%f\n",
                 basename,
                 stats->_nalns,
                 stats->_nreads,

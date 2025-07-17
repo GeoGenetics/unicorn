@@ -26,6 +26,7 @@ SOFTWARE.
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 #include <htslib/hts.h>
 #include <htslib/thread_pool.h>
@@ -253,3 +254,4 @@ void _refcoverage(ueventq_t events, uint64_t l,
                          float *meanoncov, float *varoncov,
                          float *entropy, float *gini,
                          float *nentropy, float *ngini);
+

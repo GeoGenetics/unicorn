@@ -4,6 +4,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <inttypes.h>
 
 //TODO long options
 #include "klib/ketopt.h"
@@ -208,15 +209,15 @@ static int unicorn_refstats(int argc, char **argv)
   faln  = unicorn_stat_getfaln(stats);
   tread = unicorn_stat_gettread(stats);
   fread = unicorn_stat_getfread(stats);
-  fprintf(stderr, "\t%lu alignments, %lu passed filters (%f)\n",
+  fprintf(stderr, "\t%"PRIu64"alignments, %"PRIu64"passed filters (%f)\n",
                   taln,
                   faln, 
                   (float)faln/taln); 
-  fprintf(stderr, "\t%lu reads, %lu passed filters (%f)\n",
+  fprintf(stderr, "\t%"PRIu64"reads, %"PRIu64"passed filters (%f)\n",
                   tread,
                   fread,
                   (float)fread/tread);
-  fprintf(stderr, "\tout of %lu references (%f)\n",
+  fprintf(stderr, "\tout of %"PRIu64"references (%f)\n",
                   unicorn_stats_getfrefn(stats),
                   (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
@@ -342,10 +343,8 @@ static int unicorn_bamstats(int argc, char **argv)
     uint64_t taln, tread;
     taln  = unicorn_stat_gettaln(stats);
     tread = unicorn_stat_gettread(stats);
-    fprintf(stderr, "\t%lu alignments\n",
-                    taln); 
-    fprintf(stderr, "\t%lu reads\n",
-                    tread);
+    fprintf(stderr, "\t%"PRIu64"alignments\n", taln); 
+    fprintf(stderr, "\t%"PRIu64" reads\n", tread);
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
     fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
     unicorn_bamstat_print(u, stats, ofp);
@@ -438,7 +437,7 @@ static int unicorn_tidstats(int argc, char **argv)
   if (!utax) goto exit;
   fprintf(stderr, "[unicorn::%s] Loaded taxonomy with:\n"\
                   "              %u nodes\n"\
-                  "              %lu accessions\n",
+                  "              %"PRIu64"accessions\n",
                   __func__,
                   unicorn_tax_getnumnodes(utax),
                   unicorn_tax_getnumaccs(utax));

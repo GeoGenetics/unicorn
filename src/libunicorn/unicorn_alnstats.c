@@ -97,7 +97,7 @@ int unicorn_alnstats(int argc, char **argv)
   if (sam_hdr_write(out, hdr)) goto exit;
   fprintf(stderr, "%d reference sequences in header\n", sam_hdr_nref(hdr)); 
   ret = -6;
-  uint64_t naln = 0, waln = 0;
+  uint64_t naln = 0;
   bam1_t *aln = bam_init1();
   while(((ret=sam_read1(in, hdr, aln)))>0){
     naln++;
@@ -109,9 +109,8 @@ int unicorn_alnstats(int argc, char **argv)
       fprintf(stderr, "[unicorn %s] WARINING: Failed to write alignment\n", __func__);
       continue;
     }
-    waln++;
   }
-  fprintf(stderr, "%lu alignments\n", naln);
+  fprintf(stderr, "%"PRIu64" alignments\n", naln);
   bam_destroy1(aln);
   sam_hdr_destroy(hdr);
 

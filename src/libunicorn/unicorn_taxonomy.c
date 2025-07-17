@@ -16,17 +16,18 @@ KHASHL_MAP_INIT(static, chr2int_t, chr2int,
                 kh_hash_str, kh_eq_str)
 
 #define EBITS 6U // Number of bits for ensemble maps
+#define MAXLOAD 500000U //For acc2taxid loading
 
 /*
     Ensemble map for string to int key-value pairs
 */
 typedef struct emap_chr2int_t {
-    chr2int_t **maps; //Submaps 1<<bits total maps
+    chr2int_t **maps;  //Submaps 1<<bits total maps
     uint8_t   bits;   
-    uint64_t  size;   //Number of elements in the map
+    uint64_t  size;    //Number of elements in the map
     //Special flags
-    uint8_t   is_ff; //Was the map loaded from a file?
-    charq_t keys;    //key array used in file loading
+    uint8_t   is_ff;   //Was the map loaded from a file?
+    charq_t 	keys;    //key array used in file loading
 } emap_chr2int_t;
 
 static uint64_t _emapsize(emap_chr2int_t *m)
@@ -97,32 +98,33 @@ static inline void strip(char *line)
 }
 
 //TODO add error communication
-static int2int_t *_loadnodemap(const char *fname)
+static int2int_t *_loadnodemap(const char *fname, int *_ret)
 {
-  int2int_t *map = int2int_init();
+	*_ret = -5;
+	int2int_t *map = int2int_init();
 	gzFile fp = gzopen(fname, "r");
   if (!map || !fp ) return NULL;
-		char buf[4096];
-    char *toks[4];
-    uint32_t taxid, parent, n = 0;
-    int absent;
-    khint_t k;
-    while (gzgets(fp, buf, 4096)) {
-        //Parse data
-        strip(buf);
-        char *saveptr = buf;
-        //Node
-        toks[0] = strpop(&saveptr, '|');
-        //Parent
-        toks[1] = strpop(&saveptr, '|');
-        taxid  = strtoul(toks[0], NULL, 10);
-        parent = strtoul(toks[1], NULL, 10);
-        k = int2int_put(map, taxid, &absent);
-        if (!absent) n++;
-        kh_val(map, k) = parent;
-    }
-    gzclose(fp);
-    return map;
+	char buf[4096];
+	char *toks[4];
+	uint32_t taxid, parent;
+	int absent;
+	khint_t k;
+	while (gzgets(fp, buf, 4096)) {
+		//Parse data
+		strip(buf);
+		char *saveptr = buf;
+		//Node
+		toks[0] = strpop(&saveptr, '|');
+		//Parent
+		toks[1] = strpop(&saveptr, '|');
+		taxid  = strtoul(toks[0], NULL, 10);
+		parent = strtoul(toks[1], NULL, 10);
+		k = int2int_put(map, taxid, &absent);
+		//if (!absent) n++;
+		kh_val(map, k) = parent;
+	}
+	gzclose(fp);
+	return map;
 }
 
 static int2chr_t *_loadtaxnames(const char *fname)
@@ -159,28 +161,30 @@ static int2chr_t *_loadtaxnames(const char *fname)
   return nmap;
 }
 
-static uint8_t tloadnodes(const char *nodes, utax_t *utax)
+static int8_t tloadnodes(const char *nodes, utax_t *utax, int *_ret)
 {
-	// Placeholder for loading nodes from the file
-	// In a real implementation, this would parse the nodes file
-	// and populate the utax structure accordingly.
-	if (!nodes || !utax) return 1; // Error if nodes or utax is NULL
-	int2int_t *map = _loadnodemap(nodes);
-	if (!map) return 1;
+	*_ret = -1;
+	if (!nodes || !utax) goto exit;
+	int2int_t *map = _loadnodemap(nodes, _ret);
+	if (!map) goto exit;
 	utax->nodemap = map;
-	return 0;
+	utax->numnodes = kh_size(map);
+	*_ret = 0;
+	exit:
+		return *_ret;
 }
 
-static uint8_t tloadnames(const char *names, utax_t *utax)
+static int8_t tloadnames(const char *names, utax_t *utax, int *_ret)
 {
-	// Placeholder for loading names from the file
-	// In a real implementation, this would parse the names file
-	// and populate the utax structure accordingly.
-	if (!names || !utax) return 1; // Error if names or utax is NULL
+	*_ret = -6;
+	if (!names || !utax) goto exit; // Error if names or utax is NULL
+	*_ret = -7;
 	int2chr_t *map = _loadtaxnames(names);
-	if (!map) return 1;
+	if (!map) goto exit;
 	utax->namemap = map;
-	return 0;
+	exit:
+		*_ret = 0;
+		return *_ret;
 }
 
 static emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
@@ -211,19 +215,71 @@ static emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
   return map;
 }
 
+static void _forINSERT(void *data, long i, int tid)
+{
+  accmapstep_t *step = (accmapstep_t *)data;
+  const emap_chr2int_t *map = step->map;
+  dataq_t   q         = step->dataq[i];
+  chr2int_t *submap   = map->maps[i];
+  int absent, dup = 0;
+  khint_t k;
+  for (uint32_t j = 0; j < q.n; j++) {
+    data_t a = q.a[j];
+    k = chr2int_put(submap, a.accv, &absent);
+    if (!absent) {
+      if (a.taxid != kh_val(submap, k) ) dup++;
+      continue;
+    }
+    kh_val(submap, k) = a.taxid;
+  }
+  step->dups[i] = dup;
+}
+
+static dataq_t *_loaddqueue(kstream_t *ks, uint8_t bits, uint32_t *_nacc)
+{
+	uint32_t nacc = 0;
+	dataq_t *dataq = NULL;
+	if (!ks) goto exit;
+	dataq = calloc(1U<<bits, sizeof(dataq_t));
+	for (uint8_t i = 0; i < 1U<<bits; i++)
+		kv_resize(data_t, dataq[i], MAXLOAD);
+	kstring_t kstr = {0};
+	char *tok, *key;
+	uint32_t val;
+	uint8_t low;
+	while ( (ks_getuntil(ks, '\n', &kstr, 0)) >= 0 ) {
+		if (kstr.l == 0)
+			break;
+		tok = strtok(kstr.s, "\t\n ");
+		key = strtok(NULL, "\t\n ");
+		tok = strtok(NULL, "\t\n ");
+		val = strtoul(tok, NULL, 10);
+		low = kh_hash_str(key) & ((1U<<bits) - 1);
+		data_t a = {strdup(key), val};
+		kv_push(data_t, dataq[low], a);
+		kstr.l = 0;
+		nacc++;
+		if ( MAXLOAD <= nacc) break;
+ 	}
+	free(kstr.s);
+	exit:
+		*_nacc = nacc;
+		return dataq;
+}
+
 static void *_accmapP(void *shared, int step, void *in)
 {
   accmappipe_t *p = (accmappipe_t *)shared;
-  if      ( 0 == step) { //Load data into vectors
+  if      ( 0 == step) { //Load data into queues
     uint32_t nacc = 0;
     dataq_t *dataq = _loaddqueue(p->ks, EBITS, &nacc);
     if (nacc) {
-        accmapstep_t *step = calloc(1, sizeof(accmapstep_t));
-        step->dataq = dataq;
-        step->n     = nacc;
-        step->map   = p->map;
-        step->dups  = calloc(1U<<EBITS, sizeof(uint32_t));
-        return step;
+        accmapstep_t *stepd = calloc(1, sizeof(accmapstep_t));
+        stepd->dataq = dataq;
+        stepd->n     = nacc;
+        stepd->map   = p->map;
+        stepd->dups  = calloc(1U<<EBITS, sizeof(uint32_t));
+        return stepd;
     }
     for (uint8_t i = 0; i < 1U<<EBITS; i++) {
         dataq_t q = dataq[i];
@@ -231,24 +287,24 @@ static void *_accmapP(void *shared, int step, void *in)
     }
     free(dataq);
   }
-  else if ( 1 == step) {
-    accmapstep_t *step = (accmapstep_t *)in;
+  else if ( 1 == step) { //Insert data into the map
+    accmapstep_t *stepd = (accmapstep_t *)in;
     fflush(stderr);
-    kt_forpool(p->forpool, _forINSERT, step, 1U<<EBITS);
-    return step;
+    kt_forpool(p->forpool, _forINSERT, stepd, 1U<<EBITS);
+    return stepd;
   }
-  else if ( 2 == step) {
-    accmapstep_t *step   = (accmapstep_t *)in;
-    dataq_t *dataq = step->dataq;
+  else if ( 2 == step) { //Free data
+    accmapstep_t *stepd   = (accmapstep_t *)in;
+    dataq_t *dataq = stepd->dataq;
     for (uint8_t i = 0; i < 1U<<EBITS; i++) {
         dataq_t q = dataq[i];
         kv_destroy(q);
     }
     for (uint32_t i = 0; i < 1U<<EBITS; i++)
-        p->ndup += step->dups[i];
-    free(step->dups);
+        p->ndup += stepd->dups[i];
+    free(stepd->dups);
     free(dataq);
-    free(step);
+    free(stepd);
   }
   return 0;
 }
@@ -282,6 +338,7 @@ static emap_chr2int_t *_csv2_chr2intmap(const char *in, uint8_t nthreads)
   emap_chr2int_t *map =  NULL;
   BGZF *fp = bgzf_open(in, "r");
   if (!fp) goto exit; 
+	fprintf(stderr, "About to load\n");
 	map = _csvload(fp, nthreads);
 	if (!map) goto exit;
   ret = 0;
@@ -322,9 +379,9 @@ static uint8_t tloadaccessions(const char *acc2tax,
 	else {
 		fprintf(stderr, "Should load a csv file\n");
 		utax->accmap =  _csv2_chr2intmap(acc2tax, nthreads);
-		fprintf(stderr, "Map of sieze: %lu\n", _emapsize(utax->accmap));
+		fprintf(stderr, "Map of size: %"PRIu64"\n", _emapsize(utax->accmap));
 	}
-	return 1;
+	return 0;
 }
 
 void unicorn_closetaxonomy(utax_t *utax)
@@ -339,30 +396,26 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *nodes,
 														 int *_ret)
 {
-	int ret = -1;
-	if (!nodes) {
-		return NULL;
-	}
+	*_ret = -1;
+	if (!nodes || !acc2tax || !names) return NULL;
 	utax_t *utax = calloc(1, sizeof(utax_t));
 	fprintf(stderr, "Loading nodes\n");
-	if ( tloadnodes(nodes, utax) ) goto exit;
-	ret = -2;
+	if ( tloadnodes(nodes, utax, _ret) ) goto exit;
 	fprintf(stderr, "Loading names\n");
-	if ( tloadnames(names, utax) ) goto exit;
-	ret = -3;
+	if ( tloadnames(names, utax, _ret) ) goto exit;
+	*_ret = -3;
 	if (kh_size(utax->nodemap) != kh_size(utax->namemap))
 		goto exit;
 	utax->numnodes = kh_size(utax->nodemap);
-	ret = -4;
+	*_ret = -4;
 	fprintf(stderr, "Loading accessions\n");
 	if (tloadaccessions(acc2tax, utax, 8)) goto exit;
-	ret = 0;
+	*_ret = 0;
 	exit:
-		if (ret) {
+		if (*_ret) {
 			unicorn_closetaxonomy(utax);
 			utax = NULL;;
 		}
-		*_ret = ret;
 	return utax;
 }
 
