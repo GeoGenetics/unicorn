@@ -49,5 +49,5 @@ test:
 	rm data/out.bam data/out.stats.txt
 
 clean:
-	rm -f $(OBJ) libunicorn.a unicorn unicorn.h $(KOBJ) data/out.bam data/out.stats.txt
+	rm -f $(OBJ) src/version.h libunicorn.a unicorn unicorn.h $(KOBJ) data/out.bam data/out.stats.txt
 

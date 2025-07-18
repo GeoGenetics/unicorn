@@ -11,8 +11,9 @@ KSTREAM_INIT(BGZF*, bgzf_read, 134217728U)
 static uint64_t _emapsize(emap_chr2int_t *m)
 {
   uint64_t s = 0;
-  for (uint8_t i = 0; i < 1U<<m->bits; i++)
-      s += kh_size(m->maps[i]);
+	for (uint8_t i = 0; i < 1U<<m->bits; i++) {
+		s += kh_size(m->maps[i]);
+	}
   m->size = s;
   return s;
 }
@@ -165,34 +166,6 @@ static int8_t tloadnames(const char *names, utax_t *utax, int *_ret)
 		return *_ret;
 }
 
-static emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
-{
-	int ret = -1;   
-	emap_chr2int_t *map = calloc(1, sizeof(emap_chr2int_t));
-  if (!map) goto exit;
-  map->bits = bits;
-  map->maps = (chr2int_t **)calloc(1U<<bits, sizeof(chr2int_t*));
-  if (!map->maps) goto exit;
-  for (uint8_t i = 0; i < 1U<<bits; i++) {
-      map->maps[i] = chr2int_init();
-      if (!map->maps[i]) {
-          for (uint8_t j = 0; j < i; j++)
-              chr2int_destroy(map->maps[j]);
-          goto exit;    
-      }
-  }
-  if (is_ff)
-      map->is_ff = 1;
-  ret = 0;
-	exit:
-		if (ret) {
-			if (map->maps) free(map->maps);
-				free(map);
-				map = NULL;
-		}
-  return map;
-}
-
 static void _forINSERT(void *data, long i, int tid)
 {
   accmapstep_t *step = (accmapstep_t *)data;
@@ -250,7 +223,7 @@ static void *_accmapP(void *shared, int step, void *in)
   accmappipe_t *p = (accmappipe_t *)shared;
   if      ( 0 == step) { //Load data into queues
     uint32_t nacc = 0;
-    dataq_t *dataq = _loaddqueue(p->ks, EBITS, &nacc);
+		dataq_t *dataq = _loaddqueue(p->ks, EBITS, &nacc);
     if (nacc) {
         accmapstep_t *stepd = calloc(1, sizeof(accmapstep_t));
         stepd->dataq = dataq;
@@ -268,7 +241,7 @@ static void *_accmapP(void *shared, int step, void *in)
   else if ( 1 == step) { //Insert data into the map
     accmapstep_t *stepd = (accmapstep_t *)in;
     fflush(stderr);
-    kt_forpool(p->forpool, _forINSERT, stepd, 1U<<EBITS);
+		kt_forpool(p->forpool, _forINSERT, stepd, 1U<<EBITS);
     return stepd;
   }
   else if ( 2 == step) { //Free data
@@ -287,10 +260,11 @@ static void *_accmapP(void *shared, int step, void *in)
   return 0;
 }
 
+//TODO maybe move to unicorn.io?
 static emap_chr2int_t *_csvload(BGZF *fp, uint8_t nthreads)
 {
 	if (!fp) return NULL;
-	emap_chr2int_t *map = _echr2intinit(EBITS, 0); // Initialize with 16 bits	
+	emap_chr2int_t *map = _echr2intinit(EBITS, 0); // Initialize with 6 bits	
 	if (!map) return NULL;
 	// Load the map from data 
   accmappipe_t p = {0};
@@ -303,62 +277,65 @@ static emap_chr2int_t *_csvload(BGZF *fp, uint8_t nthreads)
 	p.ks = ks;
   ks_getuntil(p.ks, '\n', &kstr, 0);
   p.fp = fp;
-  kt_pipeline(3, _accmapP, &p, 3);
+	kt_pipeline(3, _accmapP, &p, 3);
   kt_forpool_destroy(forpool);
 	free(kstr.s);
   ks_destroy(ks);
 	return map;
 }
 
-static emap_chr2int_t *_csv2_chr2intmap(const char *in, uint8_t nthreads)
+static emap_chr2int_t *_csv2_chr2intmap(const char *in,
+																				uint8_t nthreads,
+																				int *ret)
 {
-  uint8_t ret = 1;
+  *ret = 1;
   emap_chr2int_t *map =  NULL;
   BGZF *fp = bgzf_open(in, "r");
   if (!fp) goto exit; 
-	fprintf(stderr, "About to load\n");
 	map = _csvload(fp, nthreads);
+	*ret = 2;
 	if (!map) goto exit;
-  ret = 0;
+  *ret = 0;
   exit:
-		if (ret) {
-			if (map) {
-				map = NULL;
-			}
-		}
-		if (fp)
-      bgzf_close(fp);
+		if (*ret) map = NULL;
+		if (fp) bgzf_close(fp);
 	return map; // Return error for now
 }
 
-static uint8_t _iskhashfp(const char *in)
+/*
+	Load ensemble map from file khash file
+*/
+static emap_chr2int_t *_khash2_chr2intmap(const char *in, int *ret)
+{
+	*ret = 1;
+	BGZF *fp = bgzf_open(in, "r");
+	if (!fp) return NULL;
+	*ret = 0;
+	emap_chr2int_t *map = _io_loadkhash(fp, ret);
+	if (!map) *ret = 20;
+	bgzf_close(fp);
+	return map;
+}
+
+static uint8_t _iskhash(const char *in)
 {
 	uint8_t ret = 0;
 	BGZF *fp = bgzf_open(in, "r");
 	if (!fp) return ret;
-	// A khash file should have a specific header or format
-	// Here we assume that if the first byte is 'K', it is a khash file
-	char header[5] = {0};
-	if (bgzf_read(fp, header, 4) != 4) goto exit; // Read 4 bytes for header
-	if (kh_eq_str(header, "khas")) ret = 1;;
-	exit:
-		bgzf_close(fp);
+	ret = _iskhashfp(fp);
+	bgzf_close(fp);
 	return ret;
 }
 
 static uint8_t tloadaccessions(const char *acc2tax,
 															 utax_t *utax,
-															 uint8_t nthreads)
+															 uint8_t nthreads,
+															 int *ret)
 {
 	if (!acc2tax || !utax) return 1;
-	if (_iskhashfp(acc2tax)) {
-		fprintf(stderr, "Should load a .khash file\n");
-	}
-	else {
-		fprintf(stderr, "Should load a csv file\n");
-		utax->accmap =  _csv2_chr2intmap(acc2tax, nthreads);
-	}
-	return 0;
+	if (_iskhash(acc2tax)) utax->accmap = _khash2_chr2intmap(acc2tax, ret);
+	else utax->accmap =  _csv2_chr2intmap(acc2tax, nthreads, ret);
+	return *ret ? 1 : 0;
 }
 
 void unicorn_closetaxonomy(utax_t *utax)
@@ -371,27 +348,27 @@ void unicorn_closetaxonomy(utax_t *utax)
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-														 int *_ret,
+														 int *ret,
 														 uint8_t v)
 {
-	*_ret = -1;
+	*ret = -1;
 	if (!nodes || !acc2tax || !names) return NULL;
 	utax_t *utax = calloc(1, sizeof(utax_t));
 	if (v) fprintf(stderr, "[libunicorn::%s] Loading nodes\n", __func__);
-	if ( tloadnodes(nodes, utax, _ret) ) goto exit;
+	if ( tloadnodes(nodes, utax, ret) ) goto exit;
 	if (v) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);
-	if ( tloadnames(names, utax, _ret) ) goto exit;
-	*_ret = -3;
+	if ( tloadnames(names, utax, ret) ) goto exit;
+	*ret = -3;
 	if (kh_size(utax->nodemap) != kh_size(utax->namemap))
 		goto exit;
 	utax->numnodes = kh_size(utax->nodemap);
-	*_ret = -4;
+	*ret = -4;
 	if (v) fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);
-	if (tloadaccessions(acc2tax, utax, 8)) goto exit;
+	if (tloadaccessions(acc2tax, utax, 8, ret)) goto exit;
 	utax->numaccs = _emapsize(utax->accmap);
-	*_ret = 0;
+	*ret = 0;
 	exit:
-		if (*_ret) {
+		if (*ret) {
 			unicorn_closetaxonomy(utax);
 			utax = NULL;;
 		}

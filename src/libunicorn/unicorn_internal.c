@@ -99,3 +99,62 @@ unicorn_stat_t *unicorn_stat_init(const char *_statstr,
     memset(stats->_readlc, 0, 256*sizeof(uint32_t));
     return stats;
 }
+
+void _echr2intdel(emap_chr2int_t *map)
+{
+  for (uint8_t i = 0; i < 1U<<map->bits; i++) {
+    chr2int_t *submap = map->maps[i];
+    khint_t k;
+    if (!map->is_ff)    
+        kh_foreach(submap, k)
+            free((void *)kh_key(submap, k));
+    chr2int_destroy(submap);
+  }
+  if (map->is_ff) {
+    if (map->keys) {
+      for (uint8_t i = 0; i < 1U<<map->bits; i++)
+          if (map->keys[i]) free(map->keys[i]);
+      free(map->keys);
+    }
+  }
+  free(map->maps);
+  free(map);
+}
+
+/*
+	Initialize ensemble map for chr to int key-value pairs
+*/
+emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
+{
+	int ret = -1;   
+	emap_chr2int_t *map = calloc(1, sizeof(emap_chr2int_t));
+  if (!map) goto exit;
+  map->bits = bits;
+  map->maps = (chr2int_t **)calloc(1U<<bits, sizeof(chr2int_t*));
+  if (!map->maps) goto exit;
+  for (uint8_t i = 0; i < 1U<<bits; i++) {
+      map->maps[i] = chr2int_init();
+      if (!map->maps[i]) {
+          for (uint8_t j = 0; j < i; j++)
+              chr2int_destroy(map->maps[j]);
+          goto exit;    
+      }
+  }
+  if (is_ff) {
+    map->is_ff = 1;
+    map->keys = (char **)calloc(1U<<bits, sizeof(char *));
+    if (!map->keys) {
+      for (uint8_t i = 0; i < 1U<<bits; i++)
+          chr2int_destroy(map->maps[i]);
+      goto exit;
+    }
+	}
+  ret = 0;
+	exit:
+		if (ret) {
+			if (map->maps) free(map->maps);
+				free(map);
+				map = NULL;
+		}
+  return map;
+}

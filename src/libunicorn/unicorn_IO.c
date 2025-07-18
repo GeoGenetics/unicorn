@@ -194,7 +194,7 @@ static uint8_t _ekhashlwrite(emap_chr2int_t *map, BGZF *fp)
 	//Number of bits in ensemble map
 	if ( bgzf_write(fp, &map->bits, sizeof(uint8_t)) < 0 )
 		goto exit;
-  if ( bgzf_write(fp, &_zero, 8 * sizeof(uint8_t)) < 0 )
+  if ( bgzf_write(fp, &_zero, 1 * sizeof(uint8_t)) < 0 )
 		goto exit;
 	//Number of elements in the map
 	if (bgzf_write(fp, &map->size, sizeof(uint64_t)) < 0 )
@@ -237,7 +237,165 @@ int _emapwrite(emap_chr2int_t *map, BGZF *fp)
       return ret;
 }
 
-emap_chr2int_t *_emapload(BGZF *fp)
+uint8_t _iskhashfp(BGZF *fp)
 {
-	if (!fp) return NULL;
+	char magic[9] = {0};
+	if (bgzf_read(fp, magic, strlen(KHACCMAGIC)) != strlen(KHACCMAGIC))
+		return 0; // Read 4 bytes for header
+	return kh_eq_str(magic, KHACCMAGIC);
+}
+
+static uint8_t _khreadheader(BGZF *fp, chr2int_t *map)
+{   
+	uint8_t ret = 1;
+	char magic[9] = {0};
+	off_t fpos = bgzf_utell(fp) + 8; // Skip the first 8 zero bytes
+	if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;
+	int tmp;
+	if ( (tmp = bgzf_read(fp, magic, 8)) < 0 )        goto exit;
+	fflush(stderr);
+	if ( !kh_eq_str(magic, KHMAGICB) )        goto exit;
+	if ( bgzf_read(fp, &map->bits, sizeof(khint_t)) < 0 )  goto exit;
+	if ( bgzf_read(fp, &map->count, sizeof(khint_t)) < 0 ) goto exit;
+	fpos = bgzf_utell(fp) + 8;
+	if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;
+	memset(magic, 0, 9);
+	if ( bgzf_read(fp, magic, 6) < 0 ) goto exit;
+  if ( !kh_eq_str(magic, KHMAGIC) )  goto exit;
+	ret = 0;
+	exit:
+		return ret;
+}
+
+static uint8_t _khreaduseda(BGZF *fp, chr2int_t *map)
+{
+	int ret = 1;
+	char magic[9] = {0};  
+	off_t fpos;
+	khint_t n_buckets = (khint_t)1U << map->bits;
+	if (bgzf_read(fp,
+                  map->used,
+                  sizeof(khint32_t)*__kh_fsize(n_buckets)) < 0 )
+        goto exit;
+	memset(magic, 0, 9);
+	if ( bgzf_read(fp, magic, 6) < 0 ) goto exit;
+	if ( !kh_eq_str(magic, KHMAGIC) )  goto exit;
+	fpos = bgzf_utell(fp) + 8;
+	if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;
+	ret = 0;
+	exit:
+		return ret;
+}
+
+static char *_khreadkeyval(BGZF *fp, chr2int_t *map)
+{
+	uint8_t ret = 1;
+	char     *keys = NULL;
+	uint32_t *vals = NULL;
+	uint64_t ksize = 0, vsize = 0;
+  uint64_t _k = 0, kpos, vpos;
+  uint32_t _t = 0;
+	khint_t n_buckets = (khint_t)1U << map->bits;
+  if ( bgzf_read(fp, &kpos, sizeof(uint64_t)) < 0 ) goto exit;
+  if ( bgzf_read(fp, &vpos, sizeof(uint64_t)) < 0 ) goto exit;
+  ksize += kpos;
+  vsize += vpos;
+  keys = realloc(keys, ksize);
+  vals = realloc(vals, vsize);
+  char *_keys = keys;
+  uint32_t *_vals = &vals[_t];
+  if ( bgzf_read(fp, _keys, kpos) < 0 ) goto exit;
+  if ( bgzf_read(fp, _vals, vpos) < 0 ) goto exit;
+  off_t fpos = bgzf_utell(fp) + 8; // Skip the zero bytes
+  if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;
+  //Loop over buckets
+  for (khint_t i = 0; i < n_buckets; i++) {
+    //Load key and value data if needed
+    if ( (_k == ksize) && ( _t < map->count ) ) {
+      if ( bgzf_read(fp, &kpos, sizeof(uint64_t)) < 0 ) goto exit;
+      if ( bgzf_read(fp, &vpos, sizeof(uint64_t)) < 0 ) goto exit;
+      ksize += kpos;
+      vsize += vpos;
+      keys = realloc(keys, ksize);
+      vals = realloc(vals, vsize);
+      if (!keys || !vals) goto exit;
+      _keys = keys + _k;
+      _vals = &vals[_t];
+      if ( bgzf_read(fp, _keys, kpos) < 0 ) goto exit;
+      if ( bgzf_read(fp, _vals, vpos) < 0 ) goto exit;
+      fpos = bgzf_utell(fp) + 8; // Skip the zero bytes
+      if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;
+    }
+    //Add data if used bucket
+    if (__kh_used(map->used, i)) {
+      map->keys[i].key = keys + _k;
+      map->keys[i].val = vals[_t];
+      _k += strlen(keys + _k) + 1; // +1 for the null terminator
+      _t++;
+    }
+  }
+  if (map->count != _t) goto exit;
+	char magic[9] = {0};  
+  if (bgzf_read(fp, magic, 8) < 0)   goto exit;
+	if ( !kh_eq_str(magic, KHMAGICE) ) goto exit;
+	ret = 0;
+	exit:
+		if (vals) free(vals);
+		if (ret && keys) {free(keys); keys = NULL;}
+		return keys;
+}
+
+static char *_loadkh(chr2int_t *map, BGZF *fp, int *ret)
+{
+	char *keys     = NULL;
+	*ret = 27; //EOPCODE khash file bad submapheader
+	if ( _khreadheader(fp, map) ) goto exit;
+	khint_t n_buckets = (khint_t)1U << map->bits;
+	map->used = (khint32_t *)calloc( __kh_fsize(n_buckets), sizeof(khint32_t));
+	map->keys = (chr2int_t_m_bucket_t *)calloc(n_buckets, sizeof(chr2int_t_m_bucket_t));
+	if (!map->keys || !map->used) goto exit;
+  //Load used array
+	*ret = 28; //EOPCODE khash file bad used array
+	if ( _khreaduseda(fp, map) ) goto exit;
+  //Load key and value data
+	*ret = 29; //EOPCODE khash file bad key and value data
+	keys = _khreadkeyval(fp, map);
+	if (!keys) goto exit;
+  *ret = 0;
+  exit:
+  	return keys;
+}
+
+emap_chr2int_t *_io_loadkhash(BGZF *fp, int *ret)
+{
+  emap_chr2int_t *map = NULL;
+  uint8_t bits;
+  uint64_t size;
+  off_t fpos;
+	char magic[9] = {0};
+	*ret = 25; //EOPCODE khash file bad header
+	if ( bgzf_read(fp, magic, 8) < 0 )      					goto exit;
+  if (!kh_eq_str(magic, KHACCMAGIC) != 0) 					goto exit;
+  if ( bgzf_read(fp, &bits, sizeof(uint8_t)) < 0 )	goto exit;
+  fpos = bgzf_utell(fp) + 1; // Skip the zero byte
+  if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) 				goto exit;
+  if ( bgzf_read(fp, &size, sizeof(uint64_t)) < 0 ) goto exit;
+  fpos = bgzf_utell(fp) + 8; // Skip the zero bytes
+  if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) 				goto exit;
+	*ret = 26; //EOPCODE khash file bad map init
+	map = _echr2intinit(bits, 1);
+	if (!map) goto exit;
+	for (uint8_t i = 0; i < 1U<<map->bits; i++) {
+		map->keys[i] = _loadkh(map->maps[i], fp, ret);
+  	if ( !map->keys[i] ) goto exit;
+			fpos = bgzf_utell(fp) + 8; // Skip the zero byte
+			if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;    
+  
+	}
+	*ret = 0;
+	exit:
+		if (*ret && map) {
+			_echr2intdel(map);
+		}
+		return map;
 }

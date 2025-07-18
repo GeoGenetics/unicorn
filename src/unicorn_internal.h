@@ -279,10 +279,28 @@ typedef struct emap_chr2int_t {
     uint64_t  size;    //Number of elements in the map
     //Special flags
     uint8_t   is_ff;   //Was the map loaded from a file?
-    charq_t 	keys;    //key array used in file loading
+    char 	    **keys;    //key array used in file loading
 } emap_chr2int_t;
+
+/*
+	Free ensemble map for chr to int key-value pairs
+*/
+void _echr2intdel(emap_chr2int_t *map);
+
+/*
+	Initialize ensemble map for chr to int key-value pairs
+*/
+emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff);
+
 
 /*
 	Write ensemble map to file stream
 */
 int _emapwrite(emap_chr2int_t *map, BGZF *fp);
+
+/*
+	Check if fp is a .khash file
+*/
+uint8_t _iskhashfp(BGZF *fp);
+
+emap_chr2int_t *_io_loadkhash(BGZF *fp, int *ret);
