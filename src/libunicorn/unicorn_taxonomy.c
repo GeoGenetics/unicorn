@@ -382,6 +382,7 @@ uint8_t unicorn_dumpacc2tax(utax_t *utax, const char *fn)
 	emap_chr2int_t *map = utax->accmap;
 	if (!map) return ret;
 	BGZF *fp = bgzf_open(fn, "w9");
+	bgzf_mt(fp, 8, 0);
 	if (!fp) return ret;
 	if (_emapwrite(map, fp)) goto exit;
 	ret = 0;
