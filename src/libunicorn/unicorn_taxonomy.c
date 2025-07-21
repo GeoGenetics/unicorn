@@ -406,6 +406,8 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
 	uint8_t low = kh_hash_str(acc) & ((1U<<map->bits) - 1);
 	chr2int_t *submap = map->maps[low];
 	if (!submap) return -3;
+	fprintf(stderr, "PENE: %s\n", acc);
+	fflush(stderr);
 	khint_t k = chr2int_get(submap, acc);
 	if (k == kh_end(submap)) goto exit; // Not found
 	*absent = 0; // Found

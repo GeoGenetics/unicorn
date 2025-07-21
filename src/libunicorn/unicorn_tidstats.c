@@ -17,8 +17,8 @@ int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
     int32_t tid   = b->core.tid;
 		//get taxid for this reference
 		uint32_t taxid = utax_gettaxid(utax,
-																	u->hdr->target_name[tid],
-																	&absent);
+																	 u->hdr->target_name[tid],
+																	 &absent);
 		if (absent) {nabsent++; continue;}
 		taln++;
 		uint32_t qlen = b->core.l_qseq;
