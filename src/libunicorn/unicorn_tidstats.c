@@ -27,7 +27,7 @@ int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 		if ( k == kh_end(taxmap) ) {
       // New taxid, initialize stats and insert in map
       taxstat.readset = refset_init(); //Unique queryIDs
-      kv_init(taxstat.a_ani);
+      //kv_init(taxstat.a_ani);
       //kv_init(taxstat.aEVENT);
 			taxstat.refset  = refset_init();  //Unique refids
 			taxstat.reflen  = u->hdr->target_len[tid];
@@ -40,8 +40,8 @@ int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
     uint32_t naln = ++taxstat.nalns;
     //Add read name to read set to count number of reads to ref
     khint_t _queryhash = kh_hash_str(bam_get_qname(b));
-    refset_put(taxstat.readset, _queryhash, &absent);
 		float mean, delta;
+		refset_put(taxstat.readset, _queryhash, &absent);
     //mean, median, and variance  Welford's online algorithm
     if (absent) { //Only first instance of query, no counting same read twice
       //Read length mean, variance, median, mode, min, max
@@ -65,7 +65,7 @@ int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 	  //Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
-    kv_push(float, taxstat.a_ani, ani);
+    //kv_push(float, taxstat.a_ani, ani);
     mean = taxstat.alnani_mean;
     delta = ani-mean;
     taxstat.alnani_mean += delta/naln;
@@ -76,7 +76,7 @@ int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
     delta = NM-mean;
     taxstat.alnnm_mean += delta/naln;
     //Don't loose your stats value
-    kh_val(taxmap, k) = taxstat;	
+    kh_val(taxmap, k) = taxstat;
 	}
   if (!taln) goto exit; // No alignments found
 	stats->_nalns = taln;	
@@ -87,6 +87,7 @@ int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 		uint32_t *v_rlen = taxstat.v_rlen;
 		taxstat.readl_median = _udCAMEDIAN(v_rlen, 256, _n);
 		taxstat.readl_mode   = _udCAMODE(v_rlen, 256);
+		kh_val(taxmap, k) = taxstat;
 	}
 	bam_destroy1(b);
   stats->fc = 1;
@@ -108,7 +109,7 @@ void unicorn_taxstat_print(const unicorn_t *u,
 	_taxmap_t *taxmap = (_taxmap_t *)stats->__map;
   kh_foreach(taxmap, k) {
 		taxstat_t taxstat = kh_val(taxmap, k);
-		fprintf(fp, "%u\t%s\t%u\t%lu\t%u\t%.2f\t%f\t%u\t%u\t%u\t%u\t%.2f\t%.2f\t%u\t%lu\n",
+		fprintf(fp, "%u\t%s\t%u\t%lu\t%u\t%.2f\t%.2f\t%u\t%u\t%u\t%u\t%.2f\t%.2f\t%lu\n",
 								kh_key(taxmap, k), 
 								utax_getname(utax, kh_key(taxmap, k)),
 								taxstat.nrefs,
@@ -122,7 +123,6 @@ void unicorn_taxstat_print(const unicorn_t *u,
 								taxstat.readl_max,
 								taxstat.alnani_mean,
 								taxstat.alnnm_mean,
-								taxstat.nrefs,
 								taxstat.reflen
 					);
 	}
