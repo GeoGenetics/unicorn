@@ -310,6 +310,7 @@ static emap_chr2int_t *_khash2_chr2intmap(const char *in, int *ret)
 	*ret = 1;
 	BGZF *fp = bgzf_open(in, "r");
 	if (!fp) return NULL;
+	bgzf_mt(fp, 8, 0);
 	*ret = 0;
 	emap_chr2int_t *map = _io_loadkhash(fp, ret);
 	if (!map) *ret = 20;

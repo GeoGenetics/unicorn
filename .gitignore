@@ -1,3 +1,5 @@
+src/version.h
+tmp
 tmp/*
 vgcore*
 unicorn.h
