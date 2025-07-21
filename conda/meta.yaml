@@ -1,6 +1,6 @@
 {% set name = "enhorning" %}
-{% set version = "1.0.0" %}
-{% set sha256 = "12a94f9d70cad4405ece2b5a402d1af447f040ad8e3f44fb7d0935fb28a8203c" %}
+{% set version = "2.0.0" %}
+{% set sha256 = "c5a0cf7497d056763e1d74ce3429472365be2049e13f88aa9ffc313c6ab9f7f5" %}
 
 package:
   name: {{ name }}
