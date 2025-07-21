@@ -304,3 +304,12 @@ int _emapwrite(emap_chr2int_t *map, BGZF *fp);
 uint8_t _iskhashfp(BGZF *fp);
 
 emap_chr2int_t *_io_loadkhash(BGZF *fp, int *ret);
+
+typedef struct utax_t {
+	uint32_t numnodes; // Number of nodes in the taxonomy
+	uint64_t numaccs;  // Number of accessions in the taxonomy
+	int2int_t *nodemap; // Map of taxid to parent taxid
+	int2chr_t *namemap; // Map of taxid to names
+	emap_chr2int_t *accmap; // Map of accession to taxid
+} utax_t;
+

@@ -151,3 +151,5 @@ uint8_t unicorn_dumpacc2tax(utax_t *utax, const char *fn);
 uint32_t unicorn_tax_getnumnodes(const utax_t *utax);
 
 uint64_t unicorn_tax_getnumaccs(const utax_t *utax);
+
+int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax);

@@ -40,13 +40,6 @@ typedef struct accmappipe_t {
     uint32_t ndup; //Number uf duplicate entries in acc2taxid files
 } accmappipe_t;
 
-typedef struct utax_t {
-	uint32_t numnodes; // Number of nodes in the taxonomy
-	uint64_t numaccs;  // Number of accessions in the taxonomy
-	int2int_t *nodemap; // Map of taxid to parent taxid
-	int2chr_t *namemap; // Map of taxid to names
-	emap_chr2int_t *accmap; // Map of accession to taxid
-} utax_t;
 
 // usefull little function to split
 static inline char *strpop(char **str, char split)

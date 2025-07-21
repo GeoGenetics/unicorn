@@ -119,8 +119,8 @@ static void tidstats_usage(FILE *fp)
             "  -n <str> | --names <str>   Taxonomy names file.\n"\
             "  -d <str> | --nodes <str>   Taxonomy nodes file\n"\
             "  --filelist <str> File containing input file paths. One per line.\n"\
-            "  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"\
-            "                   This will create a files <tid>.dists.txt\n"\
+            //"  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"
+            //"                   This will create a files <tid>.dists.txt\n"
             "  --dumpacc2tax <str> Write the accession to taxid map to <str>.khash.\n"\
             "  --verbose           Prints libunicorn's messages.\n"\
             "  -h         print this help message\n");
@@ -379,14 +379,20 @@ static int unicorn_bamstats(int argc, char **argv)
 static int unicorn_tidstats(int argc, char **argv)
 {
   int c, ret = -1;
+  struct timespec start, stop;
+  uint64_t ns;
   ketopt_t o = KETOPT_INIT;
   utax_t *utax = 0;
   unicorn_opt_t opts = {0};
+  unicorn_t *u = NULL;
+  unicorn_stat_t *stats = NULL;
   while ( (c = ketopt(&o, argc, argv, 1, TIDOPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
       case 'b':
+				opts.ifile = strdup(o.arg);
         break;
       case 'o':
+				opts.prefix = strdup(o.arg);
         break;
       case 'a':
         opts.acc2tax = strdup(o.arg);
@@ -407,9 +413,10 @@ static int unicorn_tidstats(int argc, char **argv)
       case 304: //acc2tax
         break;
       case 310: //filelist
-      break;
+				opts.filel = strdup(o.arg);
+				break;
       case 311: //printdists
-        break;
+				break;
       case 312: //dumpacc2tax
 				opts.dumpacc2tax = strdup(o.arg);
         break;
@@ -436,6 +443,12 @@ static int unicorn_tidstats(int argc, char **argv)
                   opts.acc2tax ? opts.acc2tax : "NULL",
                   opts.names ? opts.names : "NULL",
                   opts.nodes ? opts.nodes : "NULL");
+	//Add files to queue
+  strq_t fileq = {0};
+  if (opts.ifile)
+    kv_push(char *, fileq, opts.ifile);
+  if (opts.filel)
+    unicorn_addfilelist(opts.filel, &fileq);
   //Load taxonomy
 	fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
 	utax = unicorn_loadtaxonomy(opts.acc2tax,
@@ -450,7 +463,51 @@ static int unicorn_tidstats(int argc, char **argv)
                   __func__,
                   unicorn_tax_getnumnodes(utax),
                   unicorn_tax_getnumaccs(utax));
-
+	//Loop over files 
+  for (uint32_t i = 0; i < fileq.n; ++i) {
+    //Load bam data via unicorn API
+    fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n",
+                     __func__, fileq.a[i]);
+    u = unicorn_init(opts.threads,
+                     fileq.a[i],
+                     0,
+                     0,
+                     0);
+    if (!u) {
+      fprintf(stderr, "[unicorn::%s] Error: Cannot initialize unicorn with file %s\n",
+                       __func__, fileq.a[i]);
+      continue;
+    };
+    fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
+    ret = -3;
+    //Parse the statistics string and initialize stat object
+    fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
+    stats = unicorn_stat_init(NULL, 0, 0);
+    if (!stats) goto exit;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    if ( (ret = unicorn_tidstat_compute(u, stats, utax)) ) {
+      fprintf(stderr, "[unicorn::%s] Error: Cannot compute statistics for file %s\n",
+                       __func__, fileq.a[i]);
+      unicorn_destroy(u);
+      unicorn_stat_destroy(stats);
+      u = NULL;
+      stats = NULL;
+      continue;
+    }
+    clock_gettime(CLOCK_MONOTONIC, &stop);
+    ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+    uint64_t taln, tread;
+    taln  = unicorn_stat_gettaln(stats);
+    tread = unicorn_stat_gettread(stats);
+    fprintf(stderr, "\t%"PRIu64"alignments\n", taln); 
+    fprintf(stderr, "\t%"PRIu64" reads\n", tread);
+    fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);  
+		unicorn_stat_destroy(stats);
+    stats = NULL;
+    unicorn_destroy(u);
+    u = NULL;
+	}
+	kv_destroy(fileq);
   
 	if (opts.dumpacc2tax) {
 		fprintf(stderr, "[unicorn::%s] Dumping accession map to %s\n",
@@ -464,9 +521,7 @@ static int unicorn_tidstats(int argc, char **argv)
 	}
 	ret = 0;
   exit:
-    if (ret) {
-      fprintf(stderr, "[unicorn::%s] Error: %d\n", __func__, ret);
-    }
+    if (ret) fprintf(stderr, "[unicorn::%s] Error: %d\n", __func__, ret);
     if (utax) unicorn_closetaxonomy(utax);
     return ret;
 }
