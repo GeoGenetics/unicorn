@@ -201,7 +201,7 @@ static void _refmapstats(unicorn_stat_t *stats)
     kh_val(refmap, k).REFALNANID = _fMEDIAN(aANI.a, aANI.n);
     //read length median and mode are computed from a count array
     kh_val(refmap, k).REFREADD = _udCAMEDIAN(aRLEN, 256, _n);
-    kh_val(refmap, k).REFREADO   = _udCAMODE(aRLEN, 256);
+    kh_val(refmap, k).REFREADO = _udCAMODE(aRLEN, 256);
     kv_destroy(aANI);
     //Get coverage values
     unicorn_sorturange(aEVENT.n, aEVENT.a);

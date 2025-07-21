@@ -138,25 +138,70 @@ typedef struct _refSTAT_T {
   //rehead members
   int32_t      _ntid;        // New Reference sequence ID
 } _refSTAT_T;
+
+typedef struct taxstat_t {
+  uint32_t     nrefs;    //Number of references in the taxon
+  uint64_t     reflen;   // sum of reference lengths
+  uint64_t     nalns;    // Number of alignments mapped to the reference
+  //Read length data
+  float        readl_mean;   // Mean read length
+  float        readl_var;    // Read length variance
+  uint32_t     readl_median;   // Read length median
+  uint32_t     readl_mode;   // Read length mode
+  float        _M;         // Sum of squares of difference from mean
+  uint32_t     readl_min;
+  uint32_t     readl_max;
+  _refKHASHC_T *readset;   // Hash set of read IDs mapped to the reference
+  _refKHASHC_T *refset;
+  //Alignment data
+  float        alnnm_mean;   // mean edit distance
+  float        alnani_mean; // mean Average nucleotide identity(ANI)
+  float        alnani_var; // variance ANI
+  float        alnani_median; // median ANI
+  float        alnani_mode; // Mode ANI
+  float        _MANI;      // See _M
+  //Coverage
+  uint64_t     REFCOVB;    // number of covered bases
+  float        REFMCOV;    // mean cov
+  float        REFMONCOV;  // Mean coverage of covered bases
+  float        REFVONCOV;  // Variance of coverage of covered bases
+  float        REFENTROPY; // Coverage entropy
+  float        REFGINI;    // Coverage Gini coefficient
+  float        REFNENTROP; // Normalized coverage entropy
+  float        REFNGINI;   // Normalized coverage Gini coefficient
+  //Data arrays
+  floatq_t     a_ani;
+  //uint32q_t    aRLEN;
+  uint32_t     v_rlen[256]; //Count array of read lengths
+  ueventq_t    aEVENT;     // For coverage computation
+  //rehead members
+  int32_t      _ntid;        // New Reference sequence ID
+} taxstat_t;
+
 KHASHL_MAP_INIT(static,                        //Scope
                 _refKHASH_T, refmap,           //type and prefix
                 int32_t, _refSTAT_T,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
-                #define kh_range_hash(r) kh_hash_dummy((r).qhash)
+#define kh_range_hash(r) kh_hash_dummy((r).qhash)
+KHASHL_MAP_INIT(static,                        //Scope
+                _taxmap_t, taxmap,           //type and prefix
+                int32_t, taxstat_t,           //key and value types 
+                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
 KHASHL_MAP_INIT(static,                        //Scope
                 floatmap_t, floatmap,           //type and prefix
                 uint32_t, uint64_t,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
 typedef struct unicorn_stats_t {
   //Statistics to compute  
-  uint64_t REFLEN:   1;
-  uint64_t REFNREADS:1;
-  uint64_t REFNALNS: 1;
-  uint64_t RESERVED:61; // Reserved for future use
+  //uint64_t REFLEN:   1;
+  //uint64_t REFNREADS:1;
+  //uint64_t REFNALNS: 1;
+  //uint64_t RESERVED:61; // Reserved for future use
   //Flags
   uint8_t fc: 1;          //Filter computed flag
   //Data
   _refKHASH_T *_refmap; // Hash table for reference statistics
+  void *__map; // Stat map to use, either _refmap or _taxmap
   uint64_t _nalns;
   uint64_t _nreads;
   uint64_t _nfreads;
@@ -203,28 +248,6 @@ typedef struct unicorn_stats_t {
                 "gini\t"\
                 "n_entropy\t"\
                 "n_gini\n"
-/* unicorn statistics
-1. Id
-2. Length
-3. n_alns
-4. n_reads
-5. m_readl
-6. std_readl
-7. md_readl
-8. mo_readl
-9. readl_min
-10. readl_max
-11. m_alnnm
-12. m_alnani
-13. std_alnani
-14. md_alnani
-15. n_covbases
-16. m_cov
-17. breath_cov
-18. m_covcovered
-19. std_covcovered
-20. evenness_cov
-*/
 
 /*
   Computes median from a count array.
@@ -269,7 +292,7 @@ KHASHL_MAP_INIT(static, int2chr_t, int2chr,
                 uint32_t, char *,
                 kh_hash_uint32, kh_eq_generic)
 KHASHL_MAP_INIT(static, chr2int_t, chr2int,
-                char *, uint32_t,
+                const char *, uint32_t,
                 kh_hash_str, kh_eq_str)
 
 
@@ -313,3 +336,6 @@ typedef struct utax_t {
 	emap_chr2int_t *accmap; // Map of accession to taxid
 } utax_t;
 
+uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);
+
+const char *utax_getname(utax_t *utax, uint32_t taxid);

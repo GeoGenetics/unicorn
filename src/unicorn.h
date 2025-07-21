@@ -74,7 +74,8 @@ void unicorn_refstat_destroy(unicorn_stat_t *stats);
 */
 unicorn_stat_t *unicorn_stat_init(const char *statstr,
                                         uint32_t minnreads,
-                                        uint32_t minrefl);
+                                        uint32_t minrefl,
+                                    uint8_t flg);
 void unicorn_stat_destroy(unicorn_stat_t *stats);
 
 /* Compute reference statistics */
@@ -153,3 +154,8 @@ uint32_t unicorn_tax_getnumnodes(const utax_t *utax);
 uint64_t unicorn_tax_getnumaccs(const utax_t *utax);
 
 int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax);
+
+void unicorn_taxstat_print(const unicorn_t *u,
+                           const unicorn_stat_t *stats,
+                           FILE *fp,
+                           utax_t *utax);

@@ -22,6 +22,7 @@ typedef struct data_t {
     char *accv;
     uint32_t taxid;
 } data_t;
+
 typedef kvec_t(data_t) dataq_t;
 
 typedef struct accmapstep_t {
@@ -393,4 +394,32 @@ uint32_t unicorn_tax_getnumnodes(const utax_t *utax)
 uint64_t unicorn_tax_getnumaccs(const utax_t *utax)
 {
 	return utax ? utax->numaccs : 0;		
+}
+
+uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
+{
+	*absent = 1;
+	uint32_t ret = -1;
+	if (!utax || !acc) goto exit;
+	emap_chr2int_t *map = utax->accmap;
+	if (!map) goto exit;
+	uint8_t low = kh_hash_str(acc) & ((1U<<map->bits) - 1);
+	chr2int_t *submap = map->maps[low];
+	if (!submap) return -3;
+	khint_t k = chr2int_get(submap, acc);
+	if (k == kh_end(submap)) goto exit; // Not found
+	*absent = 0; // Found
+	ret = kh_val(submap, k);
+	exit:
+		return ret; 
+}
+
+const char *utax_getname(utax_t *utax, uint32_t taxid)
+{
+	if (!utax) return NULL;
+	int2chr_t *map = utax->namemap;
+	if (!map) return NULL;
+	khint_t k = int2chr_get(map, taxid);
+	if (k == kh_end(map)) return NULL; // Not found
+	return kh_val(map, k); // Return name
 }

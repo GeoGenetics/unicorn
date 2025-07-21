@@ -198,7 +198,7 @@ static int unicorn_refstats(int argc, char **argv)
   ret = -3;
   //Parse the statistics string and initialize stat object
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-  stats = unicorn_stat_init(opts.statstr, opts.minnreads, opts.minrefl);
+  stats = unicorn_stat_init(opts.statstr, opts.minnreads, opts.minrefl, 0);
   if (!stats) goto exit;
   ret = -4; 
   //Compute statistics
@@ -327,7 +327,7 @@ static int unicorn_bamstats(int argc, char **argv)
     ret = -3;
     //Parse the statistics string and initialize stat object
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(NULL, 0, 0);
+    stats = unicorn_stat_init(NULL, 0, 0, 0);
     if (!stats) goto exit;
     ret = -4; 
     //Compute statistics
@@ -346,7 +346,7 @@ static int unicorn_bamstats(int argc, char **argv)
     uint64_t taln, tread;
     taln  = unicorn_stat_gettaln(stats);
     tread = unicorn_stat_gettread(stats);
-    fprintf(stderr, "\t%"PRIu64"alignments\n", taln); 
+    fprintf(stderr, "\t%"PRIu64" alignments\n", taln); 
     fprintf(stderr, "\t%"PRIu64" reads\n", tread);
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
     fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
@@ -386,6 +386,8 @@ static int unicorn_tidstats(int argc, char **argv)
   unicorn_opt_t opts = {0};
   unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
+  char OBUFF[516] = {0};
+  FILE *ofp = NULL;
   while ( (c = ketopt(&o, argc, argv, 1, TIDOPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
       case 'b':
@@ -443,7 +445,14 @@ static int unicorn_tidstats(int argc, char **argv)
                   opts.acc2tax ? opts.acc2tax : "NULL",
                   opts.names ? opts.names : "NULL",
                   opts.nodes ? opts.nodes : "NULL");
-	//Add files to queue
+	if (!opts.prefix) ofp = stdout;
+  else {
+    strcpy(OBUFF, opts.prefix);
+    strcat(OBUFF, ".stats.txt");
+    ofp = fopen(OBUFF, "w");
+    if (!ofp) goto exit;
+  }
+  //Add files to queue
   strq_t fileq = {0};
   if (opts.ifile)
     kv_push(char *, fileq, opts.ifile);
@@ -480,9 +489,8 @@ static int unicorn_tidstats(int argc, char **argv)
     };
     fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
     ret = -3;
-    //Parse the statistics string and initialize stat object
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(NULL, 0, 0);
+    stats = unicorn_stat_init(NULL, 0, 0, 1);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_tidstat_compute(u, stats, utax)) ) {
@@ -499,10 +507,12 @@ static int unicorn_tidstats(int argc, char **argv)
     uint64_t taln, tread;
     taln  = unicorn_stat_gettaln(stats);
     tread = unicorn_stat_gettread(stats);
-    fprintf(stderr, "\t%"PRIu64"alignments\n", taln); 
+    fprintf(stderr, "\t%"PRIu64" alignments\n", taln); 
     fprintf(stderr, "\t%"PRIu64" reads\n", tread);
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);  
-		unicorn_stat_destroy(stats);
+		fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
+    unicorn_taxstat_print(u, stats, ofp, utax);
+    unicorn_stat_destroy(stats);
     stats = NULL;
     unicorn_destroy(u);
     u = NULL;
