@@ -13,7 +13,7 @@ int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 	//Loop over alignments //TODO refector
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 	  if (_unmapped(b)) continue;
-    if (_reftooshort(u->hdr, b->core.tid, stats->minref)) continue;
+    if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     int32_t tid   = b->core.tid;
 		//get taxid for this reference
 		uint32_t taxid = utax_gettaxid(utax,
