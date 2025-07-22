@@ -17,8 +17,8 @@ void unicorn_destroy(unicorn_t *u)
             bam_hdr_destroy(u->hdr);
         if (u->_FP)
             hts_close(u->_FP);
-        if (u->p.pool)
-            hts_tpool_destroy(u->p.pool);
+        if (u->p)
+            hts_tpool_destroy(u->p);
         free(u);
     }
 }
@@ -37,9 +37,9 @@ unicorn_t *unicorn_init( int threads,
     u->ifile = strdup(ifile);
     if ( !( u->_FP = hts_open(ifile,"r") ) ) goto exit;
     if (threads > 1) {
-        u->p.pool = hts_tpool_init(threads);
-        if (!u->p.pool) goto exit;
-        hts_set_opt(u->_FP, HTS_OPT_THREAD_POOL, &u->p);
+        u->p = hts_tpool_init(threads);
+        if (!u->p) goto exit;
+        bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0);
     }
     if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
     u->argc = argc;
@@ -300,10 +300,10 @@ static char *_khreadkeyval(BGZF *fp, chr2int_t *map)
   if ( bgzf_read(fp, &vpos, sizeof(uint64_t)) < 0 ) goto exit;
   ksize += kpos;
   vsize += vpos;
-  keys = realloc(keys, ksize);
-  vals = realloc(vals, vsize);
+  keys = malloc(ksize);
+  vals = malloc(vsize);
   char *_keys = keys;
-  uint32_t *_vals = &vals[_t];
+  char *_vals = (char *)&vals[_t];
   if ( bgzf_read(fp, _keys, kpos) < 0 ) goto exit;
   if ( bgzf_read(fp, _vals, vpos) < 0 ) goto exit;
   off_t fpos = bgzf_utell(fp) + 8; // Skip the zero bytes
@@ -320,7 +320,7 @@ static char *_khreadkeyval(BGZF *fp, chr2int_t *map)
       vals = realloc(vals, vsize);
       if (!keys || !vals) goto exit;
       _keys = keys + _k;
-      _vals = &vals[_t];
+      _vals = (char *)&vals[_t];
       if ( bgzf_read(fp, _keys, kpos) < 0 ) goto exit;
       if ( bgzf_read(fp, _vals, vpos) < 0 ) goto exit;
       fpos = bgzf_utell(fp) + 8; // Skip the zero bytes

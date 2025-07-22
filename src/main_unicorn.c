@@ -8,7 +8,7 @@
 
 //TODO long options
 #include "klib/ketopt.h"
-#define OPT_STR "b:o:t:s:h"
+#define REFOPT_STR "b:t:s:h"
 #define TIDOPT_STR "b:o:a:n:d:h"
 static ko_longopt_t unicorn_lopts[] = {
     { "threads",         ko_required_argument, 300 },
@@ -16,6 +16,8 @@ static ko_longopt_t unicorn_lopts[] = {
     { "names",           ko_required_argument, 302 },
     { "nodes",           ko_required_argument, 303 },
     { "acc2tax",         ko_required_argument, 304 },
+    { "outbam",          ko_required_argument, 305 },
+    { "statprefix",      ko_required_argument, 306 },
     { "minrefl",         ko_required_argument, 308 },
     { "minreads",        ko_required_argument, 309 },
     { "filelist",        ko_required_argument, 310 },
@@ -35,9 +37,14 @@ typedef kvec_t(char *) strq_t;
 #include "version.h"
 #include "unicorn.h"
 
+static const char *ERRORS[16] = { 0, "Missing argument(s)",
+                                  "File error", 0};
+
 typedef struct unicorn_opts {
   int  threads;       // Number of threads to use
-  char *prefix;       // Output prefix for results
+  char *outbam;       // Output BAM file
+  char *prefix;
+  char *statprefix;   // Output prefix for statistics
   char *ifile;        // Input file (BAM/SAM/CRAM)
   char *statstr;      // Comma separated list of statistics to compute
   char *filel;        // File containing input file paths
@@ -83,11 +90,10 @@ static void refstats_usage(FILE *fp)
 {
     fprintf(fp, "./unicorn refstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
     fprintf(fp, "Options:\n"\
-            "  -b <str>   input bam|sam|cram\n"\
-            "  -o <str>   output prefix\n"\
-            //"  -t <int>   number of threads [4]\n"
-            //"  -s <str1,str2,...>  comma separated list of statistics to compute. [RefLen,RefNReads,RefNAlns]\n"
-            //"                      man unicron.1 for all options.\n"
+            "  -b <str>   input bam|sam|cram [Required]\n"\
+            "  -t <int>, --threads <int> Number of threads [4]\n"
+            "  --outbam <str> Output BAM file with filtered alignments to <str>.\n"\
+            "  --statprefix <str> Prefix for statistics output file [<prefix>.stats.txt]\n"\
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      For example \"--minreads 100\" to filter out references with\n"\
             "      less than 100 reads.\n"\
@@ -131,13 +137,15 @@ Compute per reference statistics
 */
 static int unicorn_refstats(int argc, char **argv)
 {
-  int c, ret = -1;
+  int c, ret = 1;
   struct timespec start, stop;
   uint64_t ns;
   ketopt_t o = KETOPT_INIT;
   unicorn_opt_t opts = {0};
-  opts.threads = 4;
-  unicorn_t *u = NULL;
+  opts.threads   = 4;
+  opts.minnreads = 1;
+  opts.minrefl   = 0;
+  unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
   char OBUFF[516] = {0};
   FILE *ofp = NULL;
@@ -145,24 +153,30 @@ static int unicorn_refstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   //Read command line options
-  while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
+  while ( (c = ketopt(&o, argc, argv, 1, REFOPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
-      case 'o':
-        opts.prefix = strdup(o.arg);
-        break;
       case 't':
-        opts.threads = atoi(o.arg);
+        opts.threads = strtoul(o.arg, NULL, 10);
         break;
       case 'b':
         opts.ifile = strdup(o.arg);
         break;
-        case 's':
+      case 's':
         opts.statstr = strdup(o.arg);
         break;
       case 'h':
         refstats_usage(stdout);
         ret = 0;
         goto exit;
+      case 300: //threads
+        opts.threads = strtoul(o.arg, NULL, 10);
+        break;
+      case 305: //outbam
+        opts.outbam = strdup(o.arg);
+        break;
+      case 306: //statprefix
+        opts.statprefix = strdup(o.arg);
+        break;
       case 308: //min_length
         opts.minrefl = strtoul(o.arg, NULL, 10);
         break;
@@ -171,26 +185,23 @@ static int unicorn_refstats(int argc, char **argv)
         break;
     }
   }
-  if (!opts.ifile) goto exit;
-  //Set default statistics if not provided
-  if (!opts.statstr)
-    opts.statstr = strdup("RefLen,RefNReads,RefNAlns");
-  if (!opts.prefix) ofp = stdout;
-  else {
-    strcpy(OBUFF, opts.prefix);
+  if (!opts.ifile)  goto exit;
+  ret++;;
+  if (opts.statprefix) {
+    strcpy(OBUFF, opts.statprefix);
     strcat(OBUFF, ".stats.txt");
     ofp = fopen(OBUFF, "w");
-    if (!ofp) goto exit;
   }
-  ret = -2;
-  if (!opts.minnreads)
-    opts.minnreads = 1; //Set default minimum number of alignments to 1, reheads only
+  else ofp = stdout;
+  if (!ofp) goto exit;
+  
+  ret++;
   //Load bam data via unicorn API
   fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__, opts.ifile);
   //TODO simplify call, allow NULL arguments
   u = unicorn_init(opts.threads,
                    opts.ifile,
-                   opts.prefix,
+                   opts.outbam ? opts.outbam : NULL,
                    argc,
                    _argv);
   if (!u) goto exit;
@@ -212,38 +223,41 @@ static int unicorn_refstats(int argc, char **argv)
   faln  = unicorn_stat_getfaln(stats);
   tread = unicorn_stat_gettread(stats);
   fread = unicorn_stat_getfread(stats);
-  fprintf(stderr, "\t%"PRIu64"alignments, %"PRIu64"passed filters (%f)\n",
+  fprintf(stderr, "\t%"PRIu64" alignments, %"PRIu64" passed filters (%f)\n",
                   taln,
                   faln, 
                   (float)faln/taln); 
-  fprintf(stderr, "\t%"PRIu64"reads, %"PRIu64"passed filters (%f)\n",
+  fprintf(stderr, "\t%"PRIu64" reads, %"PRIu64" passed filters (%f)\n",
                   tread,
                   fread,
                   (float)fread/tread);
-  fprintf(stderr, "\tout of %"PRIu64"references (%f)\n",
+  fprintf(stderr, "\tout of %"PRIu64" references (%f)\n",
                   unicorn_stats_getfrefn(stats),
                   (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   unicorn_refstat_print(u, stats, ofp);
-  fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
-  clock_gettime(CLOCK_MONOTONIC, &start);
-  if ( (ret = unicorn_refstats_filterbam(u, stats)) )
-    goto exit;
-  clock_gettime(CLOCK_MONOTONIC, &stop);
-  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+
+  if (opts.outbam) {
+    fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    if ( (ret = unicorn_refstats_filterbam(u, stats)) ) goto exit;
+    clock_gettime(CLOCK_MONOTONIC, &stop);
+    ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+    fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+  }
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     free(_argv[i]);
   ret = 0;
   exit:
-    if (ret < 0) {
-      fprintf(stderr, "[unicorn::%s] Error: %d\n",__func__, ret);
+    if (ret) {
+      fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
       refstats_usage(stderr);
     }
-    if (opts.ifile)   free(opts.ifile);
-    if (opts.statstr) free(opts.statstr);
-    if (opts.prefix)  free(opts.prefix);
+    if (opts.ifile)      free(opts.ifile);
+    if (opts.statstr)    free(opts.statstr);
+    if (opts.outbam)     free(opts.outbam);
+    if (opts.statprefix) free(opts.statprefix);
     if (u)     unicorn_destroy(u);
     if (stats) unicorn_stat_destroy(stats);
     if (ofp)   fclose(ofp);
@@ -267,7 +281,7 @@ static int unicorn_bamstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   //Read command line options
-  while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
+  while ( (c = ketopt(&o, argc, argv, 1, REFOPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
       case 'o':
         opts.prefix = strdup(o.arg);
@@ -540,6 +554,7 @@ int main(int argc, char **argv)
 {
   fprintf(stderr, "unicorn %s %s\n", unicorn_version(), GIT_COMMIT);
   fprintf(stderr, "\t%s\n", COMPILE_DATE);
+  
   if (argc < 2) {
     unicorn_usage(stderr);
     return 1;

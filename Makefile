@@ -8,8 +8,8 @@ else
   HTSLIB = -L$(HTSSRC)
 endif
 
-CFLAGS+=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g -Isrc $(HTSINC)/include -fPIC
-KFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -g
+CFLAGS+=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g3 -Isrc $(HTSINC)/include -fPIC #-fsanitize=address
+KFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -g3 #-fsanitize=address
 SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)
 KSRC=src/klib/kthread.c
@@ -20,7 +20,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD)
 .PHONY: clean all
 
 %.o:%.c src/version.h
-	$(CC) -o $(@) $*.c -g -c $(CFLAGS) $(HTSIPTH)
+	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
 
 all: klib libunicorn unicorn
 

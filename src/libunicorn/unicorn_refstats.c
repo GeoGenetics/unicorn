@@ -242,7 +242,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
   //Loop over alignments //TODO refector
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     if (_unmapped(b)) continue;
-    if (_reftooshort(u->hdr, b->core.tid, stats->minref)) continue;
+    if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
@@ -404,14 +404,11 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   sam_hdr_t *ohdr = NULL;
   sam_hdr_t *_hdr = NULL;
   bam1_t *b = bam_init1();
-  char OBUFF[256] = {0};
-  if (u->prefix) {
-    strcpy(OBUFF, u->prefix);
-    strcat(OBUFF, ".bam");
-  }
-  else
-    strcpy(OBUFF, "/dev/stdout");
-  htsFile *ofp = hts_open(OBUFF, "wb9");
+
+  htsFile *ofp = hts_open(u->prefix, "wb5");
+  if (!ofp) goto exit;
+  if (u->threads > 1)
+    bgzf_thread_pool(ofp->fp.bgzf, u->p, 0);
   //Create new header
   ohdr = _stats2samhdr(stats, u->hdr);
   if ( !ofp || !ohdr ) goto exit;

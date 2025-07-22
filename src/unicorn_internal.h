@@ -67,7 +67,7 @@ typedef struct {
     char *ifile;
     char *prefix; //TODO delete this memeber
     uint32_t minaln; // Minimum number of alignments to consider a reference
-    htsThreadPool p;
+    hts_tpool *p;
     htsFile   *_FP;
     bam_hdr_t *hdr;
 } unicorn_t;
@@ -218,7 +218,7 @@ typedef struct unicorn_stats_t {
   uint64_t _clen;         //Total length of all covered bases
   //Filters
   uint32_t minnreads; // Minimum number of reads to consider a reference
-  uint32_t minref;    // Minimum reference length to consider
+  uint32_t minrefl;    // Minimum reference length to consider
 } unicorn_stat_t;
 
 #define STATSTR "Id\t"\

@@ -102,7 +102,7 @@ unicorn_stat_t *unicorn_stat_init(const char *_statstr,
       default: stats->__map  = 0; break; //Default to no map;
     }
     stats->minnreads = minnreads;
-    stats->minref    = minrefl;
+    stats->minrefl   = minrefl;
     memset(stats->_readlc, 0, 256*sizeof(uint32_t));
     return stats;
 }
