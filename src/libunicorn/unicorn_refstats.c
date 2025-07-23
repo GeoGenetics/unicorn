@@ -404,7 +404,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   sam_hdr_t *ohdr = NULL;
   sam_hdr_t *_hdr = NULL;
   bam1_t *b = bam_init1();
-  htsFile *ofp = hts_open(u->prefix, "wb5");
+  htsFile *ofp = hts_open(u->outbam, "wb5");
   if (!ofp) goto exit;
   if (u->threads > 1)
     bgzf_thread_pool(ofp->fp.bgzf, u->p, 0);
