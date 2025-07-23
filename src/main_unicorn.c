@@ -17,7 +17,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "nodes",           ko_required_argument, 303 },
     { "acc2tax",         ko_required_argument, 304 },
     { "outbam",          ko_required_argument, 305 },
-    { "statprefix",      ko_required_argument, 306 },
+    { "outstat",         ko_required_argument, 306 },
     { "minrefl",         ko_required_argument, 308 },
     { "minreads",        ko_required_argument, 309 },
     { "filelist",        ko_required_argument, 310 },
@@ -43,8 +43,7 @@ static const char *ERRORS[16] = { 0, "Missing argument(s)",
 typedef struct unicorn_opts {
   int  threads;       // Number of threads to use
   char *outbam;       // Output BAM file
-  char *prefix;
-  char *statprefix;   // Output prefix for statistics
+  char *outstat;      // Output statistics file
   char *ifile;        // Input file (BAM/SAM/CRAM)
   char *statstr;      // Comma separated list of statistics to compute
   char *filel;        // File containing input file paths
@@ -83,23 +82,23 @@ static void unicorn_usage(FILE *fp)
             "  refstats    Compute per reference statistics such as\n"\
             "                  # alignments, # reads, mean read length, etc.\n"\
             "  bamstats    Compute per bam statistcs.\n"\
-           "  tidstats    Compute per taxid statistics.\n");
+            "  tidstats    Compute per taxid statistics.\n");
 }
 
 static void refstats_usage(FILE *fp)
 {
     fprintf(fp, "./unicorn refstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
     fprintf(fp, "Options:\n"\
-            "  -b <str>   input bam|sam|cram [Required]\n"\
+            "  -b <str>   Input bam|sam|cram [Required]\n"\
             "  -t <int>, --threads <int> Number of threads [4]\n"
-            "  --outbam <str> Output BAM file with filtered alignments to <str>.\n"\
-            "  --statprefix <str> Prefix for statistics output file [<prefix>.stats.txt]\n"\
+            "  --outbam <str> Output BAM file with filtered alignments.\n"\
+            "  --outstat <str> Output statistics file\n"\
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      For example \"--minreads 100\" to filter out references with\n"\
             "      less than 100 reads.\n"\
             "      Available filters:\n"\
-            "      - --minrefl  <int>  Minimum reference length to consider [0]\n"\
-            "      - --minreads <int>  Minimum number of reads to consider  [1]\n"\
+            "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
+            "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
             "  -h         print this help message\n");
 }
 
@@ -107,8 +106,8 @@ static void bamstats_usage(FILE *fp)
 {
     fprintf(fp, "./unicorn bamstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
     fprintf(fp, "Options:\n"\
-            "  -b <str>   input bam|sam|cram\n"\
-            "  -o <str>   output prefix\n"\
+            "  -b <str>         Input bam|sam|cram\n"\
+            "  --outstat <str>  Output statistics file\n"\
             "  --filelist <str> File containing input file paths. One per line.\n"\
             "  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"\
             "                   This will create a files <inputname>.dists.txt\n");
@@ -118,18 +117,18 @@ static void tidstats_usage(FILE *fp)
 {
     fprintf(fp, "./unicorn tidstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
     fprintf(fp, "Options:\n"\
-            "  -b <str>   input bam|sam|cram\n"\
-            "  -o <str>   output prefix\n"\
+            "  -b <str>                     Input bam|sam|cram\n"\
+            "  --outstat <str>              Output statistics file\n"\
             "  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
             "                               Providing a .khash file is much faster.\n"\
-            "  -n <str> | --names <str>   Taxonomy names file.\n"\
-            "  -d <str> | --nodes <str>   Taxonomy nodes file\n"\
-            "  --filelist <str> File containing input file paths. One per line.\n"\
-            //"  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"
-            //"                   This will create a files <tid>.dists.txt\n"
-            "  --dumpacc2tax <str> Write the accession to taxid map to <str>.khash.\n"\
-            "  --verbose           Prints libunicorn's messages.\n"\
-            "  -h         print this help message\n");
+            "  -n <str> | --names <str>     Taxonomy names file.\n"\
+            "  -d <str> | --nodes <str>     Taxonomy nodes file\n"\
+            "  --filelist <str>             File containing input file paths. One per line.\n"\
+            //"  --printdists                 Print distributions of read lengths, alignment lengths, etc.\n"
+            //"                               This will create a files <tid>.dists.txt\n"
+            "  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"\
+            "  --verbose                    Prints libunicorn's messages.\n"\
+            "  -h                           Print this help message\n");
 }
 
 /*
@@ -174,8 +173,8 @@ static int unicorn_refstats(int argc, char **argv)
       case 305: //outbam
         opts.outbam = strdup(o.arg);
         break;
-      case 306: //statprefix
-        opts.statprefix = strdup(o.arg);
+      case 306: //outstat
+        opts.outstat = strdup(o.arg);
         break;
       case 308: //min_length
         opts.minrefl = strtoul(o.arg, NULL, 10);
@@ -187,14 +186,12 @@ static int unicorn_refstats(int argc, char **argv)
   }
   if (!opts.ifile)  goto exit;
   ret++;;
-  if (opts.statprefix) {
-    strcpy(OBUFF, opts.statprefix);
-    strcat(OBUFF, ".stats.txt");
-    ofp = fopen(OBUFF, "w");
+  if (opts.outstat){
+    ofp = fopen(opts.outstat, "w");
+    if (!ofp) goto exit;
   }
   else ofp = stdout;
-  if (!ofp) goto exit;
-  
+   
   ret++;
   //Load bam data via unicorn API
   fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__, opts.ifile);
@@ -257,7 +254,7 @@ static int unicorn_refstats(int argc, char **argv)
     if (opts.ifile)      free(opts.ifile);
     if (opts.statstr)    free(opts.statstr);
     if (opts.outbam)     free(opts.outbam);
-    if (opts.statprefix) free(opts.statprefix);
+    if (opts.outstat)    free(opts.outstat);
     if (u)     unicorn_destroy(u);
     if (stats) unicorn_stat_destroy(stats);
     if (ofp)   fclose(ofp);
@@ -284,7 +281,7 @@ static int unicorn_bamstats(int argc, char **argv)
   while ( (c = ketopt(&o, argc, argv, 1, REFOPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
       case 'o':
-        opts.prefix = strdup(o.arg);
+        opts.outstat = strdup(o.arg);
         break;
       case 'b':
         opts.ifile = strdup(o.arg);
@@ -306,11 +303,9 @@ static int unicorn_bamstats(int argc, char **argv)
   }
   if (!opts.ifile && !opts.filel) goto exit;
   //Set default statistics if not provided
-  if (!opts.prefix) ofp = stdout;
+  if (!opts.outstat) ofp = stdout;
   else {
-    strcpy(OBUFF, opts.prefix);
-    strcat(OBUFF, ".stats.txt");
-    ofp = fopen(OBUFF, "w");
+    ofp = fopen(opts.outstat, "w");
     if (!ofp) goto exit;
   }
   fprintf(ofp, "#name\ttaln\ttread\tmreadl\tvreadl\tmdreadl\tmoreadl\tmani\tmnm\ttbases\tcovbases\tcovbreath\n");
@@ -382,8 +377,8 @@ static int unicorn_bamstats(int argc, char **argv)
     }
     if (opts.ifile)   free(opts.ifile);
     if (opts.statstr) free(opts.statstr);
-    if (opts.prefix)  free(opts.prefix);
-    if (opts.filel)  free(opts.filel);
+    if (opts.outstat) free(opts.outstat);
+    if (opts.filel)   free(opts.filel);
     if (u)     unicorn_destroy(u);
     if (stats) unicorn_stat_destroy(stats);
     if (ofp)   fclose(ofp);
@@ -408,7 +403,7 @@ static int unicorn_tidstats(int argc, char **argv)
 				opts.ifile = strdup(o.arg);
         break;
       case 'o':
-				opts.prefix = strdup(o.arg);
+				opts.outstat = strdup(o.arg);
         break;
       case 'a':
         opts.acc2tax = strdup(o.arg);
@@ -459,11 +454,9 @@ static int unicorn_tidstats(int argc, char **argv)
                   opts.acc2tax ? opts.acc2tax : "NULL",
                   opts.names ? opts.names : "NULL",
                   opts.nodes ? opts.nodes : "NULL");
-	if (!opts.prefix) ofp = stdout;
+	if (!opts.outstat) ofp = stdout;
   else {
-    strcpy(OBUFF, opts.prefix);
-    strcat(OBUFF, ".stats.txt");
-    ofp = fopen(OBUFF, "w");
+    ofp = fopen(opts.outstat, "w");
     if (!ofp) goto exit;
   }
   //Add files to queue
