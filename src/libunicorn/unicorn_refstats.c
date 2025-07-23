@@ -404,7 +404,6 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   sam_hdr_t *ohdr = NULL;
   sam_hdr_t *_hdr = NULL;
   bam1_t *b = bam_init1();
-
   htsFile *ofp = hts_open(u->prefix, "wb5");
   if (!ofp) goto exit;
   if (u->threads > 1)
@@ -412,7 +411,6 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   //Create new header
   ohdr = _stats2samhdr(stats, u->hdr);
   if ( !ofp || !ohdr ) goto exit;
-  hts_set_opt(ofp, HTS_OPT_THREAD_POOL, &u->p);
   //Add PG line for this program
   char *pgstr = stringify_argv(u->argc, u->argv);
   sam_hdr_add_pg(ohdr, "unicorn", "CL", pgstr, NULL);

@@ -155,8 +155,8 @@ static int8_t tloadnames(const char *names, utax_t *utax, int *_ret)
 	int2chr_t *map = _loadtaxnames(names);
 	if (!map) goto exit;
 	utax->namemap = map;
+	*_ret = 0;
 	exit:
-		*_ret = 0;
 		return *_ret;
 }
 
@@ -358,7 +358,7 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 		goto exit;
 	utax->numnodes = kh_size(utax->nodemap);
 	*ret = -4;
-	if (v) fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);
+	if (v) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
 	if (tloadaccessions(acc2tax, utax, 8, ret)) goto exit;
 	utax->numaccs = _emapsize(utax->accmap);
 	*ret = 0;
@@ -406,13 +406,12 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
 	uint8_t low = kh_hash_str(acc) & ((1U<<map->bits) - 1);
 	chr2int_t *submap = map->maps[low];
 	if (!submap) return -3;
-	fprintf(stderr, "PENE: %s\n", acc);
-	fflush(stderr);
 	khint_t k = chr2int_get(submap, acc);
 	if (k == kh_end(submap)) goto exit; // Not found
 	*absent = 0; // Found
 	ret = kh_val(submap, k);
 	exit:
+		//fprintf(stderr, "\t%s found\n\n", *absent ? "not" : "");
 		return ret; 
 }
 

@@ -16,6 +16,7 @@ int unicorn_tidstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     int32_t tid   = b->core.tid;
 		//get taxid for this reference
+		//fprintf(stderr, "Let's work with: %s\n", u->hdr->target_name[tid]);
 		uint32_t taxid = utax_gettaxid(utax,
 																	 u->hdr->target_name[tid],
 																	 &absent);
