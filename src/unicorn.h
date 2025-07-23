@@ -69,13 +69,15 @@ unicorn_stat_t *unicorn_refstat_init(const char *statstr,
 void unicorn_refstat_destroy(unicorn_stat_t *stats);
 
 /* Initialize a bamstats object
-    @param statstr - String indicating which statistics to compute
+    @param minnreads - Minimum number of reads per reference
+    @param minrefl   - Minimum length of reference to consider
+    @param flg       - Flag to indicate which map to use:
+                       0 - per reference, 1 - per taxid, other - no map  
     @returns - unicorn_bamstat_t* on success NULL on error
 */
-unicorn_stat_t *unicorn_stat_init(const char *statstr,
-                                        uint32_t minnreads,
-                                        uint32_t minrefl,
-                                    uint8_t flg);
+unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
+                                  uint32_t minrefl,
+                                  uint8_t  flg);
 void unicorn_stat_destroy(unicorn_stat_t *stats);
 
 /* Compute reference statistics */

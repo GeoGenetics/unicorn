@@ -78,8 +78,8 @@ typedef struct {
           ((hdr)->target_len[(tid)] < (minref) ? 1 : 0) 
 
 KHASHL_MAP_INIT(static,
-                _covhistKHASH_T,
-                covhist,
+                int32tin64map_t,
+                int32int64map,
                 uint32_t,
                 uint64_t,
                 kh_hash_uint32,
@@ -102,7 +102,7 @@ KHASHL_SET_INIT(static,               //Scope
  * It is used to compute the statistics for each reference sequence
  * in the BAM file.
 */
-typedef struct _refSTAT_T {
+typedef struct refstat_t {
   uint32_t     REFLEN;     // Length of the reference sequence
   uint64_t     REFNALNS;   // Number of alignments mapped to the reference
   //Read length data
@@ -137,7 +137,7 @@ typedef struct _refSTAT_T {
   ueventq_t    aEVENT;     // For coverage computation
   //rehead members
   int32_t      _ntid;        // New Reference sequence ID
-} _refSTAT_T;
+} refstat_t;
 
 typedef struct taxstat_t {
   uint32_t     nrefs;    //Number of references in the taxon
@@ -179,8 +179,8 @@ typedef struct taxstat_t {
 } taxstat_t;
 
 KHASHL_MAP_INIT(static,                        //Scope
-                _refKHASH_T, refmap,           //type and prefix
-                int32_t, _refSTAT_T,           //key and value types 
+                refmap_t, refmap,           //type and prefix
+                int32_t, refstat_t,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
 KHASHL_MAP_INIT(static,                        //Scope
@@ -192,15 +192,9 @@ KHASHL_MAP_INIT(static,                        //Scope
                 uint32_t, uint64_t,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
 typedef struct unicorn_stats_t {
-  //Statistics to compute  
-  //uint64_t REFLEN:   1;
-  //uint64_t REFNREADS:1;
-  //uint64_t REFNALNS: 1;
-  //uint64_t RESERVED:61; // Reserved for future use
   //Flags
   uint8_t fc: 1;          //Filter computed flag
   //Data
-  _refKHASH_T *_refmap; // Hash table for reference statistics
   void *__map; // Stat map to use, either _refmap or _taxmap
   uint64_t _nalns;
   uint64_t _nreads;
@@ -220,6 +214,17 @@ typedef struct unicorn_stats_t {
   uint32_t minnreads; // Minimum number of reads to consider a reference
   uint32_t minrefl;    // Minimum reference length to consider
 } unicorn_stat_t;
+
+typedef struct _covstats_t {
+  uint64_t covbases;      // Total covered bases
+  float    meancov;       // Mean coverage
+  float    meanoncov;     // Mean coverage on covered bases
+  float    varoncov;      // Variance of coverage on covered bases
+  float    entropy;       // Coverage entropy
+  float    gini;          // Coverage Gini coefficient
+  float    nentropy;      // Normalized entropy
+  float    ngini;         // Normalized Gini coefficient
+} _covstats_t;
 
 #define STATSTR "Id\t"\
                 "Length\t"\
@@ -272,11 +277,7 @@ uint32_t _udCAMODE(uint32_t *v, uint32_t n);
 */
 float _ANINM(bam1_t *b, uint32_t *NM);
 
-void _refcoverage(ueventq_t events, uint64_t l,
-                         uint64_t *covbases, float *meancov,
-                         float *meanoncov, float *varoncov,
-                         float *entropy, float *gini,
-                         float *nentropy, float *ngini);
+void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 
 
 /*

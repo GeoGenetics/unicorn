@@ -206,7 +206,7 @@ static int unicorn_refstats(int argc, char **argv)
   ret = -3;
   //Parse the statistics string and initialize stat object
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-  stats = unicorn_stat_init(opts.statstr, opts.minnreads, opts.minrefl, 0);
+  stats = unicorn_stat_init(opts.minnreads, opts.minrefl, 0);
   if (!stats) goto exit;
   ret = -4; 
   //Compute statistics
@@ -337,7 +337,7 @@ static int unicorn_bamstats(int argc, char **argv)
     ret = -3;
     //Parse the statistics string and initialize stat object
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(NULL, 0, 0, 0);
+    stats = unicorn_stat_init(0, 0, 0);
     if (!stats) goto exit;
     ret = -4; 
     //Compute statistics
@@ -498,7 +498,7 @@ static int unicorn_tidstats(int argc, char **argv)
     fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
     ret = -3;
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(NULL, 0, 0, 1);
+    stats = unicorn_stat_init(0, 0, 1);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_tidstat_compute(u, stats, utax)) ) {

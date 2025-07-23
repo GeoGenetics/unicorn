@@ -6,7 +6,7 @@ KSORT_INIT(_sfloat, float, ks_lt_generic)
 KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
 
 //Some private functions
-static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t, float *_ne)
+static inline double _getentropy(int32tin64map_t *hist, uint64_t t, float *_ne)
 {
   double entropy = 0.0;
   khint_t k;
@@ -26,7 +26,7 @@ static inline double _getentropy(_covhistKHASH_T *hist, uint64_t t, float *_ne)
   return entropy;
 }
 
-static inline double _getgini(_covhistKHASH_T *hist,
+static inline double _getgini(int32tin64map_t *hist,
                               uint64_t t,
                               float m,
                               float *_ng)
@@ -112,20 +112,15 @@ static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
 * @param events - Event kvec queue
 * @param l      - Reference sequence length
 */
-void _refcoverage(ueventq_t events, uint64_t l,
-                  uint64_t *covbases, float *meancov,
-                  float *meanoncov, float *varoncov,
-                  float *entropy, float *gini,
-                  float *nentropy, float *ngini)
+void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
 {
     // Handle the edge case of no events
     if ( !events.n || !l) {
-      *covbases = 0;
-      *meancov  = 0.0;
+      memset(covstats, 0, sizeof(_covstats_t));
       return;
     }
     // Cov frequency map for entropy and gini computation
-    _covhistKHASH_T *covhist = covhist_init();
+    int32tin64map_t *covhist = int32tin64map_init();
     // Initialize accumulators
     uint64_t tcovbases = 0; //Total covered bases
     uint64_t tdepthsum = 0; //Total depth sum.
@@ -144,10 +139,10 @@ void _refcoverage(ueventq_t events, uint64_t l,
             tdepthsum  += seglen * current_depth;
             sumsqdepth += seglen * current_depth * current_depth;
             //Add depth value to coverage histogram
-            khint_t k = covhist_get(covhist, current_depth);
+            khint_t k = int32tin64map_get(covhist, current_depth);
             if (k == kh_end(covhist)) { //Add depth value if not present
                 int absent;
-                k = covhist_put(covhist, current_depth, &absent);
+                k = int32tin64map_put(covhist, current_depth, &absent);
                 kh_val(covhist, k) = 0;
             }
             kh_val(covhist, k) += seglen; //Increase length value for this depth
@@ -157,23 +152,23 @@ void _refcoverage(ueventq_t events, uint64_t l,
         last_pos = current_pos;
     }
     // Store the final calculated values in the output pointers
-    *covbases  = tcovbases;
-    *meancov   = (double)tdepthsum / (double)l;
-    *meanoncov = (double)tdepthsum / (double)tcovbases;
-    double meansqcovb = tcovbases?(double)sumsqdepth / tcovbases:0.0;
-    *varoncov  = meansqcovb - ((*meanoncov) * (*meanoncov));
+    covstats->covbases  = tcovbases;
+    covstats->meancov   =  (double)tdepthsum / (double)l
+    covstats->meanoncov = (double)tdepthsum / (double)tcovbases;
+    double meansqcovb   = tcovbases?(double)sumsqdepth / tcovbases:0.0;
+    covstats->varoncov  = meansqcovb - (covstats->meanoncov * covstats->meanoncov);
     float _normentropy, _normgini;
-    *entropy  = _getentropy(covhist, tcovbases, &_normentropy);
-    *nentropy = _normentropy;
-    *gini     = _getgini(covhist, tcovbases, *meanoncov, &_normgini);
-    *ngini    = _normgini;
-    covhist_destroy(covhist);
+    covstats->entropy = _getentropy(covhist, tcovbases, &_normentropy);
+    covstats->nentropy = _normentropy;
+    covstats->gini     = _getgini(covhist, tcovbases, covstats->meanoncov, &_normgini);
+    covstats->ngini    = _normgini;
+    int32int64_destroy(covhist);
 }
 
 static void _refmapstats(unicorn_stat_t *stats)
 {
   //TODO parallelize
-  _refKHASH_T *refmap = stats->_refmap;
+  refmap_t *refmap = stats->__map;
   khint_t k;
   uint32_t _treads = 0, _freads = 0, _falns = 0;
   int32q_t rmq;
@@ -181,21 +176,21 @@ static void _refmapstats(unicorn_stat_t *stats)
   //Loop over references and sort arrays
   kh_foreach(refmap, k) {
     int32_t tid = kh_key(refmap, k);        //tid AKA reference id 
-    _refSTAT_T refstat = kh_val(refmap, k); //stats data
+    refstat_t refstat = kh_val(refmap, k);  //stats data
     uint32_t _n = kh_size(refstat.READSET); //number of reads
     _treads += _n;
-    if (kh_size(refstat.READSET) < stats->minnreads ) { //filter
+    if (kh_size(refstat.READSET) < stats->minnreads ) { //filter out
         refset_destroy(refstat.READSET);
         kv_destroy(refstat.aANI);
         kv_destroy(refstat.aEVENT);
-        kv_push(int32_t, rmq, tid);
+        kv_push(int32_t, rmq, tid); //tid is added to a removal queue
         continue;
     }
     _falns  += refstat.REFNALNS;
     _freads += _n;
     ueventq_t aEVENT = refstat.aEVENT;
-    floatq_t  aANI  = refstat.aANI;
-    uint32_t *aRLEN = refstat.aRLEN;
+    floatq_t  aANI   = refstat.aANI;
+    uint32_t *aRLEN  = refstat.aRLEN;
     //Sort arrays
     ks_introsort(_sfloat,  aANI.n,  aANI.a);
     kh_val(refmap, k).REFALNANID = _fMEDIAN(aANI.a, aANI.n);
@@ -205,21 +200,19 @@ static void _refmapstats(unicorn_stat_t *stats)
     kv_destroy(aANI);
     //Get coverage values
     unicorn_sorturange(aEVENT.n, aEVENT.a);
-    uint64_t covbases;
-    float    meancov, meanoncov, varoncov, entropy, gini, nent, ngini;
-    _refcoverage(aEVENT, kh_val(refmap, k).REFLEN,
-                 &covbases, &meancov, &meanoncov, &varoncov,
-                &entropy, &gini, &nent, &ngini);
-    kh_val(refmap, k).REFCOVB    = covbases;
-    kh_val(refmap, k).REFMCOV    = meancov;
-    kh_val(refmap, k).REFMONCOV  = meanoncov;
-    kh_val(refmap, k).REFVONCOV  = varoncov;
-    kh_val(refmap, k).REFENTROPY = entropy;
-    kh_val(refmap, k).REFGINI    = gini;
-    kh_val(refmap, k).REFNENTROP = nent;
-    kh_val(refmap, k).REFNGINI   = ngini;
+    _covstats_t covstats = {0};
+    _refcoverage(aEVENT, kh_val(refmap, k).REFLEN, &covstats);
+    kh_val(refmap, k).REFCOVB    = covstats.covbases;
+    kh_val(refmap, k).REFMCOV    = covstats.meancov;
+    kh_val(refmap, k).REFMONCOV  = covstats.meanoncov;
+    kh_val(refmap, k).REFVONCOV  = covstats.varoncov;
+    kh_val(refmap, k).REFENTROPY = covstats.entropy;
+    kh_val(refmap, k).REFGINI    = covstats.gini;
+    kh_val(refmap, k).REFNENTROP = covstats.nentropy;
+    kh_val(refmap, k).REFNGINI   = covstats.ngini;
     kv_destroy(aEVENT);
   }
+  
   for (uint32_t i = 0; i < rmq.n; i++) {
     k = refmap_get(refmap, rmq.a[i]);
     refmap_del(refmap, k);
@@ -239,28 +232,28 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
   ret = -2;
   bam1_t *b = bam_init1();
   uint64_t naln = 0;
-  //Loop over alignments //TODO refector
+  refmap_t *refmap = stats->__map;
+  //Loop over alignments //TODO refector //parallelize
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
-    _refSTAT_T refstat = {0};
-    khint_t k = refmap_get(stats->_refmap, tid); //query reference map
-    if ( k == kh_end(stats->_refmap) ) {
+    refstat_t refstat = {0};
+    khint_t k = refmap_get(refmap, tid); //query reference map
+    if ( k == kh_end(refmap) ) {
       // New reference sequence, initialize stats and insert in map
       refstat.READSET = refset_init(); //Unique queryIDs
       kv_init(refstat.aANI);
       kv_init(refstat.aEVENT);
-      //kv_init(refstat.aRLEN);
       refstat.REFLEN = u->hdr->target_len[tid];
       refstat.REFREADMIN = 0xffffffffU;
-      k = refmap_put(stats->_refmap, tid, &absent);
-      kh_val(stats->_refmap, k) = refstat;
+      k = refmap_put(refmap, tid, &absent);
+      kh_val(refmap, k) = refstat;
     }
     // update stats
-    refstat = kh_val(stats->_refmap, k);
+    refstat = kh_val(refmap, k);
     uint32_t naln = ++refstat.REFNALNS;
     //Add read name to read set to count number of reads to ref
     khint_t _queryhash = kh_hash_str(bam_get_qname(b));
@@ -299,9 +292,10 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     delta = NM-mean;
     refstat.REFALNNM += delta/naln;
     //Don't loose your stats value
-    kh_val(stats->_refmap, k) = refstat;
+    kh_val(refmap, k) = refstat;
   }
   if (!naln) goto exit; // No alignments found
+  
   stats->_nalns = naln;
   _refmapstats(stats);
   bam_destroy1(b);

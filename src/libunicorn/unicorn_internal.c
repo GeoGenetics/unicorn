@@ -67,37 +67,14 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
   }
 }
 
-unicorn_stat_t *unicorn_stat_init(const char *_statstr,
-                                  uint32_t minnreads,
+unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
                                   uint8_t  flg)
 {
     unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
     if (!stats) return NULL;
-    
-    // Parse the statstr and set the corresponding flags
-    if (_statstr) {
-    //  char *statstr = strdup(_statstr);
-    //  char *token = strtok(statstr, ",");
-      //uint8_t _flg = 0;
-      //while (token) {
-      //    if (strcmp(token, "RefLen") == 0)
-      //        stats->REFLEN = _flg = 1;
-      //    else if (strcmp(token, "RefNReads") == 0)
-      //        stats->REFNREADS = _flg = 1;
-      //    else if (strcmp(token, "RefNAlns") == 0)
-      //        stats->REFNALNS = _flg = 1;
-      //    token = strtok(NULL, ",");
-      //}
-      //if (!_flg) {
-      //    free(statstr);
-      //    free(stats);
-      //    return NULL;
-      //}
-      //free(statstr);
-    }
     switch (flg) {
-      case 0: stats->_refmap = refmap_init(); break; //per reference
+      case 0: stats->__map   = refmap_init(); break; //per reference
       case 1: stats->__map   = taxmap_init(); break; //per taxid
       default: stats->__map  = 0; break; //Default to no map;
     }
