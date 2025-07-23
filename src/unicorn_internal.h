@@ -65,7 +65,7 @@ typedef struct {
     char **argv;
     int  threads;
     char *ifile;
-    char *prefix; //TODO delete this memeber
+    char *outbam; //TODO delete this memeber
     uint32_t minaln; // Minimum number of alignments to consider a reference
     hts_tpool *p;
     htsFile   *_FP;

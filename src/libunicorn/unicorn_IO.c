@@ -25,7 +25,7 @@ void unicorn_destroy(unicorn_t *u)
 
 unicorn_t *unicorn_init( int threads,
                          const char *ifile,
-                         char *prefix,
+                         char *outbam,
                          int argc,
                          char **argv)
 {
@@ -44,7 +44,7 @@ unicorn_t *unicorn_init( int threads,
     if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
     u->argc = argc;
     u->argv = argv;
-    u->prefix = prefix;
+    u->outbam = outbam;
     ret = 0;
     exit:
     if (ret) {

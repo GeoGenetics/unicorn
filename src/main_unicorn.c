@@ -240,6 +240,7 @@ static int unicorn_refstats(int argc, char **argv)
 
   if (opts.outbam) {
     fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
+    fprintf(stderr, "\twriting to %s\n", opts.outbam);
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_refstats_filterbam(u, stats)) ) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &stop);
