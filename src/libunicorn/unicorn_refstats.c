@@ -6,7 +6,7 @@ KSORT_INIT(_sfloat, float, ks_lt_generic)
 KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
 
 //Some private functions
-static inline double _getentropy(int32tin64map_t *hist, uint64_t t, float *_ne)
+static inline double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne)
 {
   double entropy = 0.0;
   khint_t k;
@@ -26,7 +26,7 @@ static inline double _getentropy(int32tin64map_t *hist, uint64_t t, float *_ne)
   return entropy;
 }
 
-static inline double _getgini(int32tin64map_t *hist,
+static inline double _getgini(int32int64map_t *hist,
                               uint64_t t,
                               float m,
                               float *_ng)
@@ -60,8 +60,9 @@ static uint32_t _getreadnum(unicorn_stat_t *stats)
 {
   uint32_t nread = 0;
   khint_t k;
-  kh_foreach(stats->_refmap, k) {
-    _refKHASHC_T *readset = kh_val(stats->_refmap, k).READSET; 
+  refmap_t *refmap = (refmap_t *)stats->__map;
+	kh_foreach(refmap, k) {
+    _refKHASHC_T *readset = kh_val(refmap, k).READSET;
     nread += kh_size(readset);
   }
   return nread;
@@ -120,7 +121,7 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
       return;
     }
     // Cov frequency map for entropy and gini computation
-    int32tin64map_t *covhist = int32tin64map_init();
+    int32int64map_t *covhist = int32int64map_init();
     // Initialize accumulators
     uint64_t tcovbases = 0; //Total covered bases
     uint64_t tdepthsum = 0; //Total depth sum.
@@ -139,10 +140,10 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
             tdepthsum  += seglen * current_depth;
             sumsqdepth += seglen * current_depth * current_depth;
             //Add depth value to coverage histogram
-            khint_t k = int32tin64map_get(covhist, current_depth);
+            khint_t k = int32int64map_get(covhist, current_depth);
             if (k == kh_end(covhist)) { //Add depth value if not present
                 int absent;
-                k = int32tin64map_put(covhist, current_depth, &absent);
+                k = int32int64map_put(covhist, current_depth, &absent);
                 kh_val(covhist, k) = 0;
             }
             kh_val(covhist, k) += seglen; //Increase length value for this depth
@@ -153,7 +154,7 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
     }
     // Store the final calculated values in the output pointers
     covstats->covbases  = tcovbases;
-    covstats->meancov   =  (double)tdepthsum / (double)l
+    covstats->meancov   =  (double)tdepthsum / (double)l;
     covstats->meanoncov = (double)tdepthsum / (double)tcovbases;
     double meansqcovb   = tcovbases?(double)sumsqdepth / tcovbases:0.0;
     covstats->varoncov  = meansqcovb - (covstats->meanoncov * covstats->meanoncov);
@@ -162,7 +163,7 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
     covstats->nentropy = _normentropy;
     covstats->gini     = _getgini(covhist, tcovbases, covstats->meanoncov, &_normgini);
     covstats->ngini    = _normgini;
-    int32int64_destroy(covhist);
+    int32int64map_destroy(covhist);
 }
 
 static void _refmapstats(unicorn_stat_t *stats)
@@ -294,10 +295,9 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     //Don't loose your stats value
     kh_val(refmap, k) = refstat;
   }
-  if (!naln) goto exit; // No alignments found
-  
   stats->_nalns = naln;
-  _refmapstats(stats);
+	if (naln)
+		_refmapstats(stats);
   bam_destroy1(b);
   stats->fc = 1;
   ret = 0;
@@ -328,7 +328,7 @@ uint64_t unicorn_stat_getfaln(const unicorn_stat_t *stats)
 
 int32_t unicorn_stats_getfrefn(const unicorn_stat_t *stats)
 {
-    return kh_size(stats->_refmap);
+    return kh_size((refmap_t *)stats->__map);
 }
 
 //TODO maybe a macro is best?
@@ -349,7 +349,7 @@ static sam_hdr_t *_stats2samhdr(unicorn_stat_t *stats, sam_hdr_t *hdr)
   sam_hdr_find_hd(hdr, &kstr);
   sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
   khint_t k, ntid = 0;
-  _refKHASH_T *refmap = stats->_refmap;
+  refmap_t *refmap = (refmap_t *)stats->__map;
   //Loop over references in refmap and add them to the header
   //Update ntid for each reference
   kh_foreach(refmap, k) {
@@ -400,8 +400,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   bam1_t *b = bam_init1();
   htsFile *ofp = hts_open(u->outbam, "wb5");
   if (!ofp) goto exit;
-  if (u->threads > 1)
-    bgzf_thread_pool(ofp->fp.bgzf, u->p, 0);
+  if (u->threads > 1) bgzf_thread_pool(ofp->fp.bgzf, u->p, 0);
   //Create new header
   ohdr = _stats2samhdr(stats, u->hdr);
   if ( !ofp || !ohdr ) goto exit;
@@ -409,20 +408,19 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   char *pgstr = stringify_argv(u->argc, u->argv);
   sam_hdr_add_pg(ohdr, "unicorn", "CL", pgstr, NULL);
   free(pgstr);
-  
   //Write new header to output file
   if (sam_hdr_write(ofp, ohdr) < 0) goto exit;
-  
   //Loop over bam, write alignments from references that passed filters
   if (u->_FP) sam_close(u->_FP);
   u->_FP = hts_open(u->ifile, "r");
   _hdr = sam_hdr_read(u->_FP);
-  while (sam_read1(u->_FP, _hdr, b) >= 0) {
+	refmap_t *refmap = (refmap_t *)stats->__map;
+	while (sam_read1(u->_FP, _hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     int32_t tid = b->core.tid;
-    khint_t k = refmap_get(stats->_refmap, tid);
-    if (k == kh_end(stats->_refmap)) continue; //Reference not in map
-    int32_t ntid = kh_val(stats->_refmap, k)._ntid; //Get new tid
+    khint_t k = refmap_get(refmap, tid);
+    if (k == kh_end(refmap)) continue; //Reference not in map
+    int32_t ntid = kh_val(refmap, k)._ntid; //Get new tid
     b->core.tid = ntid; //Set new tid
     //Write alignment to output file
     if (sam_write1(ofp, ohdr, b) < 0) goto exit;
@@ -442,15 +440,16 @@ void unicorn_refstat_print(const unicorn_t *u,
 {
     if (!stats || !fp || !u) return;
     if (!stats->fc) return;
-    sam_hdr_t *hdr = u->hdr;
+		refmap_t *refmap = (refmap_t *)stats->__map;
+		sam_hdr_t *hdr = u->hdr;
     fprintf(fp, STATSTR);
     khint_t k;
-    kh_foreach(stats->_refmap, k) {
-      _refSTAT_T v = kh_val(stats->_refmap, k);   
+    kh_foreach(refmap, k) {
+      refstat_t v = kh_val(refmap, k);
       float breath = v.REFCOVB/(double)v.REFLEN;
       float expbreath =  1.0f - expf(-breath); 
       fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
-                  hdr->target_name[kh_key(stats->_refmap, k)],//1
+                  hdr->target_name[kh_key(refmap, k)],        //1
                   v.REFLEN,                                   //2
                   v.REFNALNS,                                 //3
                   kh_size(v.READSET),                         //4

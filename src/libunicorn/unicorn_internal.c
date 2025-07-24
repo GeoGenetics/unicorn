@@ -46,22 +46,37 @@ float _ANINM(bam1_t *b, uint32_t *NM)
   return ani;
 }
 
+static void refmap_free(refmap_t *map)
+{
+	if (map) {
+		khint_t k;
+		// Destroy read set for each reference
+		kh_foreach(map, k) {
+			refstat_t v = kh_val(map, k);
+			if (v.READSET)
+				refset_destroy(v.READSET);
+			kv_destroy(v.aANI);
+			kv_destroy(v.aEVENT);
+		}
+		refmap_destroy(map);
+	}
+}
+
 void unicorn_stat_destroy(unicorn_stat_t *stats)
 {
   if (stats) {
-    if (stats->_refmap) {
-      khint_t k;
-      // Destroy read set for each reference
-      kh_foreach(stats->_refmap, k) {
-        _refSTAT_T v = kh_val(stats->_refmap, k);
-        if (v.READSET)
-          refset_destroy(v.READSET);
-        //kv_destroy(v.aANI);
-        //kv_destroy(v.aEVENT);
-      }
-      refmap_destroy(stats->_refmap);
+    if (stats->__map) {
+			switch ( stats->mapflg ) {
+				case 0: //per reference
+					refmap_free( (refmap_t *)stats->__map);
+					break;
+				case 1: //per taxid
+					taxmap_destroy((_taxmap_t *)stats->__map);
+					break;
+				default:
+					break;
+			}
     }
-    //TODO delete __map 
     if (stats->_anihist) floatmap_destroy(stats->_anihist);
     free(stats);
   }
@@ -73,10 +88,11 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
 {
     unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
     if (!stats) return NULL;
-    switch (flg) {
-      case 0: stats->__map   = refmap_init(); break; //per reference
-      case 1: stats->__map   = taxmap_init(); break; //per taxid
-      default: stats->__map  = 0; break; //Default to no map;
+		stats->mapflg = flg;
+		switch (flg) {
+      case 0:  stats->__map   = refmap_init(); break; //per reference
+      case 1:  stats->__map   = taxmap_init(); break; //per taxid
+      default: stats->__map   = 0; break; //Default to no map;
     }
     stats->minnreads = minnreads;
     stats->minrefl   = minrefl;

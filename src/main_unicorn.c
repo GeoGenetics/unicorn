@@ -37,8 +37,12 @@ typedef kvec_t(char *) strq_t;
 #include "version.h"
 #include "unicorn.h"
 
-static const char *ERRORS[16] = { 0, "Missing argument(s)",
-                                  "File error", 0};
+static const char *ERRORS[16] = { 0,
+																	"Missing argument(s)",
+                                  "File error",
+																	0,
+																  0,
+																  0};
 
 typedef struct unicorn_opts {
   int  threads;       // Number of threads to use
@@ -131,9 +135,6 @@ static void tidstats_usage(FILE *fp)
             "  -h                           Print this help message\n");
 }
 
-/*
-Compute per reference statistics
-*/
 static int unicorn_refstats(int argc, char **argv)
 {
   int c, ret = 1;
@@ -146,7 +147,6 @@ static int unicorn_refstats(int argc, char **argv)
   opts.minrefl   = 0;
   unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
-  char OBUFF[516] = {0};
   FILE *ofp = NULL;
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
@@ -211,8 +211,7 @@ static int unicorn_refstats(int argc, char **argv)
   ret = -4; 
   //Compute statistics
   clock_gettime(CLOCK_MONOTONIC, &start);
-  if ( (ret = unicorn_refstat_compute(u, stats)) )
-    goto exit;
+  if ( (ret = unicorn_refstat_compute(u, stats)) ) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   uint64_t taln, faln, tread, fread;
@@ -244,8 +243,7 @@ static int unicorn_refstats(int argc, char **argv)
     ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   }
-  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
-    free(_argv[i]);
+  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
   ret = 0;
   exit:
     if (ret) {
@@ -272,7 +270,6 @@ static int unicorn_bamstats(int argc, char **argv)
   opts.threads = 4;
   unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
-  char OBUFF[516] = {0};
   FILE *ofp = NULL;
   char *_argv[64] = {0};
   uint8_t dstflg = 0; //Print distributions flag
@@ -396,7 +393,6 @@ static int unicorn_tidstats(int argc, char **argv)
   unicorn_opt_t opts = {0};
   unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
-  char OBUFF[516] = {0};
   FILE *ofp = NULL;
   while ( (c = ketopt(&o, argc, argv, 1, TIDOPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {

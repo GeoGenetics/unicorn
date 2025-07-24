@@ -47,22 +47,18 @@ static void worker_for(void *data, long i, int tid)
 	_ktpooldata_t *d = (_ktpooldata_t *)data;
 	covmap_t *covmap = d->covmap;
 	sam_hdr_t *hdr   = d->hdr;
-	uint64_t covbases;
-	float meancov, meanoncov, varoncov, entropy, gini, nentropy, ngini;
 	if (kh_exist(covmap, i)) {
 		ueventq_t covq = kh_val(covmap, i);
 		unicorn_sorturange(covq.n, covq.a);
-		_refcoverage(covq, hdr->target_len[kh_key(covmap, i)],
-                 &covbases, &meancov, &meanoncov, &varoncov,
-                 &entropy, &gini, &nentropy, &ngini);
-		d->covbases[i] = covbases;
+		_covstats_t covstats = {0};
+		_refcoverage(covq, hdr->target_len[kh_key(covmap, i)], &covstats);
+		d->covbases[i] = covstats.covbases;
 	}
 }
 
 int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 {
 	if (!u || !stats) return -1;
-	int ret = -2;
   bam1_t *b = bam_init1();
 	covmap_t *covmap = covmap_init(); 
 	uint64_t nalns = 0, nreads = 0;
@@ -114,11 +110,8 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 		}
 	}
 	uint64_t tlen = 0, clen = 0;;
-	//uint64_t covbases;
-	//float meancov, meanoncov, varoncov, entropy, gini, nentropy, ngini;
 	if (docoverage) {
 		//Sort all the event queues and compute coverage metrics
-		//Like a baus
 		_ktpooldata_t d = {0};
 		d.covmap   = covmap;
 		d.hdr      = u->hdr;
@@ -148,8 +141,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	bam_destroy1(b);
 	refset_destroy(readset);
 	stats->fc = 1;
-  ret = 0;
-	return ret;
+	return 0;
 }
 
 /**

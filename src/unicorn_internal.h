@@ -78,7 +78,7 @@ typedef struct {
           ((hdr)->target_len[(tid)] < (minref) ? 1 : 0) 
 
 KHASHL_MAP_INIT(static,
-                int32tin64map_t,
+                int32int64map_t,
                 int32int64map,
                 uint32_t,
                 uint64_t,
@@ -183,20 +183,24 @@ KHASHL_MAP_INIT(static,                        //Scope
                 int32_t, refstat_t,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
+
 KHASHL_MAP_INIT(static,                        //Scope
                 _taxmap_t, taxmap,           //type and prefix
                 int32_t, taxstat_t,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
+
 KHASHL_MAP_INIT(static,                        //Scope
                 floatmap_t, floatmap,           //type and prefix
                 uint32_t, uint64_t,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
+
 typedef struct unicorn_stats_t {
   //Flags
   uint8_t fc: 1;          //Filter computed flag
   //Data
   void *__map; // Stat map to use, either _refmap or _taxmap
-  uint64_t _nalns;
+  uint8_t mapflg; //Map type, 0 for per reference, 1 for per taxid
+	uint64_t _nalns;
   uint64_t _nreads;
   uint64_t _nfreads;
   uint64_t _nfalns;
