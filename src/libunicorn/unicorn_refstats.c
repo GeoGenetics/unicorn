@@ -222,13 +222,11 @@ static void _refmapstats(unicorn_stat_t *stats)
   stats->_nreads  = _treads;
   stats->_nfreads = _freads;
   stats->_nfalns  = _falns;
-}     
+}
 
-
-//TODO modularize
 int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 {
-  int ret = -1, absent;
+	int ret = -1, absent;
   if (!u || !stats) goto exit;
   ret = -2;
   bam1_t *b = bam_init1();
@@ -269,10 +267,9 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
       delta = qlen - mean;                             //Compute difference
       refstat.REFREADE += delta/n;                     //Running mean
       refstat._M += delta * (qlen - refstat.REFREADE); //Keep track of m
-      //TODO fix bug in variance calculation
-      refstat.REFREADV = n ? (refstat._M / (n-1)) : 0.0f; //Running variance
-      refstat.REFREADMIN = qlen < refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
-      refstat.REFREADMAX = qlen > refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
+      refstat.REFREADV = n - 1 ? (refstat._M / (n-1)) : 0.0f; //Running variance
+      refstat.REFREADMIN = qlen<refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
+      refstat.REFREADMAX = qlen>refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
     }
     //Alignment ANI
     uint32_t NM;
@@ -282,9 +279,9 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     delta = ani-mean;
     refstat.REFALNANIE += delta/naln;
     refstat._MANI = delta * (ani - refstat.REFALNANIE);
-    refstat.REFALNANIV = naln ? (refstat._MANI / (naln-1)) : 0.0f;
+    refstat.REFALNANIV = naln ? (refstat._MANI / ( naln - 1 ) ) : 0.0f;
     //Add alignment event, for coverage comp via sweep line algorith
-    _urangeevent s = {b->core.pos, 1};
+    _urangeevent s = {b->core.pos,   1};
     _urangeevent e = {bam_endpos(b), 0};
     kv_push(_urangeevent, refstat.aEVENT, s);
     kv_push(_urangeevent, refstat.aEVENT, e);
@@ -296,6 +293,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     kh_val(refmap, k) = refstat;
   }
   stats->_nalns = naln;
+	if (VERBOSE)
+		fprintf(stderr, "[libunicorn::%s] Finished parsing alignment file\n", __func__);
 	if (naln)
 		_refmapstats(stats);
   bam_destroy1(b);
@@ -331,7 +330,6 @@ int32_t unicorn_stats_getfrefn(const unicorn_stat_t *stats)
     return kh_size((refmap_t *)stats->__map);
 }
 
-//TODO maybe a macro is best?
 uint8_t unicorn_refstats_isfiltered(const unicorn_stat_t *stats)
 {
   return stats->fc;

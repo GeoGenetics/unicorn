@@ -1,6 +1,12 @@
 #define _XOPEN_SOURCE 700
 #include "unicorn_internal.h"
 
+uint8_t VERBOSE = 0;
+
+void unicorn_setverbose(void)
+{
+	VERBOSE = 1;
+}
 
 KSORT_INIT(_surange, _urangeevent, _eventlt)
 //unicorn_sorturange(kh_val(covmap, k).n, kh_val(covmap, k).a);

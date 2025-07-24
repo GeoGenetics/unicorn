@@ -25,6 +25,8 @@ SOFTWARE.
 #include "version.h"
 #define unicorn_version() VERSION
 
+void unicorn_setverbose(void);
+
 /* unicorn's IO interface
 This is an opaque structure.
 Members and methods are accessed via the unicron_* functions.
@@ -81,7 +83,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
 void unicorn_stat_destroy(unicorn_stat_t *stats);
 
 /* Compute reference statistics */
-int unicorn_refstat_compute( unicorn_t *u, unicorn_stat_t *stats);
+int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats);
 /* Compute bam statistics */
 int unicorn_bamstat_compute( unicorn_t *u, unicorn_stat_t *stats);
 /* Print statistics table to fp*/

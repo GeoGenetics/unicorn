@@ -102,6 +102,7 @@ static void refstats_usage(FILE *fp)
             "      Available filters:\n"\
             "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
             "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
+						"  --verbose	Print libunicorn's messages.\n"\
             "  -h         print this help message\n");
 }
 
@@ -181,20 +182,22 @@ static int unicorn_refstats(int argc, char **argv)
       case 309:   //minreadn
         opts.minnreads = strtoul(o.arg, NULL, 10);
         break;
+			case 313: //verbose
+				opts.verbose = 1;
+				unicorn_setverbose();
+				break;
     }
   }
   if (!opts.ifile)  goto exit;
-  ret++;;
   if (opts.outstat){
-    ofp = fopen(opts.outstat, "w");
-    if (!ofp) goto exit;
+		ret = 2;
+		ofp = fopen(opts.outstat, "w");
+		if (!ofp) goto exit;
   }
   else ofp = stdout;
-   
-  ret++;
   //Load bam data via unicorn API
-  fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__, opts.ifile);
-  //TODO simplify call, allow NULL arguments
+  fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__,
+																															opts.ifile);
   u = unicorn_init(opts.threads,
                    opts.ifile,
                    opts.outbam ? opts.outbam : NULL,
@@ -202,10 +205,9 @@ static int unicorn_refstats(int argc, char **argv)
                    _argv);
   if (!u) goto exit;
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
-  ret = -3;
-  //Parse the statistics string and initialize stat object
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-  stats = unicorn_stat_init(opts.minnreads, opts.minrefl, 0);
+	fflush(stderr);
+	stats = unicorn_stat_init(opts.minnreads, opts.minrefl, 0);
   if (!stats) goto exit;
   ret = -4; 
   //Compute statistics
@@ -218,24 +220,25 @@ static int unicorn_refstats(int argc, char **argv)
   faln  = unicorn_stat_getfaln(stats);
   tread = unicorn_stat_gettread(stats);
   fread = unicorn_stat_getfread(stats);
-  fprintf(stderr, "\t%"PRIu64" alignments, %"PRIu64" passed filters (%f)\n",
+  fprintf(stderr, "\t%" PRIu64 " alignments, %" PRIu64 " passed filters (%f)\n",
                   taln,
                   faln, 
                   (float)faln/taln); 
-  fprintf(stderr, "\t%"PRIu64" reads, %"PRIu64" passed filters (%f)\n",
+  fprintf(stderr, "\t%" PRIu64 " reads, %" PRIu64 " passed filters (%f)\n",
                   tread,
                   fread,
                   (float)fread/tread);
-  fprintf(stderr, "\tout of %"PRIu64" references (%f)\n",
+  fprintf(stderr, "\tout of %" PRIu64 " references (%f)\n",
                   unicorn_stats_getfrefn(stats),
                   (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
-  unicorn_refstat_print(u, stats, ofp);
-
+	fflush(stderr);
+	unicorn_refstat_print(u, stats, ofp);
   if (opts.outbam) {
     fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
     fprintf(stderr, "\twriting to %s\n", opts.outbam);
+		fflush(stderr);
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_refstats_filterbam(u, stats)) ) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &stop);
