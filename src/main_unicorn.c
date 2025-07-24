@@ -83,8 +83,7 @@ static void unicorn_usage(FILE *fp)
     fprintf(fp, "Commands:\n"\
             //"  alnstats    Compute per alingments statitics such as:\n"
             //"                  # alingments, ANI, GC, etc.\n"
-            "  refstats    Compute per reference statistics such as\n"\
-            "                  # alignments, # reads, mean read length, etc.\n"\
+            "  refstats    Compute per reference statistics.\n"\
             "  bamstats    Compute per bam statistcs.\n"\
             "  tidstats    Compute per taxid statistics.\n");
 }

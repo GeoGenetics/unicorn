@@ -46,6 +46,7 @@ float _ANINM(bam1_t *b, uint32_t *NM)
   return ani;
 }
 
+//Check for proper release of resource. Internal vs user
 static void refmap_free(refmap_t *map)
 {
 	if (map) {
@@ -55,8 +56,6 @@ static void refmap_free(refmap_t *map)
 			refstat_t v = kh_val(map, k);
 			if (v.READSET)
 				refset_destroy(v.READSET);
-			kv_destroy(v.aANI);
-			kv_destroy(v.aEVENT);
 		}
 		refmap_destroy(map);
 	}
