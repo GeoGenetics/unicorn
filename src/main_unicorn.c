@@ -8,8 +8,9 @@
 
 //TODO long options
 #include "klib/ketopt.h"
-#define REFOPT_STR "b:t:s:h"
-#define TIDOPT_STR "b:o:a:n:d:h"
+#define REFOPT_STR "b:t:h"
+#define BAMOPT_STR "b:t:h"
+#define TIDOPT_STR "b:t:a:n:d:h"
 static ko_longopt_t unicorn_lopts[] = {
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
@@ -18,6 +19,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "acc2tax",         ko_required_argument, 304 },
     { "outbam",          ko_required_argument, 305 },
     { "outstat",         ko_required_argument, 306 },
+    { "withtid",         ko_no_argument,       307 },
     { "minrefl",         ko_required_argument, 308 },
     { "minreads",        ko_required_argument, 309 },
     { "filelist",        ko_required_argument, 310 },
@@ -48,7 +50,7 @@ typedef struct unicorn_opts {
   int  threads;       // Number of threads to use
   char *outbam;       // Output BAM file
   char *outstat;      // Output statistics file
-  char *ifile;        // Input file (BAM/SAM/CRAM)
+  char *ifile;        // Input file (BAM/SAM)
   char *statstr;      // Comma separated list of statistics to compute
   char *filel;        // File containing input file paths
   char *acc2tax;      // Accession to taxid mapping file
@@ -56,7 +58,8 @@ typedef struct unicorn_opts {
   char *nodes;        // Taxonomy nodes file
   char *dumpacc2tax;  // Dump accession to taxid map to this file
   uint8_t verbose;    // Verbose mode, 
-	uint32_t minnreads; // Minimum number of reads to consider  
+	uint8_t withtid;    // Report taxid of reference sequence
+  uint32_t minnreads; // Minimum number of reads to consider  
   uint64_t minrefl;   // Minimum reference length to consider
 } unicorn_opt_t;
 
@@ -90,11 +93,11 @@ static void unicorn_usage(FILE *fp)
 
 static void refstats_usage(FILE *fp)
 {
-    fprintf(fp, "./unicorn refstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
+    fprintf(fp, "./unicorn refstats [options] -b <in.bam>|<in.sam>\n");
     fprintf(fp, "Options:\n"\
             "  -b <str>   Input bam|sam|cram [Required]\n"\
             "  -t <int>, --threads <int> Number of threads [4]\n"
-            "  --outbam <str> Output BAM file with filtered alignments.\n"\
+            "  --outbam  <str> Output BAM file with filtered alignments.\n"\
             "  --outstat <str> Output statistics file\n"\
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      For example \"--minreads 100\" to filter out references with\n"\
@@ -102,7 +105,11 @@ static void refstats_usage(FILE *fp)
             "      Available filters:\n"\
             "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
             "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
-						"  --verbose	Print libunicorn's messages.\n"\
+            "  --withtid  Report taxid of reference sequence. Requires --acc2tax, --names and --nodes options.\n"\
+            "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
+            "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
+            "  --acc2tax <str> Accession to taxid mapping file or .khash file.\n"\
+            "  --verbose	Print libunicorn's messages.\n"\
             "  -h         print this help message\n");
 }
 
@@ -160,9 +167,6 @@ static int unicorn_refstats(int argc, char **argv)
       case 'b':
         opts.ifile = strdup(o.arg);
         break;
-      case 's':
-        opts.statstr = strdup(o.arg);
-        break;
       case 'h':
         refstats_usage(stdout);
         ret = 0;
@@ -170,8 +174,17 @@ static int unicorn_refstats(int argc, char **argv)
       case 300: //threads
         opts.threads = strtoul(o.arg, NULL, 10);
         break;
+      case 302: //names
+        opts.names   = strdup(o.arg);
+        break;
+      case 303: //nodes
+        opts.nodes   = strdup(o.arg);
+        break;
+      case 304: //acc2tax
+        opts.acc2tax = strdup(o.arg);
+        break; 
       case 305: //outbam
-        opts.outbam = strdup(o.arg);
+        opts.outbam  = strdup(o.arg);
         break;
       case 306: //outstat
         opts.outstat = strdup(o.arg);
@@ -186,10 +199,19 @@ static int unicorn_refstats(int argc, char **argv)
 				opts.verbose = 1;
 				unicorn_setverbose();
 				break;
+      case 307: //withtid
+        opts.withtid = 1;
+        break;
     }
   }
   if (!opts.ifile)  goto exit;
-  if (opts.outstat){
+  if (opts.withtid) {
+    if (!opts.acc2tax || !opts.names || !opts.nodes) {
+      fprintf(stderr, "[unicorn::%s] Error: --withtid requires --acc2tax, --names and --nodes options.\n", __func__);
+      goto exit;
+    }
+  }
+  if (opts.outstat) {
 		ret = 2;
 		ofp = fopen(opts.outstat, "w");
 		if (!ofp) goto exit;
@@ -233,8 +255,26 @@ static int unicorn_refstats(int argc, char **argv)
                   (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
-	fflush(stderr);
-	unicorn_refstat_print(u, stats, ofp);
+	//Load taxonomy if needed
+  if (opts.withtid) {
+    fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
+    fflush(stderr);
+    int ret = 0;
+    utax_t *utax = unicorn_loadtaxonomy(opts.acc2tax,
+                                         opts.names,
+                                         opts.nodes,
+                                         &ret,
+                                         opts.verbose);
+    if (!utax) {
+      fprintf(stderr, "[unicorn::%s] Error: Failed to load taxonomy data\n", __func__);
+      goto exit;
+    }
+    unicorn_taxstat_print(u, stats, ofp, utax);
+    unicorn_closetaxonomy(utax);
+  }
+  fflush(stderr);
+    
+  unicorn_refstat_print(u, stats, ofp);
   if (opts.outbam) {
     fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
     fprintf(stderr, "\twriting to %s\n", opts.outbam);

@@ -23,30 +23,48 @@ SOFTWARE.
 */
 #include <stdint.h>
 #include "version.h"
+
 #define unicorn_version() VERSION
 
+/**
+ * @brief Enable verbose output for unicorn library functions.
+ */
 void unicorn_setverbose(void);
 
-/* unicorn's IO interface
-This is an opaque structure.
-Members and methods are accessed via the unicron_* functions.
-For example:
-    unicorn_t *u = unicorn_init(4, "input.bam");
-    fprintf(stderr, "%d references in input.bam\n", unicron_getrefn(u));
-    unicorn_destroy(u);
-    */
+/**
+ * @brief Opaque handle for a unicorn BAM/CRAM statistics session.
+ *
+ * Use unicorn_init() to create, and unicorn_destroy() to free.
+ */
 typedef struct unicorn_t *unicorn_t;
 
-/* Initialise a unicorn object*/
-unicorn_t *unicorn_init( int         threads,
-                         const char *ifile,
-                         char       *prefix,
-                         int         argc,
-                         char      **argv);
+/**
+ * @brief Initialise a unicorn object for BAM/CRAM statistics.
+ *
+ * @param threads Number of threads to use for processing.
+ * @param ifile   Input BAM/CRAM file path.
+ * @param prefix  Output file prefix (optional).
+ * @param argc    Argument count (for command-line integration).
+ * @param argv    Argument vector (for command-line integration).
+ * @return Pointer to unicorn_t object, or NULL on error.
+ */
+unicorn_t *unicorn_init(int threads,
+                        const char *ifile,
+                        char *prefix,
+                        int argc,
+                        char **argv);
 
+/**
+ * @brief Free a unicorn object and associated resources.
+ * @param u Pointer to unicorn_t object.
+ */
 void unicorn_destroy(unicorn_t *u);
 
-/* Get number of references in b|s|cram header*/
+/**
+ * @brief Get the number of reference sequences in the BAM/CRAM header.
+ * @param unicorn Pointer to unicorn_t object.
+ * @return Number of references.
+ */
 int unicorn_getrefn(unicorn_t *unicorn);
 
 
@@ -56,36 +74,43 @@ unicorn's BAM statistic computation interface
 
 ****************************************************/
 
-/*
-unicorn's reference based statistics
-This opaque structure is accessed via the unicorn_refstats_* functions.
-*/
+/**
+ * @brief unicorn's reference based statistics
+ * This opaque structure is accessed via the unicorn_refstats_* functions.
+ */
 typedef struct unicorn_stat_t *unicorn_stat_t;
-/* Initialize a refstats object
-    @param statstr - String indicating which statistics to compute
-    @returns - unicorn_stat_t* on success NULL on error
-*/
+/**
+ * @brief a refstats object
+ * @param statstr - String indicating which statistics to compute
+ * @return - unicorn_stat_t* on success NULL on error
+ */
 unicorn_stat_t *unicorn_refstat_init(const char *statstr,
                                         uint32_t minnreads,
                                         uint32_t minrefl);
 void unicorn_refstat_destroy(unicorn_stat_t *stats);
 
-/* Initialize a bamstats object
-    @param minnreads - Minimum number of reads per reference
-    @param minrefl   - Minimum length of reference to consider
-    @param flg       - Flag to indicate which map to use:
-                       0 - per reference, 1 - per taxid, other - no map  
-    @returns - unicorn_bamstat_t* on success NULL on error
-*/
+/**
+ * @brief Initialize a bamstats object
+ * @param minnreads - Minimum number of reads per reference
+ * @param minrefl   - Minimum length of reference to consider
+ * @param flg       - Flag to indicate which map to use:
+                       0 - per reference, 1 - per taxid, other - no map
+ * @return - unicorn_bamstat_t* on success NULL on error
+ */
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
                                   uint8_t  flg);
 void unicorn_stat_destroy(unicorn_stat_t *stats);
 
-/* Compute reference statistics */
+/**
+ * @brief Compute reference statistics
+ */
 int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats);
-/* Compute bam statistics */
+/**
+ * @brief Compute bam statistics
+ */
 int unicorn_bamstat_compute( unicorn_t *u, unicorn_stat_t *stats);
+
 /* Print statistics table to fp*/
 void unicorn_refstat_print(const unicorn_t *u,
                            const unicorn_stat_t *stats,
@@ -94,7 +119,7 @@ void unicorn_bamstat_print(const unicorn_t *u,
                            const unicorn_stat_t *stats,
                            FILE *fp);
 void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
-							const char *fname);
+                            const char *fname);
 
 //Get total number of alignments
 uint64_t unicorn_stat_gettaln(   const unicorn_stat_t *stats);
@@ -131,15 +156,15 @@ typedef struct utax_t *utax_t;
     @param acc2tax - Accession to taxid mapping file
     @param names   - Taxonomy names file
     @param nodes   - Taxonomy nodes file
-	  @param _ret    - Pointer to an int to store the return code
-	  @param v       - Verbose mode, print loading messages
-		@returns - utax_t* on success NULL on error
+      @param _ret    - Pointer to an int to store the return code
+      @param v       - Verbose mode, print loading messages
+        @returns - utax_t* on success NULL on error
 */
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-														 int *_ret,
-														 uint8_t v);
+                                                         int *_ret,
+                                                         uint8_t v);
 
 void unicorn_closetaxonomy(utax_t *utax);
 
