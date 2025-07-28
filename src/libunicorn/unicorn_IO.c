@@ -308,7 +308,9 @@ static char *_khreadkeyval(BGZF *fp, chr2int_t *map)
   if ( bgzf_read(fp, _vals, vpos) < 0 ) goto exit;
   off_t fpos = bgzf_utell(fp) + 8; // Skip the zero bytes
   if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;
-  //Loop over buckets
+  //Loop over buckets //TODO fix this data loading loop
+	//This looks like this due to bad loading logic that created the tough
+	//bug I finally solved by having the extra pass through all the buckets
   for (khint_t i = 0; i < n_buckets; i++) {
     //Load key and value data if needed
     if ( (_k == ksize) && ( _t < map->count ) ) {
@@ -326,14 +328,21 @@ static char *_khreadkeyval(BGZF *fp, chr2int_t *map)
       fpos = bgzf_utell(fp) + 8; // Skip the zero bytes
       if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;
     }
-    //Add data if used bucket
-    if (__kh_used(map->used, i)) {
-      map->keys[i].key = keys + _k;
-      map->keys[i].val = vals[_t];
-      _k += strlen(keys + _k) + 1; // +1 for the null terminator
-      _t++;
-    }
+		if (__kh_used(map->used, i)) {
+    	_k += strlen(keys + _k) + 1; // +1 for the null terminator
+    	_t++;
+  	}
   }
+  //Add data if used bucket
+	_k = _t = 0;
+	for (khint_t i = 0; i < n_buckets; i++) {
+		if (__kh_used(map->used, i)) {
+  	  map->keys[i].key = keys + _k;
+    	map->keys[i].val = vals[_t];
+    	_k += strlen(keys + _k) + 1; // +1 for the null terminator
+    	_t++;
+  	}
+	}
   if (map->count != _t) goto exit;
 	char magic[9] = {0};  
   if (bgzf_read(fp, magic, 8) < 0)   goto exit;
@@ -388,14 +397,14 @@ emap_chr2int_t *_io_loadkhash(BGZF *fp, int *ret)
 	for (uint8_t i = 0; i < 1U<<map->bits; i++) {
 		map->keys[i] = _loadkh(map->maps[i], fp, ret);
   	if ( !map->keys[i] ) goto exit;
-			fpos = bgzf_utell(fp) + 8; // Skip the zero byte
-			if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;    
-  
+		fpos = bgzf_utell(fp) + 8; // Skip the zero bytes
+		if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit; 
 	}
 	*ret = 0;
 	exit:
 		if (*ret && map) {
 			_echr2intdel(map);
+			map = NULL;
 		}
 		return map;
 }
