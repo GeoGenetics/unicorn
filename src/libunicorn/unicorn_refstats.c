@@ -5,7 +5,64 @@
 KSORT_INIT(_sfloat, float, ks_lt_generic)
 KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
 
-//Some private functions
+static float _tad80(int32int64map_t *hist)
+{
+  if (!hist || !kh_size(hist)) return 0.0f;
+  uint32q_t depths;
+  kv_init(depths);
+  uint64_t mass = 0;
+  khint_t k;
+  kh_foreach(hist, k) {
+    uint32_t d = kh_key(hist, k);
+    uint64_t l = kh_val(hist, k);
+    kv_push(uint32_t, depths, d);
+    mass += l;
+  }
+  ks_introsort(_suint32, depths.n, depths.a);
+  double trim = mass * 0.1;
+  //Remove bottom 10% of coverage
+  for (uint32_t i = 0; i < depths.n; i++) {
+    if (trim <= 0) break;
+    uint32_t cov = depths.a[i];
+    khint_t k    = int32int64map_get(hist, cov);
+    uint64_t l   = kh_val(hist, k);
+    if (l >= trim) {
+      l -= trim;
+      kh_val(hist, k) = l;
+      trim = 0;
+    } else {
+      trim -= l;
+      kh_val(hist, k) = 0;
+    }
+  }
+  trim = mass * 0.1;
+  //Remove top 10% of coverage
+  for (uint32_t i = depths.n-1; i > 0; i--) {
+    if (trim <= 0) break;
+    uint32_t cov = depths.a[i];
+    khint_t k    = int32int64map_get(hist, cov);
+    uint64_t l   = kh_val(hist, k);
+    if (l >= trim) {
+      l -= trim;
+      kh_val(hist, k) = l;
+      trim = 0;
+    } else {
+      trim -= l;
+      kh_val(hist, k) = 0;
+    }
+  }
+  uint64_t rmass = 0, wmass = 0;
+  kh_foreach(hist, k) {
+    uint32_t d = kh_key(hist, k);
+    uint64_t l = kh_val(hist, k);
+    kv_push(uint32_t, depths, d);
+    rmass += l;
+    wmass += d * l;
+  }
+  kv_destroy(depths);
+  return (float)wmass/ rmass;
+}
+
 static inline double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne)
 {
   double entropy = 0.0;
@@ -159,10 +216,11 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
     double meansqcovb   = tcovbases?(double)sumsqdepth / tcovbases:0.0;
     covstats->varoncov  = meansqcovb - (covstats->meanoncov * covstats->meanoncov);
     float _normentropy, _normgini;
-    covstats->entropy = _getentropy(covhist, tcovbases, &_normentropy);
+    covstats->entropy  = _getentropy(covhist, tcovbases, &_normentropy);
     covstats->nentropy = _normentropy;
     covstats->gini     = _getgini(covhist, tcovbases, covstats->meanoncov, &_normgini);
     covstats->ngini    = _normgini;
+    covstats->tad80    = _tad80(covhist);
     int32int64map_destroy(covhist);
 }
 
@@ -211,6 +269,7 @@ static void _refmapstats(unicorn_stat_t *stats)
     kh_val(refmap, k).REFGINI    = covstats.gini;
     kh_val(refmap, k).REFNENTROP = covstats.nentropy;
     kh_val(refmap, k).REFNGINI   = covstats.ngini;
+    kh_val(refmap, k).tad80      = covstats.tad80;
     kv_destroy(aEVENT);
   }
   
@@ -446,7 +505,7 @@ void unicorn_refstat_print(const unicorn_t *u,
       refstat_t v = kh_val(refmap, k);
       float breath = v.REFCOVB/(double)v.REFLEN;
       float expbreath =  1.0f - expf(-breath); 
-      fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+      fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                   hdr->target_name[kh_key(refmap, k)],        //1
                   v.REFLEN,                                   //2
                   v.REFNALNS,                                 //3
@@ -473,6 +532,7 @@ void unicorn_refstat_print(const unicorn_t *u,
                   v.REFENTROPY,                               //25
                   v.REFGINI,                                  //26        
                   v.REFNENTROP,                               //27
-                  v.REFNGINI);                                //28
+                  v.REFNGINI,                                 //28    
+                  v.tad80);
     }
 }

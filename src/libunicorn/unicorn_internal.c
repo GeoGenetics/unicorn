@@ -93,7 +93,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
 {
     unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
     if (!stats) return NULL;
-		stats->mapflg = flg;
+    stats->mapflg = flg;
 		switch (flg) {
       case 0:  stats->__map   = refmap_init(); break; //per reference
       case 1:  stats->__map   = taxmap_init(); break; //per taxid

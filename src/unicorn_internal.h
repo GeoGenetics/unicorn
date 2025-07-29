@@ -133,6 +133,7 @@ typedef struct refstat_t {
   float        REFGINI;    // Coverage Gini coefficient
   float        REFNENTROP; // Normalized coverage entropy
   float        REFNGINI;   // Normalized coverage Gini coefficient
+  float        tad80;      // Truncated average depth at 80% of the coverage
   //Data arrays
   floatq_t     aANI;
   //uint32q_t    aRLEN;
@@ -231,6 +232,7 @@ typedef struct _covstats_t {
   float    gini;          // Coverage Gini coefficient
   float    nentropy;      // Normalized entropy
   float    ngini;         // Normalized Gini coefficient
+  float    tad80;         // Truncated average depth at 80% of the total coverage
 } _covstats_t;
 
 #define STATSTR "Id\t"\
@@ -259,7 +261,8 @@ typedef struct _covstats_t {
                 "entropy\t"\
                 "gini\t"\
                 "n_entropy\t"\
-                "n_gini\n"
+                "n_gini\t"\
+                "tad80\n"
 
 /*
   Computes median from a count array.
