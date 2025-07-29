@@ -263,6 +263,35 @@ typedef struct _covstats_t {
                 "n_entropy\t"\
                 "n_gini\t"\
                 "tad80\n"
+#define STATSTR2 "Id\t"\
+                 "taxID\t"\ 
+                 "Length\t"\
+                 "n_alns\t"\
+                 "n_reads\t"\
+                 "m_readl\t"\
+                 "std_readl\t"\
+                 "md_readl\t"\
+                 "mo_readl\t"\
+                 "readl_min\t"\
+                 "readl_max\t"\
+                 "m_alnnm\t"\
+                 "m_alnani\t"\
+                 "std_alnani\t"\
+                 "md_alnani\t"\
+                 "n_covbases\t"\
+                 "m_cov\t"\
+                 "breath_cov\t"\
+                 "exp_breath\t"\
+                 "breath_ratio\t"\
+                 "m_covcovered\t"\
+                 "std_covcovered\t"\
+                 "evenness_cov\t"\
+                 "site_density\t"\
+                 "entropy\t"\
+                 "gini\t"\
+                 "n_entropy\t"\
+                 "n_gini\t"\
+                 "tad80\n"
 
 /*
   Computes median from a count array.

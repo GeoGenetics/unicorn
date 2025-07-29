@@ -491,48 +491,108 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
     return ret;
 }
 
+static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
+{
+  khint_t k;
+  kh_foreach(refmap, k) {
+    refstat_t v = kh_val(refmap, k);
+    float breath = v.REFCOVB/(double)v.REFLEN;
+    float expbreath =  1.0f - expf(-breath); 
+    fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+                hdr->target_name[kh_key(refmap, k)],        //1
+                v.REFLEN,                                   //2
+                v.REFNALNS,                                 //3
+                kh_size(v.READSET),                         //4
+                v.REFREADE,                                 //5
+                sqrtf(v.REFREADV),                          //6
+                v.REFREADD,                                 //7
+                v.REFREADO,                                 //8
+                v.REFREADMIN,                               //9
+                v.REFREADMAX,                               //10
+                v.REFALNNM,                                 //11
+                v.REFALNANIE,                               //12
+                sqrtf(v.REFALNANIV),                        //13
+                v.REFALNANID,                               //14
+                v.REFCOVB,                                  //15
+                v.REFMCOV,                                  //16
+                breath,                                     //17
+                expbreath,                                  //18
+                breath/expbreath,                           //19
+                v.REFMONCOV,                                //20
+                sqrtf(v.REFVONCOV),                         //21
+                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
+                1000.0f * breath,                           //24
+                v.REFENTROPY,                               //25
+                v.REFGINI,                                  //26        
+                v.REFNENTROP,                               //27
+                v.REFNGINI,                                 //28    
+                v.tad80);
+    }
+}
+
+static void _print_withtax(FILE *fp,
+                           sam_hdr_t *hdr,
+                           refmap_t *refmap,
+                           utax_t *utax)
+{
+  int absent;
+  khint_t k;
+  kh_foreach(refmap, k) {
+    refstat_t v = kh_val(refmap, k);
+    char *accession = hdr->target_name[kh_key(refmap, k)];
+    uint32_t taxid = utax_gettaxid(utax, accession, &absent);
+    if (absent) taxid = 0;
+    float breath = v.REFCOVB/(double)v.REFLEN;
+    float expbreath =  1.0f - expf(-breath); 
+    fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+                accession,                                  //1
+                taxid,                                      //2  
+                v.REFLEN,                                   //3
+                v.REFNALNS,                                 //4
+                kh_size(v.READSET),                         //5
+                v.REFREADE,                                 //6
+                sqrtf(v.REFREADV),                          //7
+                v.REFREADD,                                 //8
+                v.REFREADO,                                 //9
+                v.REFREADMIN,                               //10
+                v.REFREADMAX,                               //11
+                v.REFALNNM,                                 //12
+                v.REFALNANIE,                               //13
+                sqrtf(v.REFALNANIV),                        //14
+                v.REFALNANID,                               //15
+                v.REFCOVB,                                  //16
+                v.REFMCOV,                                  //17
+                breath,                                     //18
+                expbreath,                                  //19
+                breath/expbreath,                           //20
+                v.REFMONCOV,                                //21
+                sqrtf(v.REFVONCOV),                         //22
+                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //23
+                1000.0f * breath,                           //24
+                v.REFENTROPY,                               //25
+                v.REFGINI,                                  //26        
+                v.REFNENTROP,                               //27
+                v.REFNGINI,                                 //28    
+                v.tad80                                     //29
+           );
+    }
+}
+
 void unicorn_refstat_print(const unicorn_t *u,
                            const unicorn_stat_t *stats,
-                           FILE *fp)
+                           FILE *fp,
+                           utax_t *utax)
 {
     if (!stats || !fp || !u) return;
     if (!stats->fc) return;
 		refmap_t *refmap = (refmap_t *)stats->__map;
 		sam_hdr_t *hdr = u->hdr;
-    fprintf(fp, STATSTR);
-    khint_t k;
-    kh_foreach(refmap, k) {
-      refstat_t v = kh_val(refmap, k);
-      float breath = v.REFCOVB/(double)v.REFLEN;
-      float expbreath =  1.0f - expf(-breath); 
-      fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
-                  hdr->target_name[kh_key(refmap, k)],        //1
-                  v.REFLEN,                                   //2
-                  v.REFNALNS,                                 //3
-                  kh_size(v.READSET),                         //4
-                  v.REFREADE,                                 //5
-                  sqrtf(v.REFREADV),                          //6
-                  v.REFREADD,                                 //7
-                  v.REFREADO,                                 //8
-                  v.REFREADMIN,                               //9
-                  v.REFREADMAX,                               //10
-                  v.REFALNNM,                                 //11
-                  v.REFALNANIE,                               //12
-                  sqrtf(v.REFALNANIV),                        //13
-                  v.REFALNANID,                               //14
-                  v.REFCOVB,                                  //15
-                  v.REFMCOV,                                  //16
-                  breath,                                     //17
-                  expbreath,                                  //18
-                  breath/expbreath,                           //19
-                  v.REFMONCOV,                                //20
-                  sqrtf(v.REFVONCOV),                         //21
-                  sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
-                  1000.0f * breath,                           //24
-                  v.REFENTROPY,                               //25
-                  v.REFGINI,                                  //26        
-                  v.REFNENTROP,                               //27
-                  v.REFNGINI,                                 //28    
-                  v.tad80);
+    if (utax) {
+      fprintf(fp, STATSTR2);
+      _print_withtax(fp, hdr, refmap, utax);
+      return;
     }
+    fprintf(fp, STATSTR);
+    _print_notax(fp, hdr, refmap);
+    return;
 }

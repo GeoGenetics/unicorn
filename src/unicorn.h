@@ -111,15 +111,6 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats);
  */
 int unicorn_bamstat_compute( unicorn_t *u, unicorn_stat_t *stats);
 
-/* Print statistics table to fp*/
-void unicorn_refstat_print(const unicorn_t *u,
-                           const unicorn_stat_t *stats,
-                           FILE *fp);
-void unicorn_bamstat_print(const unicorn_t *u,
-                           const unicorn_stat_t *stats,
-                           FILE *fp);
-void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
-                            const char *fname);
 
 //Get total number of alignments
 uint64_t unicorn_stat_gettaln(   const unicorn_stat_t *stats);
@@ -188,3 +179,14 @@ void unicorn_taxstat_print(const unicorn_t *u,
                            const unicorn_stat_t *stats,
                            FILE *fp,
                            utax_t *utax);
+
+/* Print statistics table to fp*/
+void unicorn_refstat_print(const unicorn_t *u,
+                           const unicorn_stat_t *stats,
+                           FILE *fp,
+                           utax_t *utax);
+void unicorn_bamstat_print(const unicorn_t *u,
+                           const unicorn_stat_t *stats,
+                           FILE *fp);
+void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
+                            const char *fname);

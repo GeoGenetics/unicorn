@@ -154,6 +154,7 @@ static int unicorn_refstats(int argc, char **argv)
   opts.minrefl   = 0;
   unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
+	utax_t *utax = NULL;
   FILE *ofp = NULL;
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
@@ -255,26 +256,23 @@ static int unicorn_refstats(int argc, char **argv)
                   (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
-	//Load taxonomy if needed
+  //Load taxonomy if needed
   if (opts.withtid) {
     fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
     fflush(stderr);
     int ret = 0;
-    utax_t *utax = unicorn_loadtaxonomy(opts.acc2tax,
-                                         opts.names,
-                                         opts.nodes,
-                                         &ret,
-                                         opts.verbose);
+    utax = unicorn_loadtaxonomy(opts.acc2tax,
+                                opts.names,
+                                opts.nodes,
+                                &ret,
+                                opts.verbose);
     if (!utax) {
       fprintf(stderr, "[unicorn::%s] Error: Failed to load taxonomy data\n", __func__);
       goto exit;
     }
-    unicorn_taxstat_print(u, stats, ofp, utax);
-    unicorn_closetaxonomy(utax);
   }
   fflush(stderr);
-    
-  unicorn_refstat_print(u, stats, ofp);
+  unicorn_refstat_print(u, stats, ofp, utax);
   if (opts.outbam) {
     fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
     fprintf(stderr, "\twriting to %s\n", opts.outbam);
@@ -299,6 +297,7 @@ static int unicorn_refstats(int argc, char **argv)
     if (u)     unicorn_destroy(u);
     if (stats) unicorn_stat_destroy(stats);
     if (ofp)   fclose(ofp);
+    if (utax)  unicorn_closetaxonomy(utax);
     return ret;
 }
 
