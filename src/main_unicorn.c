@@ -26,7 +26,8 @@ static ko_longopt_t unicorn_lopts[] = {
     { "printdists",      ko_no_argument,       311 },
     { "dumpacc2tax",     ko_required_argument, 312 },
   	{ "verbose",         ko_no_argument,       313 },  
-		{ "help",            ko_no_argument,       316 },
+		{ "onlypresent",     ko_no_argument,       314 },
+    { "help",            ko_no_argument,       316 },
     { "version",         ko_no_argument,       317 },
     { "nodump_bam"  ,    ko_no_argument,       315 },
     { "out",             ko_required_argument, 320 },
@@ -129,15 +130,15 @@ static void tidstats_usage(FILE *fp)
     fprintf(fp, "./unicorn tidstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
     fprintf(fp, "Options:\n"\
             "  -b <str>                     Input bam|sam|cram\n"\
-            "  --outstat <str>              Output statistics file\n"\
+            "  -o <str> | --outstat <str>   Output statistics file [/dev/stdout]\n"\
             "  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
             "                               Providing a .khash file is much faster.\n"\
             "  -n <str> | --names <str>     Taxonomy names file.\n"\
             "  -d <str> | --nodes <str>     Taxonomy nodes file\n"\
             "  --filelist <str>             File containing input file paths. One per line.\n"\
-            //"  --printdists                 Print distributions of read lengths, alignment lengths, etc.\n"
-            //"                               This will create a files <tid>.dists.txt\n"
             "  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"\
+            "  --onlypresent                Only report accessions found in the acc2tax map\n"\
+            "  --rank <str>                 Taxonomic rank to summarize by.\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message\n");
 }
@@ -426,7 +427,7 @@ static int unicorn_bamstats(int argc, char **argv)
 
 static int unicorn_tidstats(int argc, char **argv)
 {
-  int c, ret = -1;
+  int c, ret = 1;
   struct timespec start, stop;
   uint64_t ns;
   ketopt_t o = KETOPT_INIT;
@@ -439,6 +440,9 @@ static int unicorn_tidstats(int argc, char **argv)
     switch(c) {
       case 'b':
 				opts.ifile = strdup(o.arg);
+        break;
+      case 't':
+        opts.threads = strtoul(o.arg, NULL, 10);
         break;
       case 'o':
 				opts.outstat = strdup(o.arg);
@@ -456,10 +460,19 @@ static int unicorn_tidstats(int argc, char **argv)
         tidstats_usage(stdout);
         return 0;
       case 302: //names
+        opts.names = strdup(o.arg);
         break;
       case 303: //nodes
+        opts.nodes = strdup(o.arg);
         break;
       case 304: //acc2tax
+        opts.acc2tax = strdup(o.arg);
+        break;
+      case 308: //min_length
+        opts.minrefl = strtoul(o.arg, NULL, 10);
+        break;
+      case 309:   //minreadn
+        opts.minnreads = strtoul(o.arg, NULL, 10);
         break;
       case 310: //filelist
 				opts.filel = strdup(o.arg);
@@ -472,6 +485,9 @@ static int unicorn_tidstats(int argc, char **argv)
 			case 313: //verbose
 				opts.verbose = 1;
 				break;
+      case 314: //onlypresent
+        opts.withtid = 1;
+        break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -484,6 +500,7 @@ static int unicorn_tidstats(int argc, char **argv)
         break;
       }
   }
+  if (!opts.ifile) goto exit;
   fprintf(stderr, "[unicorn::%s] Options:\n"\
                   "              acc2tax: %s\n"\
                   "              names:   %s\n"\
@@ -535,7 +552,7 @@ static int unicorn_tidstats(int argc, char **argv)
     fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
     ret = -3;
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(0, 0, 1);
+    stats = unicorn_stat_init(opts.minnreads, 0, 1);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_tidstat_compute(u, stats, utax)) ) {
@@ -576,7 +593,10 @@ static int unicorn_tidstats(int argc, char **argv)
 	}
 	ret = 0;
   exit:
-    if (ret) fprintf(stderr, "[unicorn::%s] Error: %d\n", __func__, ret);
+    if (ret) {
+      fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
+      tidstats_usage(stderr);
+    }
     if (utax) unicorn_closetaxonomy(utax);
     return ret;
 }

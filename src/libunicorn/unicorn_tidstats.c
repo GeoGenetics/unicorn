@@ -4,11 +4,21 @@
 static void _taxmapstats(unicorn_stat_t *stats)
 {
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;
+	uint32_t _treads = 0, _freads = 0, _falns = 0;
+	int32q_t rmq;
+	kv_init(rmq);
 	khint_t ktax, kref;
 	kh_foreach(taxmap, ktax) {
+		int32_t taxid = kh_key(taxmap, ktax);
 		taxstat_t taxstat = kh_val(taxmap, ktax);
 		uint32_t _n = kh_size(taxstat.readset);
-		stats->_nreads += _n;
+		_treads += _n;
+		if ( _n < stats->minnreads ) { //filter out
+        u64set_destroy(taxstat.readset);
+				refmap_destroy(taxstat.refmap);
+				kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
+        continue;
+    }
 		uint32_t *v_rlen     = taxstat.v_rlen;
 		taxstat.readl_median = _udCAMEDIAN(v_rlen, 256, _n);
 		taxstat.readl_mode   = _udCAMODE(v_rlen, 256);
@@ -33,6 +43,10 @@ static void _taxmapstats(unicorn_stat_t *stats)
 		}
 		kh_val(taxmap, ktax)    = taxstat;
 	}
+	for (uint32_t i = 0; i < rmq.n; i++) {
+    ktax = taxmap_get(taxmap, rmq.a[i]);
+    taxmap_del(taxmap, ktax);
+  }
 }
 
 int unicorn_tidstat_compute(unicorn_t *u,
