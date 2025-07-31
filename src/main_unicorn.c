@@ -60,8 +60,9 @@ typedef struct unicorn_opts {
   char *dumpacc2tax;  // Dump accession to taxid map to this file
   uint8_t verbose;    // Verbose mode, 
 	uint8_t withtid;    // Report taxid of reference sequence
-  uint32_t minnreads; // Minimum number of reads to consider  
-  uint64_t minrefl;   // Minimum reference length to consider
+  uint8_t onlypresent; // Only dump accessions found in the acc2tax map
+  uint32_t minnreads;  // Minimum number of reads to consider  
+  uint64_t minrefl;    // Minimum reference length to consider
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -435,6 +436,7 @@ static int unicorn_tidstats(int argc, char **argv)
   unicorn_opt_t opts = {0};
   unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
+  strq_t accq = {0};
   FILE *ofp = NULL;
   while ( (c = ketopt(&o, argc, argv, 1, TIDOPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
@@ -486,7 +488,7 @@ static int unicorn_tidstats(int argc, char **argv)
 				opts.verbose = 1;
 				break;
       case 314: //onlypresent
-        opts.withtid = 1;
+        opts.onlypresent = 1;
         break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
@@ -520,7 +522,11 @@ static int unicorn_tidstats(int argc, char **argv)
     kv_push(char *, fileq, opts.ifile);
   if (opts.filel)
     unicorn_addfilelist(opts.filel, &fileq);
-  //Load taxonomy
+  if (opts.onlypresent) {
+    if (!opts.dumpacc2tax) opts.dumpacc2tax = strdup("acc2tax.khash");
+    kv_init(accq);
+  }
+    //Load taxonomy
 	fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
 	utax = unicorn_loadtaxonomy(opts.acc2tax,
                               opts.names,
@@ -559,6 +565,10 @@ static int unicorn_tidstats(int argc, char **argv)
       fprintf(stderr, "[unicorn::%s] Error: Cannot compute statistics for file %s\n",
                        __func__, fileq.a[i]);
       unicorn_destroy(u);
+      if (opts.onlypresent) {
+        //Extract accessions into queue
+        unicorn_fillaccq(stats, &accq);
+      }
       unicorn_stat_destroy(stats);
       u = NULL;
       stats = NULL;

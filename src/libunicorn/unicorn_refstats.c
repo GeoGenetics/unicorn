@@ -73,7 +73,7 @@ static void _refmapstats(unicorn_stat_t *stats)
     refstat_t refstat = kh_val(refmap, k);  //stats data
     uint32_t _n = kh_size(refstat.READSET); //number of reads
     _treads += _n;
-    if (kh_size(refstat.READSET) < stats->minnreads ) { //filter out
+    if ( _n < stats->minnreads ) { //filter out
         u64set_destroy(refstat.READSET);
         kv_destroy(refstat.aANI);
         kv_destroy(refstat.aEVENT);

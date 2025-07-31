@@ -332,3 +332,17 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   covstats->tad80    = _tad80(covhist);
   int32int64map_destroy(covhist);
 }
+
+
+void unicorn_fillaccq(unicorn_stat_t *stats, strq_t *accq)
+{
+  if (!stats || !accq || !stats->fc) return;
+  taxmap_t *taxmap = (taxmap_t *)stats->__map;
+  khint_t k;
+  kh_foreach(taxmap, k) {
+    refstat_t refstat = kh_val(taxmap, k);
+    
+    kv_push(char *, *accq, acc);
+    }
+  }
+}
