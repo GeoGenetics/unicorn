@@ -63,7 +63,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	covmap_t *covmap = covmap_init(); 
 	uint64_t nalns = 0, nreads = 0;
 	khint_t k;
-	_refKHASHC_T *readset = refset_init();
+	u64set_t *readset = u64set_init();
 	floatmap_t   *anihist = floatmap_init();
 	uint32_t RLHIST[256] = {0}; //Read length count table
 	//Loop over alignments //TODO refector
@@ -71,9 +71,9 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		if (_unmapped(b)) continue;
 		uint32_t qlen = b->core.l_qseq;
-		khint_t _queryhash = kh_hash_str(bam_get_qname(b));
+		khint_t q = kh_hash_str(bam_get_qname(b));
 		int absent;
-		refset_put(readset, _queryhash, &absent);
+		u64set_put(readset, q, &absent);
 		if (absent) {
 			//New read, increment read count
 			nreads++;
@@ -139,7 +139,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	stats->_clen = clen;
 	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
 	bam_destroy1(b);
-	refset_destroy(readset);
+	u64set_destroy(readset);
 	stats->fc = 1;
 	return 0;
 }

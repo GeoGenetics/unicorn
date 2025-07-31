@@ -90,12 +90,11 @@ KHASHL_MAP_INIT(static,
 
 
 /******************
- * Reference hash set
- * This is a hash set of read IDs mapped to the reference
+ * unsigned 64bit int set
  * It is used to count the number of reads mapped to the reference
 */
 KHASHL_SET_INIT(static,               //Scope
-                _refKHASHC_T, refset, //type and prefix
+                u64set_t, u64set, //type and prefix
                 uint64_t,             //key type 
                 kh_hash_dummy, kh_eq_generic) //hash and equality functions
 
@@ -116,7 +115,7 @@ typedef struct refstat_t {
   float        _M;         // Sum of squares of difference from mean
   uint32_t     REFREADMIN;
   uint32_t     REFREADMAX;
-  _refKHASHC_T *READSET;   // Hash set of read IDs mapped to the reference
+  u64set_t     *READSET;   // Hash set of read IDs mapped to the reference
   //Alignment data
   float        REFALNNM;   // mean edit distance
   float        REFALNANIE; // mean Average nucleotide identity(ANI)
@@ -143,20 +142,26 @@ typedef struct refstat_t {
   int32_t      _ntid;        // New Reference sequence ID
 } refstat_t;
 
+KHASHL_MAP_INIT(static,                        //Scope
+                refmap_t, refmap,           //type and prefix
+                int32_t, refstat_t,           //key and value types 
+                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
+#define kh_range_hash(r) kh_hash_dummy((r).qhash)
+
 typedef struct taxstat_t {
   uint32_t     nrefs;    //Number of references in the taxon
   uint64_t     reflen;   // sum of reference lengths
   uint64_t     nalns;    // Number of alignments mapped to the reference
   //Read length data
-  float        readl_mean;   // Mean read length
-  float        readl_var;    // Read length variance
+  float        readl_mean;     // Mean read length
+  float        readl_var;      // Read length variance
   uint32_t     readl_median;   // Read length median
-  uint32_t     readl_mode;   // Read length mode
-  float        _M;         // Sum of squares of difference from mean
+  uint32_t     readl_mode;     // Read length mode
+  float        _M;             // Sum of squares of difference from mean
   uint32_t     readl_min;
   uint32_t     readl_max;
-  _refKHASHC_T *readset;   // Hash set of read IDs mapped to the reference
-  _refKHASHC_T *refset;
+  u64set_t     *readset;       // Hash set of read IDs mapped to the reference
+  refmap_t     *refmap;
   //Alignment data
   float        alnnm_mean;   // mean edit distance
   float        alnani_mean; // mean Average nucleotide identity(ANI)
@@ -183,13 +188,7 @@ typedef struct taxstat_t {
 } taxstat_t;
 
 KHASHL_MAP_INIT(static,                        //Scope
-                refmap_t, refmap,           //type and prefix
-                int32_t, refstat_t,           //key and value types 
-                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
-#define kh_range_hash(r) kh_hash_dummy((r).qhash)
-
-KHASHL_MAP_INIT(static,                        //Scope
-                _taxmap_t, taxmap,           //type and prefix
+                taxmap_t, taxmap,           //type and prefix
                 int32_t, taxstat_t,           //key and value types 
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions 
 
@@ -264,7 +263,7 @@ typedef struct _covstats_t {
                 "n_gini\t"\
                 "tad80\n"
 #define STATSTR2 "Id\t"\
-                 "taxID\t"\ 
+                 "taxID\t"\
                  "Length\t"\
                  "n_alns\t"\
                  "n_reads\t"\
@@ -315,6 +314,8 @@ uint32_t _udCAMODE(uint32_t *v, uint32_t n);
   Computes ANI of alignment record, stores edit distance (nm) in *NM
 */
 float _ANINM(bam1_t *b, uint32_t *NM);
+
+
 
 void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 

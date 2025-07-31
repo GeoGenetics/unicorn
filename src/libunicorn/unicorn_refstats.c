@@ -3,115 +3,8 @@
 
 // ksort
 KSORT_INIT(_sfloat, float, ks_lt_generic)
-KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
 
-static float _tad80(int32int64map_t *hist)
-{
-  if (!hist || !kh_size(hist)) return 0.0f;
-  uint32q_t depths;
-  kv_init(depths);
-  uint64_t mass = 0;
-  khint_t k;
-  kh_foreach(hist, k) {
-    uint32_t d = kh_key(hist, k);
-    uint64_t l = kh_val(hist, k);
-    kv_push(uint32_t, depths, d);
-    mass += l;
-  }
-  ks_introsort(_suint32, depths.n, depths.a);
-  double trim = mass * 0.1;
-  //Remove bottom 10% of coverage
-  for (uint32_t i = 0; i < depths.n; i++) {
-    if (trim <= 0) break;
-    uint32_t cov = depths.a[i];
-    khint_t k    = int32int64map_get(hist, cov);
-    uint64_t l   = kh_val(hist, k);
-    if (l >= trim) {
-      l -= trim;
-      kh_val(hist, k) = l;
-      trim = 0;
-    } else {
-      trim -= l;
-      kh_val(hist, k) = 0;
-    }
-  }
-  trim = mass * 0.1;
-  //Remove top 10% of coverage
-  for (uint32_t i = depths.n-1; i > 0; i--) {
-    if (trim <= 0) break;
-    uint32_t cov = depths.a[i];
-    khint_t k    = int32int64map_get(hist, cov);
-    uint64_t l   = kh_val(hist, k);
-    if (l >= trim) {
-      l -= trim;
-      kh_val(hist, k) = l;
-      trim = 0;
-    } else {
-      trim -= l;
-      kh_val(hist, k) = 0;
-    }
-  }
-  uint64_t rmass = 0, wmass = 0;
-  kh_foreach(hist, k) {
-    uint32_t d = kh_key(hist, k);
-    uint64_t l = kh_val(hist, k);
-    kv_push(uint32_t, depths, d);
-    rmass += l;
-    wmass += d * l;
-  }
-  kv_destroy(depths);
-  return (float)wmass/ rmass;
-}
 
-static inline double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne)
-{
-  double entropy = 0.0;
-  khint_t k;
-  kh_foreach(hist, k) {
-    uint64_t count = kh_val(hist, k);
-    if (count > 0) {
-      double p = (double)count / t;
-      entropy -= p * log2(p);
-    }
-  }
-  //Max entropy is log2(n) where n is the number of unique depths
-  float me = log2(kh_size(hist));
-  if ( kh_size(hist) > 1)
-    *_ne = entropy / me;
-  else
-    *_ne = 1.0f;
-  return entropy;
-}
-
-static inline double _getgini(int32int64map_t *hist,
-                              uint64_t t,
-                              float m,
-                              float *_ng)
-{
-  if (!t || !m) {
-    *_ng = 0.0f;
-    return 0.0f;
-  }
-  uint64_t wsum = 0;
-  khint_t ki, kj;
-  kh_foreach(hist, ki) {
-    uint32_t di = kh_key(hist, ki);
-    uint64_t li = kh_val(hist, ki);    
-    kh_foreach(hist, kj) {
-      uint32_t dj = kh_key(hist, kj);
-      uint64_t lj = kh_val(hist, kj);          
-      wsum += li * lj * abs((int)di - (int)dj);
-    }
-  }
-  float gini = (float)(wsum / (2.0 * t * t * m));
-  //Max gini is (t-1)/t meaning maximum inequality
-  float mgini = ((double)t-1)/t;
-  if (mgini > 0.0f)
-    *_ng = gini / mgini;
-  else
-    *_ng = 0.0f;
-  return gini;
-}
 
 static uint32_t _getreadnum(unicorn_stat_t *stats)
 {
@@ -119,7 +12,7 @@ static uint32_t _getreadnum(unicorn_stat_t *stats)
   khint_t k;
   refmap_t *refmap = (refmap_t *)stats->__map;
 	kh_foreach(refmap, k) {
-    _refKHASHC_T *readset = kh_val(refmap, k).READSET;
+    u64set_t *readset = kh_val(refmap, k).READSET;
     nread += kh_size(readset);
   }
   return nread;
@@ -164,65 +57,7 @@ static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
   return _val;
 }
 
-/**
-* Calculates coverage metrics from a sorted list of events.
-*
-* @param events - Event kvec queue
-* @param l      - Reference sequence length
-*/
-void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
-{
-    // Handle the edge case of no events
-    if ( !events.n || !l) {
-      memset(covstats, 0, sizeof(_covstats_t));
-      return;
-    }
-    // Cov frequency map for entropy and gini computation
-    int32int64map_t *covhist = int32int64map_init();
-    // Initialize accumulators
-    uint64_t tcovbases = 0; //Total covered bases
-    uint64_t tdepthsum = 0; //Total depth sum.
-    // Initialize sweep-line state
-    uint32_t current_depth = 0;
-    uint64_t last_pos = events.a[0].pos, sumsqdepth = 0;
-    // Sweep through all events
-    for (uint64_t i = 0; i < events.n; ++i) {
-        uint64_t current_pos = events.a[i].pos;
-        uint32_t seglen = current_pos - last_pos; //Segment length
-        // If the segment has length and was covered, accumulate metrics
-        if ( seglen  && current_depth ) {
-            // Add to the total number of unique covered bases (breadth)
-            tcovbases += seglen;
-            // Add the area of this segment (length * depth) to the total sum
-            tdepthsum  += seglen * current_depth;
-            sumsqdepth += seglen * current_depth * current_depth;
-            //Add depth value to coverage histogram
-            khint_t k = int32int64map_get(covhist, current_depth);
-            if (k == kh_end(covhist)) { //Add depth value if not present
-                int absent;
-                k = int32int64map_put(covhist, current_depth, &absent);
-                kh_val(covhist, k) = 0;
-            }
-            kh_val(covhist, k) += seglen; //Increase length value for this depth
-        }
-        //Increase or decrease the current depth based on the event type
-        current_depth += events.a[i].e ? 1 : -1;
-        last_pos = current_pos;
-    }
-    // Store the final calculated values in the output pointers
-    covstats->covbases  = tcovbases;
-    covstats->meancov   =  (double)tdepthsum / (double)l;
-    covstats->meanoncov = (double)tdepthsum / (double)tcovbases;
-    double meansqcovb   = tcovbases?(double)sumsqdepth / tcovbases:0.0;
-    covstats->varoncov  = meansqcovb - (covstats->meanoncov * covstats->meanoncov);
-    float _normentropy, _normgini;
-    covstats->entropy  = _getentropy(covhist, tcovbases, &_normentropy);
-    covstats->nentropy = _normentropy;
-    covstats->gini     = _getgini(covhist, tcovbases, covstats->meanoncov, &_normgini);
-    covstats->ngini    = _normgini;
-    covstats->tad80    = _tad80(covhist);
-    int32int64map_destroy(covhist);
-}
+
 
 static void _refmapstats(unicorn_stat_t *stats)
 {
@@ -239,7 +74,7 @@ static void _refmapstats(unicorn_stat_t *stats)
     uint32_t _n = kh_size(refstat.READSET); //number of reads
     _treads += _n;
     if (kh_size(refstat.READSET) < stats->minnreads ) { //filter out
-        refset_destroy(refstat.READSET);
+        u64set_destroy(refstat.READSET);
         kv_destroy(refstat.aANI);
         kv_destroy(refstat.aEVENT);
         kv_push(int32_t, rmq, tid); //tid is added to a removal queue
@@ -302,7 +137,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     khint_t k = refmap_get(refmap, tid); //query reference map
     if ( k == kh_end(refmap) ) {
       // New reference sequence, initialize stats and insert in map
-      refstat.READSET = refset_init(); //Unique queryIDs
+      refstat.READSET = u64set_init(); //Unique queryIDs
       kv_init(refstat.aANI);
       kv_init(refstat.aEVENT);
       refstat.REFLEN = u->hdr->target_len[tid];
@@ -314,8 +149,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     refstat = kh_val(refmap, k);
     uint32_t naln = ++refstat.REFNALNS;
     //Add read name to read set to count number of reads to ref
-    khint_t _queryhash = kh_hash_str(bam_get_qname(b));
-    refset_put(refstat.READSET, _queryhash, &absent);
+    khint_t q = kh_hash_str(bam_get_qname(b));
+    u64set_put(refstat.READSET, q, &absent);
     float mean, delta;
     //mean, median, and variance  Welford's online algorithm
     if (absent) { //Only first instance of query, no counting same read twice
