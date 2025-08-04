@@ -74,6 +74,23 @@ static inline void strip(char *line)
 static int2int_t *_loadnodemap(const char *fname, int *_ret)
 {
 	*_ret = -5;
+	const char *names[48] = {"superkingdom", "domain", "lineage",
+													 "kingdom", "subkingdom", "superphylum",
+													 "phylum", "subphylum", "superclass",
+													 "class", "subclass", "infraclass",
+													 "clade", "cohort", "subcohort",
+													 "superorder", "order", "suborder",
+													 "infraorder", "parvorder", "superfamily",
+													 "family", "subfamily", "tribe",
+													 "subtribe", "infratribe", "genus",
+													 "subgenus", "section", "series",
+													 "subseries", "subsection", "species",
+													 "species group", "species subgroup", "subspecies",
+													 "varietas", "morph", "subvariety",
+													 "forma", "forma specialis", "biotype",
+													 "genotype", "isolate", "pathogroup",
+													 "serogroup", "serotype", "strain"};
+    
 	int2int_t *map = int2int_init();
 	gzFile fp = gzopen(fname, "r");
   if (!map || !fp ) return NULL;
@@ -90,12 +107,16 @@ static int2int_t *_loadnodemap(const char *fname, int *_ret)
 		toks[0] = strpop(&saveptr, '|');
 		//Parent
 		toks[1] = strpop(&saveptr, '|');
+		//Rank
+		toks[2] = strpop(&saveptr, '|');
+		fprintf(stderr, "PENE\t%s\n", toks[2]);
 		taxid  = strtoul(toks[0], NULL, 10);
 		parent = strtoul(toks[1], NULL, 10);
 		k = int2int_put(map, taxid, &absent);
 		//if (!absent) n++;
 		kh_val(map, k) = parent;
 	}
+	sleep(1000);
 	gzclose(fp);
 	return map;
 }
@@ -335,7 +356,18 @@ static uint8_t tloadaccessions(const char *acc2tax,
 
 void unicorn_closetaxonomy(utax_t *utax)
 {
+	khint_t k;
 	if (utax) {
+		if (utax->nodemap) int2int_destroy(utax->nodemap);		
+		if (utax->namemap) {
+			kh_foreach(utax->namemap, k)
+				free((void *)kh_val(utax->namemap, k));
+			int2chr_destroy(utax->namemap);
+		}
+		if (utax->accmap) {
+			emap_chr2int_t *map = utax->accmap;
+			_echr2intdel(map);
+		}
 		free(utax);
 	}
 }
@@ -343,22 +375,21 @@ void unicorn_closetaxonomy(utax_t *utax)
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-														 int *ret,
-														 uint8_t v)
+														 int *ret)
 {
 	*ret = -1;
 	if (!nodes || !acc2tax || !names) return NULL;
 	utax_t *utax = calloc(1, sizeof(utax_t));
-	if (v) fprintf(stderr, "[libunicorn::%s] Loading nodes\n", __func__);
+	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading nodes\n", __func__);
 	if ( tloadnodes(nodes, utax, ret) ) goto exit;
-	if (v) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);
+	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);
 	if ( tloadnames(names, utax, ret) ) goto exit;
 	*ret = -3;
 	if (kh_size(utax->nodemap) != kh_size(utax->namemap))
 		goto exit;
 	utax->numnodes = kh_size(utax->nodemap);
 	*ret = -4;
-	if (v) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
+	if (VERBOSE) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
 	if (tloadaccessions(acc2tax, utax, 8, ret)) goto exit;
 	utax->numaccs = _emapsize(utax->accmap);
 	*ret = 0;
@@ -405,13 +436,12 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
 	if (!map) goto exit;
 	uint8_t low = kh_hash_str(acc) & ((1U<<map->bits) - 1);
 	chr2int_t *submap = map->maps[low];
-	if (!submap) return -3;
+	if (!submap) return -1;
 	khint_t k = chr2int_get(submap, acc);
 	if (k == kh_end(submap)) goto exit; // Not found
 	*absent = 0; // Found
 	ret = kh_val(submap, k);
 	exit:
-		//fprintf(stderr, "\t%s found\n\n", *absent ? "not" : "");
 		return ret; 
 }
 

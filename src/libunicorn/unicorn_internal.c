@@ -68,6 +68,18 @@ static void refmap_free(refmap_t *map)
 	}
 }
 
+static void taxmap_free(taxmap_t *map)
+{
+  khint_t k;
+  kh_foreach(map, k) {
+    taxstat_t v = kh_val(map, k);
+    refmap_free(v.refmap);
+    if (v.readset)
+      u64set_destroy(v.readset);
+  }
+  taxmap_destroy(map);
+}
+
 void unicorn_stat_destroy(unicorn_stat_t *stats)
 {
   if (stats) {
@@ -77,7 +89,7 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
 					refmap_free( (refmap_t *)stats->__map);
 					break;
 				case 1: //per taxid
-					taxmap_destroy((taxmap_t *)stats->__map);
+					taxmap_free((taxmap_t *)stats->__map);
 					break;
 				default:
 					break;
@@ -333,16 +345,34 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   int32int64map_destroy(covhist);
 }
 
-
-void unicorn_fillaccq(unicorn_stat_t *stats, strq_t *accq)
+void unicorn_fillaccq(unicorn_t *u, strq_t *accq)
 {
-  if (!stats || !accq || !stats->fc) return;
-  taxmap_t *taxmap = (taxmap_t *)stats->__map;
-  khint_t k;
-  kh_foreach(taxmap, k) {
-    refstat_t refstat = kh_val(taxmap, k);
-    
-    kv_push(char *, *accq, acc);
-    }
+  for (uint32_t i = 0; i < u->hdr->n_targets; i++) {
+    const char *acc = u->hdr->target_name[i];
+    if (!acc) continue;
+    kv_push(char *, *accq, strdup(acc));
   }
+}
+
+void unicorn_strqdestroy(strq_t accq)
+{
+  for (uint32_t i = 0; i < accq.n; i++) {
+    free(accq.a[i]);
+  }
+  kv_destroy(accq);
+}
+
+void unicorn_printstrq(const char *filename, strq_t accq, utax_t *utax)
+{
+  if (!filename || !accq.n || !utax) return;
+  FILE *fp = fopen(filename, "a");
+  if (!fp) return;
+  int absent;
+  for (uint32_t i = 0; i < accq.n; i++) {
+    const char *acc = accq.a[i];
+    if (!acc) continue;
+    uint32_t tid = utax_gettaxid(utax, acc, &absent);
+    if (!absent) fprintf(fp, "%s\t%s\t%u\n",acc, acc, tid);
+  }
+  fclose(fp);
 }

@@ -34,8 +34,7 @@ static ko_longopt_t unicorn_lopts[] = {
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
-typedef kvec_t(char *) strq_t;
-
+typedef kvec_t(char *)   strq_t;
 
 #include "version.h"
 #include "unicorn.h"
@@ -43,7 +42,7 @@ typedef kvec_t(char *) strq_t;
 static const char *ERRORS[16] = { 0,
 																	"Missing argument(s)",
                                   "File error",
-																	0,
+																	"Failed writing accession map",
 																  0,
 																  0};
 
@@ -266,8 +265,7 @@ static int unicorn_refstats(int argc, char **argv)
     utax = unicorn_loadtaxonomy(opts.acc2tax,
                                 opts.names,
                                 opts.nodes,
-                                &ret,
-                                opts.verbose);
+                                &ret);
     if (!utax) {
       fprintf(stderr, "[unicorn::%s] Error: Failed to load taxonomy data\n", __func__);
       goto exit;
@@ -486,6 +484,7 @@ static int unicorn_tidstats(int argc, char **argv)
         break;
 			case 313: //verbose
 				opts.verbose = 1;
+        unicorn_setverbose();
 				break;
       case 314: //onlypresent
         opts.onlypresent = 1;
@@ -503,14 +502,6 @@ static int unicorn_tidstats(int argc, char **argv)
       }
   }
   if (!opts.ifile) goto exit;
-  fprintf(stderr, "[unicorn::%s] Options:\n"\
-                  "              acc2tax: %s\n"\
-                  "              names:   %s\n"\
-                  "              nodes:   %s\n",
-                  __func__,
-                  opts.acc2tax ? opts.acc2tax : "NULL",
-                  opts.names ? opts.names : "NULL",
-                  opts.nodes ? opts.nodes : "NULL");
 	if (!opts.outstat) ofp = stdout;
   else {
     ofp = fopen(opts.outstat, "w");
@@ -518,31 +509,27 @@ static int unicorn_tidstats(int argc, char **argv)
   }
   //Add files to queue
   strq_t fileq = {0};
-  if (opts.ifile)
-    kv_push(char *, fileq, opts.ifile);
-  if (opts.filel)
-    unicorn_addfilelist(opts.filel, &fileq);
+  if (opts.ifile) kv_push(char *, fileq, opts.ifile);
+  if (opts.filel) unicorn_addfilelist(opts.filel, &fileq);
   if (opts.onlypresent) {
     if (!opts.dumpacc2tax) opts.dumpacc2tax = strdup("acc2tax.khash");
     kv_init(accq);
   }
-    //Load taxonomy
 	fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
-	utax = unicorn_loadtaxonomy(opts.acc2tax,
+	clock_gettime(CLOCK_MONOTONIC, &start);
+  utax = unicorn_loadtaxonomy(opts.acc2tax,
                               opts.names,
                               opts.nodes,
-                              &ret,
-															opts.verbose);
+                              &ret);
   if (!utax) goto exit;
-  fprintf(stderr, "[unicorn::%s] Loaded taxonomy with:\n"\
-                  "              %u nodes\n"\
-                  "              %"PRIu64" accessions\n",
-                  __func__,
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+  fprintf(stderr, "\t%u nodes\n"\
+                  "\t%"PRIu64" accessions\n",
                   unicorn_tax_getnumnodes(utax),
                   unicorn_tax_getnumaccs(utax));
-	//Loop over files 
+	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   for (uint32_t i = 0; i < fileq.n; ++i) {
-    //Load bam data via unicorn API
     fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n",
                      __func__, fileq.a[i]);
     u = unicorn_init(opts.threads,
@@ -556,19 +543,14 @@ static int unicorn_tidstats(int argc, char **argv)
       continue;
     };
     fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
-    ret = -3;
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(opts.minnreads, 0, 1);
+    stats = unicorn_stat_init(opts.minnreads, opts.minrefl, 1);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_tidstat_compute(u, stats, utax)) ) {
-      fprintf(stderr, "[unicorn::%s] Error: Cannot compute statistics for file %s\n",
+      fprintf(stderr, "[unicorn::%s] Error: Failed to compute statistics for file %s\n",
                        __func__, fileq.a[i]);
       unicorn_destroy(u);
-      if (opts.onlypresent) {
-        //Extract accessions into queue
-        unicorn_fillaccq(stats, &accq);
-      }
       unicorn_stat_destroy(stats);
       u = NULL;
       stats = NULL;
@@ -576,31 +558,42 @@ static int unicorn_tidstats(int argc, char **argv)
     }
     clock_gettime(CLOCK_MONOTONIC, &stop);
     ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-    uint64_t taln, tread;
+    uint64_t taln, tread, faln, fread;
     taln  = unicorn_stat_gettaln(stats);
+    faln  = unicorn_stat_getfaln(stats);
     tread = unicorn_stat_gettread(stats);
-    fprintf(stderr, "\t%"PRIu64" alignments\n", taln); 
-    fprintf(stderr, "\t%"PRIu64" reads\n", tread);
-    fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);  
-		fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
+    fread = unicorn_stat_getfread(stats);
+    fprintf(stderr, "\t%" PRIu64 " alignments, %" PRIu64 " passed filters (%f)\n",
+                  taln,
+                  faln, 
+                  (float)faln/taln); 
+    fprintf(stderr, "\t%" PRIu64 " reads, %" PRIu64 " passed filters (%f)\n",
+                  tread,
+                  fread,
+                  (float)fread/tread);
+    fprintf(stderr, "\tout of %" PRIu64 " references (%f)\n",
+                  unicorn_stats_getfrefn(stats),
+                  (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
+    fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+		//Extract accessions into queue
+    if (opts.onlypresent) unicorn_fillaccq(u, &accq);
+    fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
     unicorn_taxstat_print(u, stats, ofp, utax);
     unicorn_stat_destroy(stats);
-    stats = NULL;
     unicorn_destroy(u);
-    u = NULL;
+    stats = NULL;
+    u     = NULL;
 	}
 	kv_destroy(fileq);
-  
-	if (opts.dumpacc2tax) {
-		fprintf(stderr, "[unicorn::%s] Dumping accession map to %s\n",
-										__func__, opts.dumpacc2tax);
-		if (unicorn_dumpacc2tax(utax, opts.dumpacc2tax)) {
-			fprintf(stderr, "[unicorn::%s] ERROR: Failed writing accession map to %s\n",
-											__func__, opts.dumpacc2tax);
-			ret = -1;
-			goto exit;
-		}
-	}
+  if (opts.onlypresent) {
+    unicorn_printstrq(opts.dumpacc2tax ,accq, utax);
+    unicorn_strqdestroy(accq);
+  }
+  //if (opts.dumpacc2tax) {
+	//	fprintf(stderr, "[unicorn::%s] Dumping accession map to %s\n",
+	//									__func__, opts.dumpacc2tax);
+	//	if (unicorn_dumpacc2tax(utax, opts.dumpacc2tax)) goto exit;
+	//}
 	ret = 0;
   exit:
     if (ret) {
@@ -608,6 +601,13 @@ static int unicorn_tidstats(int argc, char **argv)
       tidstats_usage(stderr);
     }
     if (utax) unicorn_closetaxonomy(utax);
+    if (opts.ifile)   free(opts.ifile);
+    if (opts.outstat) free(opts.outstat);
+    if (opts.acc2tax) free(opts.acc2tax);
+    if (opts.names)   free(opts.names);
+    if (opts.nodes)   free(opts.nodes);
+    if (opts.dumpacc2tax) free(opts.dumpacc2tax);
+    if (opts.filel)   free(opts.filel);
     return ret;
 }
 

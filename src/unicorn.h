@@ -154,8 +154,7 @@ typedef struct utax_t *utax_t;
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-                                                         int *_ret,
-                                                         uint8_t v);
+                             int *_ret);
 
 void unicorn_closetaxonomy(utax_t *utax);
 
@@ -190,3 +189,21 @@ void unicorn_bamstat_print(const unicorn_t *u,
                            FILE *fp);
 void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
                             const char *fname);
+
+/**
+ * @brief Extract accessions present in stat file.
+ * @param u     - The unicorn_t object.
+ * @param accq  - The strq_t object to store the accessions.
+ * This function retrieves all accessions present in a unicorn_t object
+ * and stores them in a strq_t object.
+ */
+void unicorn_fillaccq(unicorn_t *u, strq_t *accq);
+
+/** 
+ * @brief Print accessions from a strq_t object to a file.
+ * @param filename - The name of the output file.
+ * @param accq     - The strq_t object containing accessions.
+ * @param utax     - The utax_t object for taxonomic information.
+ */
+void unicorn_printstrq(const char *filename, strq_t accq, utax_t *utax);
+void unicorn_strqdestroy(strq_t accq);

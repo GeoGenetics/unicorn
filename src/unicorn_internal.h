@@ -42,6 +42,7 @@ typedef kvec_t(float)    floatq_t;
 typedef kvec_t(uint32_t) uint32q_t;
 typedef kvec_t(int32_t)  int32q_t;
 typedef kvec_t(char *)   charq_t;
+typedef kvec_t(char *)   strq_t;
 
 extern uint8_t VERBOSE;
 

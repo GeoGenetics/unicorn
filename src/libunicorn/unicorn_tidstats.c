@@ -19,6 +19,8 @@ static void _taxmapstats(unicorn_stat_t *stats)
 				kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
         continue;
     }
+		_falns  += taxstat.nalns;
+		_freads += _n;
 		uint32_t *v_rlen     = taxstat.v_rlen;
 		taxstat.readl_median = _udCAMEDIAN(v_rlen, 256, _n);
 		taxstat.readl_mode   = _udCAMODE(v_rlen, 256);
@@ -47,6 +49,11 @@ static void _taxmapstats(unicorn_stat_t *stats)
     ktax = taxmap_get(taxmap, rmq.a[i]);
     taxmap_del(taxmap, ktax);
   }
+ 	kv_destroy(rmq); 
+	stats->_nreads  = _treads;
+  stats->_nfreads = _freads;
+  stats->_nfalns  = _falns;
+
 }
 
 int unicorn_tidstat_compute(unicorn_t *u,
@@ -137,8 +144,10 @@ int unicorn_tidstat_compute(unicorn_t *u,
 	}
   if (!taln) goto exit; // No alignments found
 	stats->_nalns = taln;	
-	if (VERBOSE)
+	if (VERBOSE) {
 		fprintf(stderr, "[libunicorn::%s] Finished parsing alignment file\n", __func__);
+		fprintf(stderr, "\t%u missing accessions from taxonomy.\n", nabsent);
+	}
 	if (taln)
 		_taxmapstats(stats);
 	bam_destroy1(b);
