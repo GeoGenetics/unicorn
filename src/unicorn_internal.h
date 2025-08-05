@@ -370,11 +370,27 @@ uint8_t _iskhashfp(BGZF *fp);
 
 emap_chr2int_t *_io_loadkhash(BGZF *fp, int *ret);
 
+typedef struct utupple_t {
+  uint32_t taxid;
+  const char *rank;
+  uint8_t rank_val;
+} utuple_t;
+KHASHL_MAP_INIT(static, uint2tup_t, uint2tup,
+                uint32_t, utuple_t,
+                kh_hash_uint32, kh_eq_generic)
+KHASHL_SET_INIT(static,
+                chrset_t, chrset,
+                const char *,
+                kh_hash_str, kh_eq_str)
+KHASHL_MAP_INIT(static, chr2set_t, chr2set,
+                const char *, chrset_t *,
+                kh_hash_str, kh_eq_str)
+
 typedef struct utax_t {
 	uint32_t numnodes; // Number of nodes in the taxonomy
 	uint64_t numaccs;  // Number of accessions in the taxonomy
-	int2int_t *nodemap; // Map of taxid to parent taxid
-	int2chr_t *namemap; // Map of taxid to names
+	uint2tup_t *nodemap; // Map of taxid to parent taxid
+	int2chr_t  *namemap; // Map of taxid to names
 	emap_chr2int_t *accmap; // Map of accession to taxid
 } utax_t;
 

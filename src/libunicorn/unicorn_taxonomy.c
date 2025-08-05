@@ -70,35 +70,33 @@ static inline void strip(char *line)
     line[at] = '\0';
 }
 
+static inline int8_t rank_lt(const char *a, const char *b, chr2set_t *t)
+{
+	if (kh_eq_str(a,b)) return 0;
+	khint_t i = chr2set_get(t, a);
+	chrset_t *a_set = kh_val(t, i);
+	kh_foreach(a_set, i) {
+		if (kh_eq_str(b, kh_key(a_set, i))) return -1;
+	}
+	kh_foreach(a_set, i) {
+		if ( rank_lt(b, kh_key(a_set, i), t) < 0) return -1;
+	}
+	return 1;
+}
+
 //TODO add error communication
-static int2int_t *_loadnodemap(const char *fname, int *_ret)
+static uint2tup_t *_loadnodemap(const char *fname, int *_ret)
 {
 	*_ret = -5;
-	const char *names[48] = {"superkingdom", "domain", "lineage",
-													 "kingdom", "subkingdom", "superphylum",
-													 "phylum", "subphylum", "superclass",
-													 "class", "subclass", "infraclass",
-													 "clade", "cohort", "subcohort",
-													 "superorder", "order", "suborder",
-													 "infraorder", "parvorder", "superfamily",
-													 "family", "subfamily", "tribe",
-													 "subtribe", "infratribe", "genus",
-													 "subgenus", "section", "series",
-													 "subseries", "subsection", "species",
-													 "species group", "species subgroup", "subspecies",
-													 "varietas", "morph", "subvariety",
-													 "forma", "forma specialis", "biotype",
-													 "genotype", "isolate", "pathogroup",
-													 "serogroup", "serotype", "strain"};
-    
-	int2int_t *map = int2int_init();
+	uint2tup_t *map = uint2tup_init();
+	chr2set_t  *levelmap = chr2set_init();
 	gzFile fp = gzopen(fname, "r");
   if (!map || !fp ) return NULL;
 	char buf[4096];
 	char *toks[4];
 	uint32_t taxid, parent;
 	int absent;
-	khint_t k;
+	khint_t k, j;
 	while (gzgets(fp, buf, 4096)) {
 		//Parse data
 		strip(buf);
@@ -109,13 +107,37 @@ static int2int_t *_loadnodemap(const char *fname, int *_ret)
 		toks[1] = strpop(&saveptr, '|');
 		//Rank
 		toks[2] = strpop(&saveptr, '|');
-		fprintf(stderr, "PENE\t%s\n", toks[2]);
 		taxid  = strtoul(toks[0], NULL, 10);
 		parent = strtoul(toks[1], NULL, 10);
-		k = int2int_put(map, taxid, &absent);
-		//if (!absent) n++;
-		kh_val(map, k) = parent;
+		//Add to rank map
+		j = chr2set_get(levelmap, toks[2]);
+		if (j == kh_end(levelmap)) {
+			j = chr2set_put(levelmap, strdup(toks[2]), &absent);
+			kh_val(levelmap, j) = chrset_init();;
+		}	
+		k = uint2tup_put(map, taxid, &absent);
+		utuple_t tup = {parent, kh_key(levelmap, j), 0};
+		kh_val(map, k) = tup;
 	}
+	khint_t l, i = 0;
+	kh_foreach(map, k) {
+		const char *rank = kh_val(map, k).rank;
+		if (kh_eq_str(rank, "no rank")) continue;
+		j = uint2tup_get(map, kh_val(map, k).taxid);
+		const char *prank = kh_val(map, j).rank;
+		//if (kh_eq_str(prank, "no rank")) continue;
+		l = chr2set_get(levelmap, rank);
+		chrset_put(kh_val(levelmap, l), prank, &absent);
+	}
+	kh_foreach(levelmap, l) {
+		chrset_t *set = kh_val(levelmap, l);
+		fprintf(stderr, "%s\n", kh_key(levelmap, l));
+		kh_foreach(set, i) {
+			fprintf(stderr, "\t%s\n", kh_key(set, i));
+		}
+	}
+	fprintf(stderr, "====>%d\n", rank_lt("genus","species", levelmap));
+	fprintf(stderr, "size of ranks: %u %u\n", kh_size(levelmap), i);
 	sleep(1000);
 	gzclose(fp);
 	return map;
@@ -159,7 +181,7 @@ static int8_t tloadnodes(const char *nodes, utax_t *utax, int *_ret)
 {
 	*_ret = -1;
 	if (!nodes || !utax) goto exit;
-	int2int_t *map = _loadnodemap(nodes, _ret);
+	uint2tup_t *map = _loadnodemap(nodes, _ret);
 	if (!map) goto exit;
 	utax->nodemap = map;
 	utax->numnodes = kh_size(map);
@@ -358,7 +380,7 @@ void unicorn_closetaxonomy(utax_t *utax)
 {
 	khint_t k;
 	if (utax) {
-		if (utax->nodemap) int2int_destroy(utax->nodemap);		
+		if (utax->nodemap) uint2tup_destroy(utax->nodemap);
 		if (utax->namemap) {
 			kh_foreach(utax->namemap, k)
 				free((void *)kh_val(utax->namemap, k));
