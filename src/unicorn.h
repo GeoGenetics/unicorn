@@ -142,19 +142,20 @@ Members and methods are accessed via the unicron_* functions
 */
 typedef struct utax_t *utax_t;
 
-/*
-    Loads taxonomic data.
+/** 
+    @brief Load taxonomic data.
     @param acc2tax - Accession to taxid mapping file
     @param names   - Taxonomy names file
     @param nodes   - Taxonomy nodes file
-      @param _ret    - Pointer to an int to store the return code
-      @param v       - Verbose mode, print loading messages
+    @param rank    - Taxonomic rank to use
+    @param _ret    - Pointer to an int to store the return code
         @returns - utax_t* on success NULL on error
 */
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-                             int *_ret);
+														 const char *rank,
+														 int *ret);
 
 void unicorn_closetaxonomy(utax_t *utax);
 

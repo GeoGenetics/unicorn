@@ -398,8 +398,11 @@ typedef struct utax_t {
 	nodes_t  nodes; // Map of taxid to parent taxid
 	int2chr_t  *namemap; // Map of taxid to names
 	emap_chr2int_t *accmap; // Map of accession to taxid
+  const char *rank;
 } utax_t;
 
 uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);
 
 const char *utax_getname(utax_t *utax, uint32_t taxid);
+
+uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank);

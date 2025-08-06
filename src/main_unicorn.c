@@ -27,9 +27,10 @@ static ko_longopt_t unicorn_lopts[] = {
     { "dumpacc2tax",     ko_required_argument, 312 },
   	{ "verbose",         ko_no_argument,       313 },  
 		{ "onlypresent",     ko_no_argument,       314 },
+    { "nodump_bam"  ,    ko_no_argument,       315 },
     { "help",            ko_no_argument,       316 },
     { "version",         ko_no_argument,       317 },
-    { "nodump_bam"  ,    ko_no_argument,       315 },
+    { "rank",            ko_required_argument, 318 },
     { "out",             ko_required_argument, 320 },
     {0 ,0 ,0}
 };
@@ -43,8 +44,8 @@ static const char *ERRORS[16] = { 0,
 																	"Missing argument(s)",
                                   "File error",
 																	"Failed writing accession map",
-																  0,
-																  0};
+																  "Memory allocation error",
+																  "Unknown error"};
 
 typedef struct unicorn_opts {
   int  threads;       // Number of threads to use
@@ -57,6 +58,7 @@ typedef struct unicorn_opts {
   char *names;        // Taxonomy names file
   char *nodes;        // Taxonomy nodes file
   char *dumpacc2tax;  // Dump accession to taxid map to this file
+  char *rank;         // Rank to use
   uint8_t verbose;    // Verbose mode, 
 	uint8_t withtid;    // Report taxid of reference sequence
   uint8_t onlypresent; // Only dump accessions found in the acc2tax map
@@ -135,6 +137,12 @@ static void tidstats_usage(FILE *fp)
             "                               Providing a .khash file is much faster.\n"\
             "  -n <str> | --names <str>     Taxonomy names file.\n"\
             "  -d <str> | --nodes <str>     Taxonomy nodes file\n"\
+            "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
+            "      For example \"--minreads 100\" to filter out references with\n"\
+            "      less than 100 reads.\n"\
+            "      Available filters:\n"\
+            "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
+            "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
             "  --filelist <str>             File containing input file paths. One per line.\n"\
             "  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"\
             "  --onlypresent                Only report accessions found in the acc2tax map\n"\
@@ -265,6 +273,7 @@ static int unicorn_refstats(int argc, char **argv)
     utax = unicorn_loadtaxonomy(opts.acc2tax,
                                 opts.names,
                                 opts.nodes,
+                                opts.rank,
                                 &ret);
     if (!utax) {
       fprintf(stderr, "[unicorn::%s] Error: Failed to load taxonomy data\n", __func__);
@@ -489,11 +498,14 @@ static int unicorn_tidstats(int argc, char **argv)
       case 314: //onlypresent
         opts.onlypresent = 1;
         break;
+      case 318: //rank
+        opts.rank = strdup(o.arg);
+        break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
                         argv[ o.ind - 1]);
-        break;
+        goto exit;
       case '?':
         fprintf(stderr, "[unicorn::%s] Unknown option %s\n",
                         __func__,
@@ -520,6 +532,7 @@ static int unicorn_tidstats(int argc, char **argv)
   utax = unicorn_loadtaxonomy(opts.acc2tax,
                               opts.names,
                               opts.nodes,
+                              opts.rank,
                               &ret);
   if (!utax) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
@@ -532,6 +545,7 @@ static int unicorn_tidstats(int argc, char **argv)
   for (uint32_t i = 0; i < fileq.n; ++i) {
     fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n",
                      __func__, fileq.a[i]);
+    //TODO create bam
     u = unicorn_init(opts.threads,
                      fileq.a[i],
                      0,
@@ -571,7 +585,7 @@ static int unicorn_tidstats(int argc, char **argv)
                   tread,
                   fread,
                   (float)fread/tread);
-    fprintf(stderr, "\tout of %" PRIu64 " references (%f)\n",
+    fprintf(stderr, "\tout of %" PRIu64 " taxids (%f)\n",
                   unicorn_stats_getfrefn(stats),
                   (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
@@ -589,11 +603,6 @@ static int unicorn_tidstats(int argc, char **argv)
     unicorn_printstrq(opts.dumpacc2tax ,accq, utax);
     unicorn_strqdestroy(accq);
   }
-  //if (opts.dumpacc2tax) {
-	//	fprintf(stderr, "[unicorn::%s] Dumping accession map to %s\n",
-	//									__func__, opts.dumpacc2tax);
-	//	if (unicorn_dumpacc2tax(utax, opts.dumpacc2tax)) goto exit;
-	//}
 	ret = 0;
   exit:
     if (ret) {

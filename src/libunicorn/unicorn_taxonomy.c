@@ -114,11 +114,18 @@ KAVL_INIT(myAVL, avlnode_t, head, _cmp)
 //TODO add error communication
 static nodes_t _loadnodemap(const char *fname, int *_ret)
 {
-	*_ret = -5;
+	*_ret = -1;
+	nodes_t nodes = {0,0};
 	uint2tup_t *map = uint2tup_init();
 	chr2set_t  *levelmap = chr2set_init();
+	if (!map || !levelmap) { *_ret = 4; goto exit; }
 	gzFile fp = gzopen(fname, "r");
-	if (!map || !fp ) return (nodes_t){0};
+	if (!fp) {
+		*_ret = 2;
+		if (VERBOSE)
+			fprintf(stderr, "[libunicorn::%s] Error opening taxonomy nodes file %s\n", __func__, fname);
+		goto exit;
+	}
 	char buf[4096];
 	char *toks[4];
 	uint32_t taxid, parent;
@@ -146,7 +153,7 @@ static nodes_t _loadnodemap(const char *fname, int *_ret)
 		utuple_t tup = {parent, kh_key(levelmap, j), 0};
 		kh_val(map, k) = tup;
 	}
-	khint_t l, i = 0;
+	khint_t l;
 	//Get rank tree
 	kh_foreach(map, k) {
 		const char *rank = kh_val(map, k).rank;
@@ -167,13 +174,12 @@ static nodes_t _loadnodemap(const char *fname, int *_ret)
 	}
 	kavl_itr_t(myAVL) itr;
   kavl_itr_first(myAVL, root, &itr);  // place at first
-	l = 0;
 	chr2int_t *levels = chr2int_init();
+	j = 0;
 	do {                             // traverse
     const avlnode_t *p = kavl_at(&itr);
 		l = chr2int_put(levels, p->key, &absent);
-		kh_val(levels, l) = l;
-		free((void*)p);              // free node
+		kh_val(levels, l) = j++;
   } while (kavl_itr_next(myAVL, &itr));
 	//Set rank levels
 	kh_foreach(map, k) {
@@ -181,17 +187,16 @@ static nodes_t _loadnodemap(const char *fname, int *_ret)
 		l = chr2int_get(levels, rank);
 		kh_val(map, k).rank_val = kh_val(levels, l);
 	}
-	kh_foreach(levelmap, j) {
-		free((void*)kh_key(levelmap, j));
-		chrset_destroy(kh_val(levelmap, j));
-	}	
+	
+	kh_foreach(levelmap, j)
+		chrset_destroy(kh_val(levelmap, j));	
 	chr2set_destroy(levelmap);
 	gzclose(fp);
-	nodes_t nodes = {0,0};
 	nodes.map = map;
 	nodes.levelmap = levels;
 	*_ret = 0;
-	return nodes;
+	exit:
+		return nodes;
 }
 
 static int2chr_t *_loadtaxnames(const char *fname)
@@ -448,23 +453,24 @@ void unicorn_closetaxonomy(utax_t *utax)
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
+														 const char *rank,
 														 int *ret)
 {
-	*ret = -1;
+	*ret = 5;
 	if (!nodes || !acc2tax || !names) return NULL;
 	utax_t *utax = calloc(1, sizeof(utax_t));
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading nodes\n", __func__);
 	if ( tloadnodes(nodes, utax, ret) ) goto exit;
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);
 	if ( tloadnames(names, utax, ret) ) goto exit;
-	*ret = -3;
+	*ret = 5;
 	if (kh_size(utax->nodes.map) != kh_size(utax->namemap))
 		goto exit;
 	utax->numnodes = kh_size(utax->nodes.map);
-	*ret = -4;
 	if (VERBOSE) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
 	if (tloadaccessions(acc2tax, utax, 8, ret)) goto exit;
 	utax->numaccs = _emapsize(utax->accmap);
+	utax->rank = rank ? strdup(rank) : NULL;
 	*ret = 0;
 	exit:
 		if (*ret) {
@@ -526,4 +532,25 @@ const char *utax_getname(utax_t *utax, uint32_t taxid)
 	khint_t k = int2chr_get(map, taxid);
 	if (k == kh_end(map)) return NULL; // Not found
 	return kh_val(map, k); // Return name
+}
+
+uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank)
+{
+	if (!utax || !rank) return -1;
+	uint2tup_t *nodemap = utax->nodes.map;
+	chr2int_t  *levels = utax->nodes.levelmap;
+	//Get node info: parent and rank level
+	khint_t k  = uint2tup_get(nodemap, taxid);
+	uint32_t parent   = kh_val(nodemap, k).taxid;
+	uint32_t rank_val = kh_val(nodemap, k).rank_val;
+	//Get dsired rank level
+	k = chr2int_get(levels, rank);
+	uint32_t trank_val = kh_val(levels, k);
+	while (rank_val < trank_val) {
+		taxid = parent;
+		k = uint2tup_get(nodemap, parent);
+		parent   = kh_val(nodemap, k).taxid;
+		rank_val = kh_val(nodemap, k).rank_val;
+	}
+	return taxid;
 }

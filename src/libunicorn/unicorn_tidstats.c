@@ -4,7 +4,8 @@
 static void _taxmapstats(unicorn_stat_t *stats)
 {
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;
-	uint32_t _treads = 0, _freads = 0, _falns = 0;
+	uint32_t _freads = 0;
+	uint64_t _falns  = 0;
 	int32q_t rmq;
 	kv_init(rmq);
 	khint_t ktax, kref;
@@ -12,7 +13,6 @@ static void _taxmapstats(unicorn_stat_t *stats)
 		int32_t taxid = kh_key(taxmap, ktax);
 		taxstat_t taxstat = kh_val(taxmap, ktax);
 		uint32_t _n = kh_size(taxstat.readset);
-		_treads += _n;
 		if ( _n < stats->minnreads ) { //filter out
         u64set_destroy(taxstat.readset);
 				refmap_destroy(taxstat.refmap);
@@ -50,7 +50,6 @@ static void _taxmapstats(unicorn_stat_t *stats)
     taxmap_del(taxmap, ktax);
   }
  	kv_destroy(rmq); 
-	stats->_nreads  = _treads;
   stats->_nfreads = _freads;
   stats->_nfalns  = _falns;
 
@@ -63,21 +62,31 @@ int unicorn_tidstat_compute(unicorn_t *u,
 	int ret = -1, absent;
 	if (!u || !stats || !utax) goto exit;;
 	bam1_t *b = bam_init1();
-  uint64_t taln = 0;
+  uint64_t taln = 0, kaln = 0;
 	uint32_t nabsent = 0;
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;	
+	chrset_t *missing = chrset_init();
+	u64set_t *readset = u64set_init();
+	const char *rank = utax->rank;
 	khint_t ktax, kref;
 	//Loop over alignments //TODO refector
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
-	  if (_unmapped(b)) continue;
+		taln++;
+		if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     int32_t tid   = b->core.tid;
 		//get taxid for this reference
 		uint32_t taxid = utax_gettaxid(utax,
 																	 u->hdr->target_name[tid],
 																	 &absent);
-		if (absent) {nabsent++; continue;}
-		taln++;
+		if (absent) {
+			chrset_put(missing, u->hdr->target_name[tid], &absent);
+			nabsent++;
+			continue;
+		}
+		//If rank is set, get taxid for parent node at that rank
+		if (rank) taxid = utax_getidatrank(utax, taxid, rank);
+		kaln++;
 		uint32_t qlen = b->core.l_qseq;
     taxstat_t taxstat = {0};
 		ktax = taxmap_get(taxmap, taxid); //query taxid
@@ -93,9 +102,10 @@ int unicorn_tidstat_compute(unicorn_t *u,
     // update stats
     taxstat = kh_val(taxmap, ktax);
     uint32_t naln = ++taxstat.nalns;
-    //Add read name to read set to count number of reads to ref
+    //Add read name to read set to count number of reads to tid
     khint_t q = kh_hash_str(bam_get_qname(b));
 		float mean, delta;
+		u64set_put(readset, q, &absent);
 		u64set_put(taxstat.readset, q, &absent);
     //mean, median, and variance  Welford's online algorithm
     if (absent) { //Only first instance of query, no counting same read twice
@@ -142,18 +152,23 @@ int unicorn_tidstat_compute(unicorn_t *u,
     //Don't loose your stats value
     kh_val(taxmap, ktax) = taxstat;
 	}
-  if (!taln) goto exit; // No alignments found
-	stats->_nalns = taln;	
+	stats->_nalns  = taln;
+	stats->_nreads = kh_size(readset);
+	if (!kaln) goto exit; // No alignments found
 	if (VERBOSE) {
 		fprintf(stderr, "[libunicorn::%s] Finished parsing alignment file\n", __func__);
-		fprintf(stderr, "\t%u missing accessions from taxonomy.\n", nabsent);
+		fprintf(stderr, "\tskipped %u alignments due to", nabsent);
+		fprintf(stderr, "\t%u missing accessions from taxonomy.\n",
+										 kh_size(missing));
 	}
-	if (taln)
+	if (kaln)
 		_taxmapstats(stats);
 	bam_destroy1(b);
   stats->fc = 1;
   ret = 0;
   exit:
+		u64set_destroy(readset);
+		chrset_destroy(missing);
     return ret;
 }
 
