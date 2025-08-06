@@ -36,6 +36,7 @@ SOFTWARE.
 #include "klib/khashl.h"
 #include "klib/ksort.h"
 #include "klib/kthread.h"
+#include "klib/kavl.h"
 #include "klib/kvec.h"
 typedef kvec_t(bam1_t)   bamq_t;
 typedef kvec_t(float)    floatq_t;
@@ -386,10 +387,15 @@ KHASHL_MAP_INIT(static, chr2set_t, chr2set,
                 const char *, chrset_t *,
                 kh_hash_str, kh_eq_str)
 
+typedef struct nodes_t {
+  uint2tup_t *map;
+  chr2int_t *levelmap;
+} nodes_t;
+
 typedef struct utax_t {
 	uint32_t numnodes; // Number of nodes in the taxonomy
 	uint64_t numaccs;  // Number of accessions in the taxonomy
-	uint2tup_t *nodemap; // Map of taxid to parent taxid
+	nodes_t  nodes; // Map of taxid to parent taxid
 	int2chr_t  *namemap; // Map of taxid to names
 	emap_chr2int_t *accmap; // Map of accession to taxid
 } utax_t;

@@ -70,28 +70,55 @@ static inline void strip(char *line)
     line[at] = '\0';
 }
 
-static inline int8_t rank_lt(const char *a, const char *b, chr2set_t *t)
+typedef struct  avlnode_t avlnode_t;
+
+typedef struct avlnode_t {
+	const char *key;
+	KAVL_HEAD(avlnode_t) head;
+	chr2set_t *tree;
+} avlnode_t;
+
+static inline uint8_t _visit2(const char *node1,
+															const char *node2,
+															chr2set_t *tree,
+															chr2int_t *touched)
 {
-	if (kh_eq_str(a,b)) return 0;
-	khint_t i = chr2set_get(t, a);
-	chrset_t *a_set = kh_val(t, i);
-	kh_foreach(a_set, i) {
-		if (kh_eq_str(b, kh_key(a_set, i))) return -1;
+	//Get parents
+	khint_t j, k = chr2set_get(tree, node1);
+	chrset_t *pset = kh_val(tree, k);
+	kh_foreach(pset, j) {
+		int absent;
+		const char *parent = kh_key(pset, j);
+		if (kh_eq_str(parent, node2)) return 1;
+		//Check if visited, report ls if so
+		khint_t l = chr2int_get(touched, parent);
+		if (l != kh_end(touched)) return 0;
+		//Mark as touched
+		l = chr2int_put(touched, parent, &absent);
+		if (_visit2(parent, node2, tree, touched)) return 1;
 	}
-	kh_foreach(a_set, i) {
-		if ( rank_lt(b, kh_key(a_set, i), t) < 0) return -1;
-	}
+	return 0;
+}
+
+static inline int8_t _rankcmp(const char *node1, const char *node2, chr2set_t *tree)
+{
+	if (kh_eq_str(node1, node2)) return 0;
+	chr2int_t *touched = chr2int_init();
+	if (_visit2(node1, node2, tree, touched)) return -1;
 	return 1;
 }
 
+#define _cmp(p,q) ( _rankcmp( (p)->key, (q)->key, (p)->tree) )
+KAVL_INIT(myAVL, avlnode_t, head, _cmp)
+
 //TODO add error communication
-static uint2tup_t *_loadnodemap(const char *fname, int *_ret)
+static nodes_t _loadnodemap(const char *fname, int *_ret)
 {
 	*_ret = -5;
 	uint2tup_t *map = uint2tup_init();
 	chr2set_t  *levelmap = chr2set_init();
 	gzFile fp = gzopen(fname, "r");
-  if (!map || !fp ) return NULL;
+	if (!map || !fp ) return (nodes_t){0};
 	char buf[4096];
 	char *toks[4];
 	uint32_t taxid, parent;
@@ -113,34 +140,58 @@ static uint2tup_t *_loadnodemap(const char *fname, int *_ret)
 		j = chr2set_get(levelmap, toks[2]);
 		if (j == kh_end(levelmap)) {
 			j = chr2set_put(levelmap, strdup(toks[2]), &absent);
-			kh_val(levelmap, j) = chrset_init();;
+			kh_val(levelmap, j) = chrset_init();
 		}	
 		k = uint2tup_put(map, taxid, &absent);
 		utuple_t tup = {parent, kh_key(levelmap, j), 0};
 		kh_val(map, k) = tup;
 	}
 	khint_t l, i = 0;
+	//Get rank tree
 	kh_foreach(map, k) {
 		const char *rank = kh_val(map, k).rank;
 		if (kh_eq_str(rank, "no rank")) continue;
 		j = uint2tup_get(map, kh_val(map, k).taxid);
 		const char *prank = kh_val(map, j).rank;
-		//if (kh_eq_str(prank, "no rank")) continue;
 		l = chr2set_get(levelmap, rank);
 		chrset_put(kh_val(levelmap, l), prank, &absent);
 	}
+	//Loop over ranks and insert in AVL tree
+	avlnode_t *root = 0;
 	kh_foreach(levelmap, l) {
-		chrset_t *set = kh_val(levelmap, l);
-		fprintf(stderr, "%s\n", kh_key(levelmap, l));
-		kh_foreach(set, i) {
-			fprintf(stderr, "\t%s\n", kh_key(set, i));
-		}
+		avlnode_t *q, *p = calloc(1, sizeof(avlnode_t));
+		p->key = kh_key(levelmap, l);
+		p->tree = levelmap;
+		q = kavl_insert(myAVL, &root, p, 0);
+		if (p != q) free(p);         // if already present, free
 	}
-	fprintf(stderr, "====>%d\n", rank_lt("genus","species", levelmap));
-	fprintf(stderr, "size of ranks: %u %u\n", kh_size(levelmap), i);
-	sleep(1000);
+	kavl_itr_t(myAVL) itr;
+  kavl_itr_first(myAVL, root, &itr);  // place at first
+	l = 0;
+	chr2int_t *levels = chr2int_init();
+	do {                             // traverse
+    const avlnode_t *p = kavl_at(&itr);
+		l = chr2int_put(levels, p->key, &absent);
+		kh_val(levels, l) = l;
+		free((void*)p);              // free node
+  } while (kavl_itr_next(myAVL, &itr));
+	//Set rank levels
+	kh_foreach(map, k) {
+		const char *rank = kh_val(map, k).rank;
+		l = chr2int_get(levels, rank);
+		kh_val(map, k).rank_val = kh_val(levels, l);
+	}
+	kh_foreach(levelmap, j) {
+		free((void*)kh_key(levelmap, j));
+		chrset_destroy(kh_val(levelmap, j));
+	}	
+	chr2set_destroy(levelmap);
 	gzclose(fp);
-	return map;
+	nodes_t nodes = {0,0};
+	nodes.map = map;
+	nodes.levelmap = levels;
+	*_ret = 0;
+	return nodes;
 }
 
 static int2chr_t *_loadtaxnames(const char *fname)
@@ -181,10 +232,9 @@ static int8_t tloadnodes(const char *nodes, utax_t *utax, int *_ret)
 {
 	*_ret = -1;
 	if (!nodes || !utax) goto exit;
-	uint2tup_t *map = _loadnodemap(nodes, _ret);
-	if (!map) goto exit;
-	utax->nodemap = map;
-	utax->numnodes = kh_size(map);
+	utax->nodes = _loadnodemap(nodes, _ret);
+	if (_ret) goto exit;
+	utax->numnodes = kh_size(utax->nodes.map);
 	*_ret = 0;
 	exit:
 		return *_ret;
@@ -380,7 +430,8 @@ void unicorn_closetaxonomy(utax_t *utax)
 {
 	khint_t k;
 	if (utax) {
-		if (utax->nodemap) uint2tup_destroy(utax->nodemap);
+		if (utax->nodes.map) uint2tup_destroy(utax->nodes.map);
+		if (utax->nodes.levelmap) chr2int_destroy(utax->nodes.levelmap);
 		if (utax->namemap) {
 			kh_foreach(utax->namemap, k)
 				free((void *)kh_val(utax->namemap, k));
@@ -407,9 +458,9 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);
 	if ( tloadnames(names, utax, ret) ) goto exit;
 	*ret = -3;
-	if (kh_size(utax->nodemap) != kh_size(utax->namemap))
+	if (kh_size(utax->nodes.map) != kh_size(utax->namemap))
 		goto exit;
-	utax->numnodes = kh_size(utax->nodemap);
+	utax->numnodes = kh_size(utax->nodes.map);
 	*ret = -4;
 	if (VERBOSE) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
 	if (tloadaccessions(acc2tax, utax, 8, ret)) goto exit;
