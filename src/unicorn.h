@@ -73,32 +73,27 @@ unicorn's BAM statistic computation interface
 
 
 ****************************************************/
+#define REFSTATS 0 
+#define TIDSTATS 1
 
 /**
  * @brief unicorn's reference based statistics
  * This opaque structure is accessed via the unicorn_refstats_* functions.
  */
 typedef struct unicorn_stat_t *unicorn_stat_t;
-/**
- * @brief a refstats object
- * @param statstr - String indicating which statistics to compute
- * @return - unicorn_stat_t* on success NULL on error
- */
-unicorn_stat_t *unicorn_refstat_init(const char *statstr,
-                                        uint32_t minnreads,
-                                        uint32_t minrefl);
-void unicorn_refstat_destroy(unicorn_stat_t *stats);
 
 /**
- * @brief Initialize a bamstats object
+ * @brief Initialize a unicorn_stat_t object
  * @param minnreads - Minimum number of reads per reference
  * @param minrefl   - Minimum length of reference to consider
+ * @param minani    - Minimum Average Nucleotide Identity (ANI) to consider
  * @param flg       - Flag to indicate which map to use:
                        0 - per reference, 1 - per taxid, other - no map
  * @return - unicorn_bamstat_t* on success NULL on error
  */
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
+																	float    minani,
                                   uint8_t  flg);
 void unicorn_stat_destroy(unicorn_stat_t *stats);
 

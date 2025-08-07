@@ -4,27 +4,42 @@
 static void _taxmapstats(unicorn_stat_t *stats)
 {
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;
-	uint32_t _freads = 0;
-	uint64_t _falns  = 0;
+	uint64_t _falns  = 0, _frefs = 0;;
+	u64set_t *freadset = u64set_init();	
 	int32q_t rmq;
 	kv_init(rmq);
 	khint_t ktax, kref;
+	//Loop over taxids
+	if (VERBOSE) {
+		fprintf(stderr, "[libunicorn::%s] Collecting stats for %u tids\n",
+										__func__, 
+										kh_size(taxmap));
+	}
+	struct timespec start, stop;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	kh_foreach(taxmap, ktax) {
-		int32_t taxid = kh_key(taxmap, ktax);
+		uint32_t taxid = kh_key(taxmap, ktax);
 		taxstat_t taxstat = kh_val(taxmap, ktax);
-		uint32_t _n = kh_size(taxstat.readset);
-		if ( _n < stats->minnreads ) { //filter out
+		if ( (kh_size(taxstat.readset) < stats->minnreads) ||
+	 			 (taxstat.alnani_mean < stats->minani) ) { //filter out
         u64set_destroy(taxstat.readset);
 				refmap_destroy(taxstat.refmap);
 				kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
         continue;
     }
 		_falns  += taxstat.nalns;
-		_freads += _n;
+		//Add to total read set to avoid double counting
+		kh_foreach(taxstat.readset, kref) {
+			uint64_t qid = kh_key(taxstat.readset, kref);
+			int absent;
+			//Add read to the global read set
+			u64set_put(freadset, qid, &absent);
+		}
 		uint32_t *v_rlen     = taxstat.v_rlen;
-		taxstat.readl_median = _udCAMEDIAN(v_rlen, 256, _n);
+		taxstat.readl_median = _udCAMEDIAN(v_rlen, 256, kh_size(taxstat.readset));
 		taxstat.readl_mode   = _udCAMODE(v_rlen, 256);
 		refmap_t *refmap = taxstat.refmap;
+		_frefs  += kh_size(refmap);
 		kh_foreach(refmap, kref) {
 			refstat_t refstat = kh_val(refmap, kref);
 			ueventq_t aEVENT = refstat.aEVENT;
@@ -43,16 +58,22 @@ static void _taxmapstats(unicorn_stat_t *stats)
     	kv_destroy(aEVENT);
 			kh_val(refmap, kref) = refstat; //Don't loose your stats value
 		}
-		kh_val(taxmap, ktax)    = taxstat;
+		kh_val(taxmap, ktax) = taxstat;
 	}
 	for (uint32_t i = 0; i < rmq.n; i++) {
     ktax = taxmap_get(taxmap, rmq.a[i]);
     taxmap_del(taxmap, ktax);
   }
  	kv_destroy(rmq); 
-  stats->_nfreads = _freads;
+ 	clock_gettime(CLOCK_MONOTONIC, &stop); 
+	if (VERBOSE) {
+		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+	}
+	stats->_nfreads = kh_size(freadset);
+	stats->_nfrefs = _frefs;
   stats->_nfalns  = _falns;
-
+	u64set_destroy(freadset);
 }
 
 int unicorn_tidstat_compute(unicorn_t *u,
@@ -60,21 +81,25 @@ int unicorn_tidstat_compute(unicorn_t *u,
 														utax_t *utax)
 {
 	int ret = -1, absent;
+	chrset_t *missing = NULL;
+	u64set_t *readset = NULL;
 	if (!u || !stats || !utax) goto exit;;
 	bam1_t *b = bam_init1();
-  uint64_t taln = 0, kaln = 0;
+  uint64_t taln = 0, kaln = 0, ns;
 	uint32_t nabsent = 0;
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;	
-	chrset_t *missing = chrset_init();
-	u64set_t *readset = u64set_init();
+	missing = chrset_init();
+	readset = u64set_init();
 	const char *rank = utax->rank;
 	khint_t ktax, kref;
+	struct timespec start, stop;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	//Loop over alignments //TODO refector
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		taln++;
 		if (_unmapped(b)) continue;
-    if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
-    int32_t tid   = b->core.tid;
+    if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;  
+		int32_t tid   = b->core.tid;
 		//get taxid for this reference
 		uint32_t taxid = utax_gettaxid(utax,
 																	 u->hdr->target_name[tid],
@@ -140,7 +165,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
 		//Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
-    mean = taxstat.alnani_mean;
+		mean = taxstat.alnani_mean;
     delta = ani-mean;
     taxstat.alnani_mean += delta/naln;
     taxstat._MANI = delta * (ani - taxstat.alnani_mean);
@@ -152,14 +177,17 @@ int unicorn_tidstat_compute(unicorn_t *u,
     //Don't loose your stats value
     kh_val(taxmap, ktax) = taxstat;
 	}
+	clock_gettime(CLOCK_MONOTONIC, &stop);
 	stats->_nalns  = taln;
 	stats->_nreads = kh_size(readset);
 	if (!kaln) goto exit; // No alignments found
 	if (VERBOSE) {
 		fprintf(stderr, "[libunicorn::%s] Finished parsing alignment file\n", __func__);
 		fprintf(stderr, "\tskipped %u alignments due to", nabsent);
-		fprintf(stderr, "\t%u missing accessions from taxonomy.\n",
+		fprintf(stderr, " %u missing accessions from taxonomy.\n",
 										 kh_size(missing));
+		ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 	}
 	if (kaln)
 		_taxmapstats(stats);
@@ -167,8 +195,8 @@ int unicorn_tidstat_compute(unicorn_t *u,
   stats->fc = 1;
   ret = 0;
   exit:
-		u64set_destroy(readset);
-		chrset_destroy(missing);
+		if (readset) u64set_destroy(readset);
+		if (missing) chrset_destroy(missing);
     return ret;
 }
 
@@ -185,7 +213,7 @@ void unicorn_taxstat_print(const unicorn_t *u,
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;
   kh_foreach(taxmap, k) {
 		taxstat_t taxstat = kh_val(taxmap, k);
-		fprintf(fp, "%u\t%s\t%u\t%lu\t%u\t%.2f\t%.2f\t%u\t%u\t%u\t%u\t%.2f\t%.2f\t%lu\n",
+		fprintf(fp, "%u\t%s\t%u\t%"PRIu64"\t%u\t%.2f\t%.2f\t%u\t%u\t%u\t%u\t%.2f\t%.2f\t%"PRIu64"\n",
 								kh_key(taxmap, k), 
 								utax_getname(utax, kh_key(taxmap, k)),
 								taxstat.nrefs,

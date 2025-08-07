@@ -27,6 +27,7 @@ SOFTWARE.
 #include <math.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <time.h>
 
 #include <htslib/hts.h>
 #include <htslib/thread_pool.h>
@@ -207,9 +208,12 @@ typedef struct unicorn_stats_t {
   uint8_t mapflg; //Map type, 0 for per reference, 1 for per taxid
 	uint64_t _nalns;
   uint64_t _nreads;
-  uint64_t _nfreads;
+	uint32_t _nrefs;				//Number of references in bam
+	uint64_t _nfreads;
   uint64_t _nfalns;
-  float    _mrlen;        //Mean read length
+	uint32_t _nfrefs;				//Number of filtered references after computation
+	//bam wide stats 
+	float    _mrlen;        //Mean read length
   float    _vrlen;        //Variance of read length
   uint32_t _mdrlen;       //Median read length
   uint32_t _morlen;       //Mode read length
@@ -222,6 +226,7 @@ typedef struct unicorn_stats_t {
   //Filters
   uint32_t minnreads; // Minimum number of reads to consider a reference
   uint32_t minrefl;    // Minimum reference length to consider
+	float 	 minani;	 // Minimum ANI to consider a reference
 } unicorn_stat_t;
 
 typedef struct _covstats_t {

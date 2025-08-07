@@ -31,12 +31,12 @@ static ko_longopt_t unicorn_lopts[] = {
     { "help",            ko_no_argument,       316 },
     { "version",         ko_no_argument,       317 },
     { "rank",            ko_required_argument, 318 },
-    { "out",             ko_required_argument, 320 },
+  	{ "minani",          ko_required_argument, 319 },  
+		{ "out",             ko_required_argument, 320 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
 typedef kvec_t(char *)   strq_t;
-
 #include "version.h"
 #include "unicorn.h"
 
@@ -45,53 +45,53 @@ static const char *ERRORS[16] = { 0,
                                   "File error",
 																	"Failed writing accession map",
 																  "Memory allocation error",
-																  "Unknown error"};
+																  "Unknown error",
+																	"Bad argument"};
 
 typedef struct unicorn_opts {
-  int  threads;       // Number of threads to use
-  char *outbam;       // Output BAM file
-  char *outstat;      // Output statistics file
-  char *ifile;        // Input file (BAM/SAM)
-  char *statstr;      // Comma separated list of statistics to compute
-  char *filel;        // File containing input file paths
-  char *acc2tax;      // Accession to taxid mapping file
-  char *names;        // Taxonomy names file
-  char *nodes;        // Taxonomy nodes file
-  char *dumpacc2tax;  // Dump accession to taxid map to this file
-  char *rank;         // Rank to use
-  uint8_t verbose;    // Verbose mode, 
-	uint8_t withtid;    // Report taxid of reference sequence
-  uint8_t onlypresent; // Only dump accessions found in the acc2tax map
-  uint32_t minnreads;  // Minimum number of reads to consider  
-  uint64_t minrefl;    // Minimum reference length to consider
+  int  threads;         // Number of threads to use
+  char *outbam;         // Output BAM file
+  char *outstat;        // Output statistics file
+  char *ifile;          // Input file (BAM/SAM)
+  char *statstr;        // Comma separated list of statistics to compute
+  char *filel;          // File containing input file paths
+  char *acc2tax;        // Accession to taxid mapping file
+  char *names;          // Taxonomy names file
+  char *nodes;          // Taxonomy nodes file
+  char *dumpacc2tax;    // Dump accession to taxid map to this file
+  char *rank;           // Rank to use
+  uint8_t  verbose;     // Verbose mode, 
+	uint8_t  withtid;     // Report taxid of reference sequence
+  uint8_t  onlypresent; // Only dump accessions found in the acc2tax map
+  uint32_t minnreads;   // Minimum number of reads to consider  
+  uint64_t minrefl;     // Minimum reference length to consider
+	float    minani;  	  // Minimum ANI to consider
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
 {
-    FILE *fp = fopen(filelist, "r");
-    if (!fp) {
-        fprintf(stderr, "[unicorn::%s] Error: Cannot open file list %s\n", __func__, filelist);
-        return;
-    }
-    char line[1024];
-    while (fgets(line, sizeof(line), fp)) {
-        line[strcspn(line, "\n")] = 0; // Remove newline character
-        //Detect ewmpty lines
-        if (line[0] == '\0') continue;
-        kv_push(char *, *fileq, strdup(line));
-    }
-    fclose(fp);
+  FILE *fp = fopen(filelist, "r");
+  if (!fp) {
+    fprintf(stderr, "[unicorn::%s] Error: Cannot open file list %s\n", __func__, filelist);
+    return;
+  }
+  char line[1024];
+  while (fgets(line, sizeof(line), fp)) {
+    line[strcspn(line, "\n")] = 0; // Remove newline character
+    //Detect ewmpty lines
+    if (line[0] == '\0') continue;
+    kv_push(char *, *fileq, strdup(line));
+  }
+  fclose(fp);
 }
 
 static void unicorn_usage(FILE *fp)
 {
-    fprintf(fp, "./unicorn command [options] -b <in.bam>|<in.sam>|<in.cram>\n");
-    fprintf(fp, "Commands:\n"\
-            //"  alnstats    Compute per alingments statitics such as:\n"
-            //"                  # alingments, ANI, GC, etc.\n"
-            "  refstats    Compute per reference statistics.\n"\
-            "  bamstats    Compute per bam statistcs.\n"\
-            "  tidstats    Compute per taxid statistics.\n");
+  fprintf(fp, "./unicorn command [options] -b <in.bam>|<in.sam>|<in.cram>\n");
+  fprintf(fp, "Commands:\n"\
+          "  refstats    Compute per reference statistics.\n"\
+          "  bamstats    Compute per bam statistcs.\n"\
+          "  tidstats    Compute per taxid statistics.\n");
 }
 
 static void refstats_usage(FILE *fp)
@@ -138,11 +138,12 @@ static void tidstats_usage(FILE *fp)
             "  -n <str> | --names <str>     Taxonomy names file.\n"\
             "  -d <str> | --nodes <str>     Taxonomy nodes file\n"\
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
-            "      For example \"--minreads 100\" to filter out references with\n"\
+            "      For example \"--minreads 100\" to filter out taxids with\n"\
             "      less than 100 reads.\n"\
             "      Available filters:\n"\
-            "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
-            "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
+            "       - minrefl  <int>   Minimum reference length. [0]\n"\
+            "       - minreads <int>   Minimum number of reads. [1]\n"\
+            "       - minmani  <float> Minimum mean ANI. [0]\n"\
             "  --filelist <str>             File containing input file paths. One per line.\n"\
             "  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"\
             "  --onlypresent                Only report accessions found in the acc2tax map\n"\
@@ -239,7 +240,10 @@ static int unicorn_refstats(int argc, char **argv)
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
 	fflush(stderr);
-	stats = unicorn_stat_init(opts.minnreads, opts.minrefl, 0);
+	stats = unicorn_stat_init(opts.minnreads,
+														opts.minrefl,
+														opts.minani,
+														0);
   if (!stats) goto exit;
   ret = -4; 
   //Compute statistics
@@ -384,7 +388,7 @@ static int unicorn_bamstats(int argc, char **argv)
     ret = -3;
     //Parse the statistics string and initialize stat object
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(0, 0, 0);
+    stats = unicorn_stat_init(0, 0, 0, 0);
     if (!stats) goto exit;
     ret = -4; 
     //Compute statistics
@@ -436,8 +440,9 @@ static int unicorn_bamstats(int argc, char **argv)
 static int unicorn_tidstats(int argc, char **argv)
 {
   int c, ret = 1;
-  struct timespec start, stop;
-  uint64_t ns;
+  struct timespec start, stop, pstart, pstop;
+	clock_gettime(CLOCK_MONOTONIC, &pstart); 
+	uint64_t ns;
   ketopt_t o = KETOPT_INIT;
   utax_t *utax = 0;
   unicorn_opt_t opts = {0};
@@ -501,6 +506,14 @@ static int unicorn_tidstats(int argc, char **argv)
       case 318: //rank
         opts.rank = strdup(o.arg);
         break;
+			case 319: //minani
+				opts.minani = strtof(o.arg, NULL);
+				if (opts.minani < 0.f || opts.minani > 1.f) {
+					fprintf(stderr, "[unicorn::%s] Error: --minani must be between 0 and 1\n", __func__);
+					ret = 6;
+					goto exit;
+				}
+				break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -545,7 +558,6 @@ static int unicorn_tidstats(int argc, char **argv)
   for (uint32_t i = 0; i < fileq.n; ++i) {
     fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n",
                      __func__, fileq.a[i]);
-    //TODO create bam
     u = unicorn_init(opts.threads,
                      fileq.a[i],
                      0,
@@ -558,7 +570,10 @@ static int unicorn_tidstats(int argc, char **argv)
     };
     fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(opts.minnreads, opts.minrefl, 1);
+    stats = unicorn_stat_init(opts.minnreads,
+															opts.minrefl,
+															opts.minani,
+															TIDSTATS);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_tidstat_compute(u, stats, utax)) ) {
@@ -572,11 +587,12 @@ static int unicorn_tidstats(int argc, char **argv)
     }
     clock_gettime(CLOCK_MONOTONIC, &stop);
     ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-    uint64_t taln, tread, faln, fread;
+    uint64_t taln, tread, faln, fread, frefs;
     taln  = unicorn_stat_gettaln(stats);
     faln  = unicorn_stat_getfaln(stats);
     tread = unicorn_stat_gettread(stats);
     fread = unicorn_stat_getfread(stats);
+		frefs = unicorn_stats_getfrefn(stats);
     fprintf(stderr, "\t%" PRIu64 " alignments, %" PRIu64 " passed filters (%f)\n",
                   taln,
                   faln, 
@@ -585,9 +601,9 @@ static int unicorn_tidstats(int argc, char **argv)
                   tread,
                   fread,
                   (float)fread/tread);
-    fprintf(stderr, "\tout of %" PRIu64 " taxids (%f)\n",
-                  unicorn_stats_getfrefn(stats),
-                  (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
+    fprintf(stderr, "\tout of %" PRIu64 " references (%f)\n",
+                  frefs,
+                  (float)frefs/unicorn_getrefn(u));
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 		//Extract accessions into queue
     if (opts.onlypresent) unicorn_fillaccq(u, &accq);
@@ -617,7 +633,12 @@ static int unicorn_tidstats(int argc, char **argv)
     if (opts.nodes)   free(opts.nodes);
     if (opts.dumpacc2tax) free(opts.dumpacc2tax);
     if (opts.filel)   free(opts.filel);
-    return ret;
+  	clock_gettime(CLOCK_MONOTONIC, &pstop);  
+		ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);	
+		fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",
+										__func__,
+										(double)ns/1000000000.f);
+		return ret;
 }
 
 int main(int argc, char **argv)

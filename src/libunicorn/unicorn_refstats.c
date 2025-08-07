@@ -106,8 +106,7 @@ static void _refmapstats(unicorn_stat_t *stats)
     kh_val(refmap, k).REFNGINI   = covstats.ngini;
     kh_val(refmap, k).tad80      = covstats.tad80;
     kv_destroy(aEVENT);
-  }
-  
+  } 
   for (uint32_t i = 0; i < rmq.n; i++) {
     k = refmap_get(refmap, rmq.a[i]);
     refmap_del(refmap, k);
@@ -116,6 +115,7 @@ static void _refmapstats(unicorn_stat_t *stats)
   stats->_nreads  = _treads;
   stats->_nfreads = _freads;
   stats->_nfalns  = _falns;
+	stats->_nfrefs  = kh_size(refmap);
 }
 
 int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
@@ -221,7 +221,7 @@ uint64_t unicorn_stat_getfaln(const unicorn_stat_t *stats)
 
 int32_t unicorn_stats_getfrefn(const unicorn_stat_t *stats)
 {
-    return kh_size((refmap_t *)stats->__map);
+  return stats->_nfrefs;
 }
 
 uint8_t unicorn_refstats_isfiltered(const unicorn_stat_t *stats)

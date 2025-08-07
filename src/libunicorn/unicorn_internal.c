@@ -102,20 +102,22 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
 
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
+																	float    minani,
                                   uint8_t  flg)
 {
-    unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
-    if (!stats) return NULL;
-    stats->mapflg = flg;
-		switch (flg) {
-      case 0:  stats->__map   = refmap_init(); break; //per reference
-      case 1:  stats->__map   = taxmap_init(); break; //per taxid
-      default: stats->__map   = 0; break; //Default to no map;
-    }
-    stats->minnreads = minnreads;
-    stats->minrefl   = minrefl;
-    memset(stats->_readlc, 0, 256*sizeof(uint32_t));
-    return stats;
+	unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
+	if (!stats) return NULL;
+	stats->mapflg = flg;
+	switch (flg) {
+		case 0:  stats->__map   = refmap_init(); break; //per reference
+		case 1:  stats->__map   = taxmap_init(); break; //per taxid
+		default: stats->__map   = 0; break; //Default to no map;
+	}
+	stats->minnreads = minnreads;
+	stats->minrefl   = minrefl;
+	stats->minani    = minani;
+	memset(stats->_readlc, 0, 256*sizeof(uint32_t));
+	return stats;
 }
 
 void _echr2intdel(emap_chr2int_t *map)
