@@ -102,7 +102,7 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
 
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
-																	float    minani,
+                                  float    minmani,
                                   uint8_t  flg)
 {
 	unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
@@ -115,7 +115,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
 	}
 	stats->minnreads = minnreads;
 	stats->minrefl   = minrefl;
-	stats->minani    = minani;
+	stats->minmani   = minmani;
 	memset(stats->_readlc, 0, 256*sizeof(uint32_t));
 	return stats;
 }
@@ -179,7 +179,7 @@ emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
   return map;
 }
 
-static float _tad80(int32int64map_t *hist)
+float _tad80(int32int64map_t *hist)
 {
   if (!hist || !kh_size(hist)) return 0.0f;
   uint32q_t depths;
@@ -237,7 +237,7 @@ static float _tad80(int32int64map_t *hist)
   return (float)wmass/ rmass;
 }
 
-static inline double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne)
+double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne)
 {
   double entropy = 0.0;
   khint_t k;
@@ -257,10 +257,10 @@ static inline double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne)
   return entropy;
 }
 
-static inline double _getgini(int32int64map_t *hist,
-                              uint64_t t,
-                              float m,
-                              float *_ng)
+double _getgini(int32int64map_t *hist,
+                uint64_t t,
+                float m,
+                float *_ng)
 {
   if (!t || !m) {
     *_ng = 0.0f;
@@ -287,6 +287,47 @@ static inline double _getgini(int32int64map_t *hist,
   return gini;
 }
 
+uint64_t cov_hist(ueventq_t events,
+									int32int64map_t *hist,
+									uint64_t *_tdepthsum,
+									uint64_t *_sumsqdepth)
+{
+  if (!hist || !events.n) return 0;
+  // Initialize sweep-line state
+  //Total covered bases, Total depth sum
+  uint32_t current_depth = 0;
+	uint64_t tcovbases = 0, tdepthsum = 0, sumsqdepth = 0;
+  uint64_t last_pos = events.a[0].pos;
+  // Sweep through all events
+  for (uint64_t i = 0; i < events.n; ++i) {
+    uint64_t current_pos = events.a[i].pos;
+    uint32_t seglen = current_pos - last_pos; //Segment length
+    // If the segment has length and was covered, accumulate metrics
+    if ( seglen  && current_depth ) {
+      // Add to the total number of unique covered bases (breadth)
+      tcovbases += seglen;
+      // Add the area of this segment (length * depth) to the total sum
+      tdepthsum  += seglen * current_depth;
+      sumsqdepth += seglen * current_depth * current_depth;
+      //Add depth value to coverage histogram
+      khint_t k = int32int64map_get(hist, current_depth);
+      if (k == kh_end(hist)) { //Add depth value if not present
+        int absent;
+        k = int32int64map_put(hist, current_depth, &absent);
+        kh_val(hist, k) = 0;
+      }
+      kh_val(hist, k) += seglen; //Increase length value for this depth
+    }
+    //Increase or decrease the current depth based on the event type
+    current_depth += events.a[i].e ? 1 : -1;
+    last_pos = current_pos;
+  }
+	//this might bite you later in the future
+	*_tdepthsum  += tdepthsum;
+	*_sumsqdepth += sumsqdepth;
+	return tcovbases;
+}
+
 /**
 * Calculates coverage metrics from a sorted list of events.
 *
@@ -302,46 +343,21 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   }
   // Cov frequency map for entropy and gini computation
   int32int64map_t *covhist = int32int64map_init();
-  // Initialize accumulators
-  uint64_t tcovbases = 0; //Total covered bases
-  uint64_t tdepthsum = 0; //Total depth sum.
-  // Initialize sweep-line state
-  uint32_t current_depth = 0;
-  uint64_t last_pos = events.a[0].pos, sumsqdepth = 0;
-  // Sweep through all events
-  for (uint64_t i = 0; i < events.n; ++i) {
-    uint64_t current_pos = events.a[i].pos;
-    uint32_t seglen = current_pos - last_pos; //Segment length
-    // If the segment has length and was covered, accumulate metrics
-    if ( seglen  && current_depth ) {
-      // Add to the total number of unique covered bases (breadth)
-      tcovbases += seglen;
-      // Add the area of this segment (length * depth) to the total sum
-      tdepthsum  += seglen * current_depth;
-      sumsqdepth += seglen * current_depth * current_depth;
-      //Add depth value to coverage histogram
-      khint_t k = int32int64map_get(covhist, current_depth);
-      if (k == kh_end(covhist)) { //Add depth value if not present
-        int absent;
-        k = int32int64map_put(covhist, current_depth, &absent);
-        kh_val(covhist, k) = 0;
-      }
-      kh_val(covhist, k) += seglen; //Increase length value for this depth
-    }
-    //Increase or decrease the current depth based on the event type
-    current_depth += events.a[i].e ? 1 : -1;
-    last_pos = current_pos;
-  }
+	uint64_t tdepthsum = 0, sumsqdepth = 0, tcovbases = 0;
+	tcovbases = cov_hist(events, covhist, &tdepthsum, &sumsqdepth);
   // Store the final calculated values in the output pointers
-  covstats->covbases  = tcovbases;
+	covstats->covbases  = tcovbases;
   covstats->meancov   =  (double)tdepthsum / (double)l;
   covstats->meanoncov = (double)tdepthsum / (double)tcovbases;
-  double meansqcovb   = tcovbases?(double)sumsqdepth / tcovbases:0.0;
-  covstats->varoncov  = meansqcovb - (covstats->meanoncov * covstats->meanoncov);
+  double msqcovb      = tcovbases?(double)sumsqdepth / tcovbases:0.0;
+  covstats->varoncov  = msqcovb - (covstats->meanoncov * covstats->meanoncov);
   float _normentropy, _normgini;
   covstats->entropy  = _getentropy(covhist, tcovbases, &_normentropy);
   covstats->nentropy = _normentropy;
-  covstats->gini     = _getgini(covhist, tcovbases, covstats->meanoncov, &_normgini);
+  covstats->gini     = _getgini(covhist,
+																tcovbases,
+																covstats->meanoncov,
+																&_normgini);
   covstats->ngini    = _normgini;
   covstats->tad80    = _tad80(covhist);
   int32int64map_destroy(covhist);

@@ -31,7 +31,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "help",            ko_no_argument,       316 },
     { "version",         ko_no_argument,       317 },
     { "rank",            ko_required_argument, 318 },
-  	{ "minani",          ko_required_argument, 319 },  
+  	{ "minmani",          ko_required_argument, 319 },  
 		{ "out",             ko_required_argument, 320 },
     {0 ,0 ,0}
 };
@@ -65,7 +65,7 @@ typedef struct unicorn_opts {
   uint8_t  onlypresent; // Only dump accessions found in the acc2tax map
   uint32_t minnreads;   // Minimum number of reads to consider  
   uint64_t minrefl;     // Minimum reference length to consider
-	float    minani;  	  // Minimum ANI to consider
+	float    minmani;  	  // Minimum ANI to consider
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -142,8 +142,8 @@ static void tidstats_usage(FILE *fp)
             "      less than 100 reads.\n"\
             "      Available filters:\n"\
             "       - minrefl  <int>   Minimum reference length. [0]\n"\
-            "       - minreads <int>   Minimum number of reads. [1]\n"\
-            "       - minmani  <float> Minimum mean ANI. [0]\n"\
+            "       - minreads <int>   Minimum number of reads per taxid. [1]\n"\
+            "       - minmani  <float> Minimum mean ANI per taxid. [0]\n"\
             "  --filelist <str>             File containing input file paths. One per line.\n"\
             "  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"\
             "  --onlypresent                Only report accessions found in the acc2tax map\n"\
@@ -242,7 +242,7 @@ static int unicorn_refstats(int argc, char **argv)
 	fflush(stderr);
 	stats = unicorn_stat_init(opts.minnreads,
 														opts.minrefl,
-														opts.minani,
+														opts.minmani,
 														0);
   if (!stats) goto exit;
   ret = -4; 
@@ -506,10 +506,10 @@ static int unicorn_tidstats(int argc, char **argv)
       case 318: //rank
         opts.rank = strdup(o.arg);
         break;
-			case 319: //minani
-				opts.minani = strtof(o.arg, NULL);
-				if (opts.minani < 0.f || opts.minani > 1.f) {
-					fprintf(stderr, "[unicorn::%s] Error: --minani must be between 0 and 1\n", __func__);
+			case 319: //minmani
+				opts.minmani = strtof(o.arg, NULL);
+				if (opts.minmani < 0.f || opts.minmani > 1.f) {
+					fprintf(stderr, "[unicorn::%s] Error: --minmani must be between 0 and 1\n", __func__);
 					ret = 6;
 					goto exit;
 				}
@@ -572,7 +572,7 @@ static int unicorn_tidstats(int argc, char **argv)
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
     stats = unicorn_stat_init(opts.minnreads,
 															opts.minrefl,
-															opts.minani,
+															opts.minmani,
 															TIDSTATS);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);

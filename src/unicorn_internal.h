@@ -173,15 +173,16 @@ typedef struct taxstat_t {
   float        alnani_mode; // Mode ANI
   float        _MANI;      // See _M
   //Coverage
-  uint64_t     REFCOVB;    // number of covered bases
-  float        REFMCOV;    // mean cov
-  float        REFMONCOV;  // Mean coverage of covered bases
-  float        REFVONCOV;  // Variance of coverage of covered bases
-  float        REFENTROPY; // Coverage entropy
-  float        REFGINI;    // Coverage Gini coefficient
-  float        REFNENTROP; // Normalized coverage entropy
-  float        REFNGINI;   // Normalized coverage Gini coefficient
-  //Data arrays
+  uint64_t     covbases;    // number of covered bases
+  float        covmean;     // mean cov
+  float        meanoncov;   // Mean coverage of covered bases
+  float        varoncov;    // Variance of coverage of covered bases
+  float        coventropy;  // Coverage entropy
+  float        covgini;     // Coverage Gini coefficient
+  float        covnentropy; // Normalized coverage entropy
+  float        covngini;    // Normalized coverage Gini coefficient
+	float        tad80;       // Truncated average depth at 80% of coverage mass
+	//Data arrays
   floatq_t     a_ani;
   //uint32q_t    aRLEN;
   uint32_t     v_rlen[256]; //Count array of read lengths
@@ -224,9 +225,9 @@ typedef struct unicorn_stats_t {
   uint64_t _tlen;         //Total length of all references
   uint64_t _clen;         //Total length of all covered bases
   //Filters
-  uint32_t minnreads; // Minimum number of reads to consider a reference
-  uint32_t minrefl;    // Minimum reference length to consider
-	float 	 minani;	 // Minimum ANI to consider a reference
+  uint32_t minnreads; // Minimum number of reads to consider
+  uint32_t minrefl;   // Minimum reference length to consider
+	float 	 minmani;	  // Minimum mean ANI to consider
 } unicorn_stat_t;
 
 typedef struct _covstats_t {
@@ -322,8 +323,17 @@ uint32_t _udCAMODE(uint32_t *v, uint32_t n);
 */
 float _ANINM(bam1_t *b, uint32_t *NM);
 
+float _tad80(int32int64map_t *hist);
+double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne);
+double _getgini(int32int64map_t *hist,
+                uint64_t t,
+                float m,
+                float *_ng);
 
-
+uint64_t cov_hist(ueventq_t events,
+									int32int64map_t *hist,
+									uint64_t *_tdepthsum,
+									uint64_t *_sumsqdepth);
 void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 
 

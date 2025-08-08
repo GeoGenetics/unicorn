@@ -17,11 +17,12 @@ static void _taxmapstats(unicorn_stat_t *stats)
 	}
 	struct timespec start, stop;
 	clock_gettime(CLOCK_MONOTONIC, &start);
+	//TODO parallelize
 	kh_foreach(taxmap, ktax) {
 		uint32_t taxid = kh_key(taxmap, ktax);
 		taxstat_t taxstat = kh_val(taxmap, ktax);
 		if ( (kh_size(taxstat.readset) < stats->minnreads) ||
-	 			 (taxstat.alnani_mean < stats->minani) ) { //filter out
+	 			 (taxstat.alnani_mean < stats->minmani) ) { //filter out
         u64set_destroy(taxstat.readset);
 				refmap_destroy(taxstat.refmap);
 				kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
@@ -40,24 +41,30 @@ static void _taxmapstats(unicorn_stat_t *stats)
 		taxstat.readl_mode   = _udCAMODE(v_rlen, 256);
 		refmap_t *refmap = taxstat.refmap;
 		_frefs  += kh_size(refmap);
+		//Add coverage histograms for all references
+		int32int64map_t *covhist = int32int64map_init();
+		uint64_t tdepthsum = 0, sumsqdepth = 0, tcovbases = 0, treflen = 0;
 		kh_foreach(refmap, kref) {
-			refstat_t refstat = kh_val(refmap, kref);
-			ueventq_t aEVENT = refstat.aEVENT;
-			unicorn_sorturange(aEVENT.n, aEVENT.a);
-    	_covstats_t covstats = {0};
-    	_refcoverage(aEVENT, kh_val(refmap, kref).REFLEN, &covstats);
-    	kh_val(refmap, kref).REFCOVB    = covstats.covbases;
-    	kh_val(refmap, kref).REFMCOV    = covstats.meancov;
-    	kh_val(refmap, kref).REFMONCOV  = covstats.meanoncov;
-    	kh_val(refmap, kref).REFVONCOV  = covstats.varoncov;
-    	kh_val(refmap, kref).REFENTROPY = covstats.entropy;
-    	kh_val(refmap, kref).REFGINI    = covstats.gini;
-    	kh_val(refmap, kref).REFNENTROP = covstats.nentropy;
-    	kh_val(refmap, kref).REFNGINI   = covstats.ngini;
-    	kh_val(refmap, kref).tad80      = covstats.tad80;
-    	kv_destroy(aEVENT);
-			kh_val(refmap, kref) = refstat; //Don't loose your stats value
+			treflen += kh_val(refmap, kref).REFLEN;
+			ueventq_t events = kh_val(refmap, kref).aEVENT;
+			unicorn_sorturange(events.n, events.a);
+			tcovbases += cov_hist(events, covhist, &tdepthsum, &sumsqdepth);
+   		kv_destroy(events);
 		}
+    taxstat.covbases  = tcovbases;
+    taxstat.meanoncov = (double)tdepthsum / (double)tcovbases;
+		double msqcovb    = tcovbases ? (double)sumsqdepth / tcovbases : 0.0;
+  	taxstat.varoncov  = msqcovb - (taxstat.meanoncov * taxstat.meanoncov);
+		float _normentropy, _normgini;
+		taxstat.coventropy  = _getentropy(covhist, tcovbases, &_normentropy);
+		taxstat.covgini     = _getgini(covhist,
+																	 tcovbases,
+																	 taxstat.meanoncov,
+																	 &_normgini);
+		taxstat.covnentropy = _normentropy;
+		taxstat.covngini    = _normgini;
+		taxstat.tad80       = _tad80(covhist);
+		int32int64map_destroy(covhist);
 		kh_val(taxmap, ktax) = taxstat;
 	}
 	for (uint32_t i = 0; i < rmq.n; i++) {
