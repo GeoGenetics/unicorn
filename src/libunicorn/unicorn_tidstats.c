@@ -116,7 +116,10 @@ int unicorn_tidstat_compute(unicorn_t *u,
 			continue;
 		}
 		//If rank is set, get taxid for parent node at that rank
-		if (rank) taxid = utax_getidatrank(utax, taxid, rank);
+		if (rank) {
+			taxid = utax_getidatrank(utax, taxid, rank);
+			fprintf(stderr, "rank: %s tid: %u\n", rank, taxid);
+		}
 		kaln++;
 		uint32_t qlen = b->core.l_qseq;
     taxstat_t taxstat = {0};

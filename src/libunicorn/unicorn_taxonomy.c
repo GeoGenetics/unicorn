@@ -401,11 +401,11 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 		k = chr2int_get(utax->nodes.levelmap, rank);
 		if ( k == kh_end(utax->nodes.levelmap)) {
 			fprintf(stderr, "[libunicorn::%s] Warning: '%s' no such rank in taxonomy\n",
-										  __func__, utax->rank);
+										  __func__, rank);
 			rank = strdup("species");
 		}
 	}
-	utax->rank = rank ? strdup(rank) : NULL;
+	utax->rank = rank ? rank : NULL;
 	*ret = 0;
 	exit:
 		if (*ret) {
@@ -472,16 +472,19 @@ const char *utax_getname(utax_t *utax, uint32_t taxid)
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank)
 {
 	if (!utax || !rank) return -1;
+	fprintf(stderr, "asking: %s\n", rank);
 	uint2tup_t *nodemap = utax->nodes.map;
 	chr2int_t  *levels = utax->nodes.levelmap;
 	//Get dsired rank level
 	khint_t k  = chr2int_get(levels, rank);
 	uint32_t trank_val = kh_val(levels, k);
+	fprintf(stderr, "desired rank: %u\n", trank_val);
 	//Get node info: parent and rank level
 	k  = uint2tup_get(nodemap, taxid);
 	uint32_t parent   = kh_val(nodemap, k).taxid;
 	uint32_t rank_val = kh_val(nodemap, k).rank_val;
-	uint32_t _taxid;
+	fprintf(stderr, "current rank: %u\n", rank_val);
+	uint32_t _taxid = taxid;
 	while (rank_val < trank_val) {
 		_taxid = parent;
 		k = uint2tup_get(nodemap, parent);
