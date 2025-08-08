@@ -299,7 +299,22 @@ typedef struct _covstats_t {
                  "n_entropy\t"\
                  "n_gini\t"\
                  "tad80\n"
-
+#define TIDSTATSTR "#taxid\tname\tnum_accessions\ttotal_length"\
+                	 "n_alns\tn_reads\tm_readl\tstd_readl\t"\
+                	 "median_readl\tmode_readl\treadl_min\treadl_max\t"\
+                	 "mean_alnnm\tmean_alnani\tstdev_alnani\tmedian_alnani\t"\
+                	 "num_covbases\tmean_cov\tbreath_cov\texp_breath\t"\
+									 "breath_ratio\tmean_covcovered\tstdev_covoncovered\tevenness_cov\t"\
+                	 "site_density\tentropy\tgini\tnorm_entropy\t"\
+                	 "norm_gini\ttad80\n"
+#define TIDFMTSTR "#%u\t%s\t%u\t%"PRIu64"\t"\
+									"%u\t%u\t%u\t%f\t"\
+									"%u\t%u\t%u\t%u\t"\
+									"%f\t%f\t%f\t%u\t"\
+									"%"PRIu64"\t%f\t%f\t%f\t"\
+									"%f\t%f\t%f\t%f\t"\
+									"%f\t%f\t%f\t%f\n"\
+									"%f\t%f\n"
 /*
   Computes median from a count array.
   @param *v - Count array v[n] has the count of the number of instances value

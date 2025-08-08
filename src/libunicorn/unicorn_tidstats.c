@@ -43,9 +43,8 @@ static void _taxmapstats(unicorn_stat_t *stats)
 		_frefs  += kh_size(refmap);
 		//Add coverage histograms for all references
 		int32int64map_t *covhist = int32int64map_init();
-		uint64_t tdepthsum = 0, sumsqdepth = 0, tcovbases = 0, treflen = 0;
+		uint64_t tdepthsum = 0, sumsqdepth = 0, tcovbases = 0;
 		kh_foreach(refmap, kref) {
-			treflen += kh_val(refmap, kref).REFLEN;
 			ueventq_t events = kh_val(refmap, kref).aEVENT;
 			unicorn_sorturange(events.n, events.a);
 			tcovbases += cov_hist(events, covhist, &tdepthsum, &sumsqdepth);
@@ -126,7 +125,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
       // New taxid, initialize stats and insert in map
       taxstat.readset = u64set_init(); 	//queryid set
 			taxstat.refmap  = refmap_init();  //refid set
-			taxstat.reflen  = u->hdr->target_len[tid];
+			taxstat.reflen  += u->hdr->target_len[tid];
       taxstat.readl_min = 0xffffffffU;
       ktax = taxmap_put(taxmap, taxid, &absent);
 			kh_val(taxmap, ktax) = taxstat;
@@ -190,6 +189,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
 	if (!kaln) goto exit; // No alignments found
 	if (VERBOSE) {
 		fprintf(stderr, "[libunicorn::%s] Finished parsing alignment file\n", __func__);
+		fprintf(stderr, "\tobtained data for %u taxids\n", kh_size(taxmap));
 		fprintf(stderr, "\tskipped %u alignments due to", nabsent);
 		fprintf(stderr, " %u missing accessions from taxonomy.\n",
 										 kh_size(missing));
@@ -215,26 +215,22 @@ void unicorn_taxstat_print(const unicorn_t *u,
 	if (!stats || !fp || !u || !utax) return;
 	if (!stats->fc) return;
   //sam_hdr_t *hdr = u->hdr;
-	fprintf(fp, "#tid\tname\tnaccessions\ttaln\ttread\tmreadl\tvreadl\tmdreadl\tmoreadl\tminreadl\tmaxreadl\tmani\tmnm\ttbases\n"); 
+	fprintf(fp, TIDSTATSTR); 
   khint_t k;
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;
   kh_foreach(taxmap, k) {
 		taxstat_t taxstat = kh_val(taxmap, k);
-		fprintf(fp, "%u\t%s\t%u\t%"PRIu64"\t%u\t%.2f\t%.2f\t%u\t%u\t%u\t%u\t%.2f\t%.2f\t%"PRIu64"\n",
-								kh_key(taxmap, k), 
-								utax_getname(utax, kh_key(taxmap, k)),
-								taxstat.nrefs,
-								taxstat.nalns,
-								kh_size(taxstat.readset),
-								taxstat.readl_mean,
-								sqrtf(taxstat.readl_var),
-								taxstat.readl_median,
-								taxstat.readl_mode,
-								taxstat.readl_min,
-								taxstat.readl_max,
-								taxstat.alnani_mean,
-								taxstat.alnnm_mean,
-								taxstat.reflen
+    float breath = taxstat.covbases/(double)taxstat.reflen;
+    float expbreath =  1.0f - expf(-breath);
+		fprintf(fp, TIDFMTSTR,
+								kh_key(taxmap, k), utax_getname(utax, kh_key(taxmap, k)), taxstat.nrefs, taxstat.reflen,
+								taxstat.nalns, kh_size(taxstat.readset), taxstat.readl_mean, sqrtf(taxstat.readl_var),
+								taxstat.readl_median, taxstat.readl_mode, taxstat.readl_min, taxstat.readl_max,
+								taxstat.alnnm_mean, taxstat.alnani_mean, sqrtf(taxstat.alnani_var), taxstat.alnani_median,
+								taxstat.covbases, taxstat.covmean, breath, expbreath,
+								breath/expbreath, taxstat.meanoncov, sqrtf(taxstat.varoncov), sqrtf(taxstat.varoncov)/taxstat.meanoncov,
+								1000.0f * breath, taxstat.coventropy, taxstat.covgini, taxstat.covnentropy,
+								taxstat.covngini, taxstat.tad80
 					);
 	}
 }

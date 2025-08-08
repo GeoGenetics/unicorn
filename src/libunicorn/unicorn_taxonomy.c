@@ -380,7 +380,7 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
 														 const char *rank,
-														 int *ret)
+													 	 int *ret)
 {
 	*ret = 5;
 	if (!nodes || !acc2tax || !names) return NULL;
@@ -396,12 +396,21 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 	if (VERBOSE) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
 	if (tloadaccessions(acc2tax, utax, 8, ret)) goto exit;
 	utax->numaccs = _emapsize(utax->accmap);
+	if (rank) {
+		khint_t k;
+		k = chr2int_get(utax->nodes.levelmap, utax->rank);
+		if ( k == kh_end(utax->nodes.levelmap)) {
+			fprintf(stderr, "[libunicorn::%s] Warning: '%s' no such rank in taxonomy\n",
+										  __func__, utax->rank);
+			rank = strdup("species");
+		}
+	}
 	utax->rank = rank ? strdup(rank) : NULL;
 	*ret = 0;
 	exit:
 		if (*ret) {
 			unicorn_closetaxonomy(utax);
-			utax = NULL;;
+			utax = NULL;
 		}
 	return utax;
 }

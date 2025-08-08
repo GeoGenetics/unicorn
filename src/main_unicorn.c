@@ -145,12 +145,13 @@ static void tidstats_usage(FILE *fp)
             "       - minreads <int>   Minimum number of reads per taxid. [1]\n"\
             "       - minmani  <float> Minimum mean ANI per taxid. [0]\n"\
             "  --filelist <str>             File containing input file paths. One per line.\n"\
-            "  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"\
-            "  --onlypresent                Only report accessions found in the acc2tax map\n"\
-            "  --rank <str>                 Taxonomic rank to summarize by.\n"\
+            "  --rank <str>                 Taxonomic rank to summarize by. [species]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message\n");
 }
+//"  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"\
+//"  --onlypresent                Only report accessions found in the acc2tax map\n"\
+
 
 static int unicorn_refstats(int argc, char **argv)
 {
@@ -446,7 +447,11 @@ static int unicorn_tidstats(int argc, char **argv)
   ketopt_t o = KETOPT_INIT;
   utax_t *utax = 0;
   unicorn_opt_t opts = {0};
-  unicorn_t *u = NULL;
+	opts.minnreads = 1;
+	opts.minrefl   = 0;
+	opts.minmani	  = 0.f;
+	opts.rank = strdup("species"); 
+	unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
   strq_t accq = {0};
   FILE *ofp = NULL;
@@ -504,6 +509,7 @@ static int unicorn_tidstats(int argc, char **argv)
         opts.onlypresent = 1;
         break;
       case 318: //rank
+				free(opts.rank);
         opts.rank = strdup(o.arg);
         break;
 			case 319: //minmani
