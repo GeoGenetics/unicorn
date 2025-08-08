@@ -300,7 +300,7 @@ typedef struct _covstats_t {
                  "n_gini\t"\
                  "tad80\n"
 #define TIDSTATSTR "#taxid\tname\tnum_accessions\ttotal_length\t"\
-                	 "n_alns\tn_reads\tm_readl\tstd_readl\t"\
+                	 "num_alns\tnum_reads\tmean_readl\tstdev_readl\t"\
                 	 "median_readl\tmode_readl\treadl_min\treadl_max\t"\
                 	 "mean_alnnm\tmean_alnani\tstdev_alnani\tmedian_alnani\t"\
                 	 "num_covbases\tmean_cov\tbreath_cov\texp_breath\t"\
@@ -308,9 +308,9 @@ typedef struct _covstats_t {
                 	 "site_density\tentropy\tgini\tnorm_entropy\t"\
                 	 "norm_gini\ttad80\n"
 #define TIDFMTSTR "%u\t%s\t%u\t%"PRIu64"\t"\
-									"%u\t%u\t%u\t%f\t"\
+									"%"PRIu64"\t%u\t%f\t%f\t"\
 									"%u\t%u\t%u\t%u\t"\
-									"%f\t%f\t%f\t%u\t"\
+									"%f\t%f\t%f\t%f\t"\
 									"%"PRIu64"\t%f\t%f\t%f\t"\
 									"%f\t%f\t%f\t%f\t"\
 									"%f\t%f\t%f\t%f\t"\
