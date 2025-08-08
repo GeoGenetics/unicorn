@@ -398,7 +398,7 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 	utax->numaccs = _emapsize(utax->accmap);
 	if (rank) {
 		khint_t k;
-		k = chr2int_get(utax->nodes.levelmap, utax->rank);
+		k = chr2int_get(utax->nodes.levelmap, rank);
 		if ( k == kh_end(utax->nodes.levelmap)) {
 			fprintf(stderr, "[libunicorn::%s] Warning: '%s' no such rank in taxonomy\n",
 										  __func__, utax->rank);
