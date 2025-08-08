@@ -313,7 +313,7 @@ typedef struct _covstats_t {
 									"%f\t%f\t%f\t%u\t"\
 									"%"PRIu64"\t%f\t%f\t%f\t"\
 									"%f\t%f\t%f\t%f\t"\
-									"%f\t%f\t%f\t%f\n"\
+									"%f\t%f\t%f\t%f\t"\
 									"%f\t%f\n"
 /*
   Computes median from a count array.
