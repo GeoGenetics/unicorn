@@ -203,3 +203,11 @@ void unicorn_fillaccq(unicorn_t *u, strq_t *accq);
  */
 void unicorn_printstrq(const char *filename, strq_t accq, utax_t *utax);
 void unicorn_strqdestroy(strq_t accq);
+
+
+/**************************************************** 
+unicorn's reassign routines
+
+
+****************************************************/
+int unicorn_reassign(int argc, char* argv[]);
