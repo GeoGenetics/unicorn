@@ -11,16 +11,38 @@
 
 void unicorn_destroy(unicorn_t *u)
 {
-    if (u) {
-        if (u->ifile) free(u->ifile); 
-        if (u->hdr)
-            bam_hdr_destroy(u->hdr);
-        if (u->_FP)
-            hts_close(u->_FP);
-        if (u->p)
-            hts_tpool_destroy(u->p);
-        free(u);
-    }
+  if (u) {
+    if (u->ifile) free(u->ifile); 
+    if (u->hdr)   bam_hdr_destroy(u->hdr);
+    if (u->_FP)   hts_close(u->_FP);
+    if (u->p)     hts_tpool_destroy(u->p);
+		if (u->daln)  bam_destroy1(u->daln);
+		free(u);
+  }
+}
+
+static uint8_t isqsorted(sam_hdr_t *h) {
+  kstring_t ks = {0,0,NULL};
+  int ok = sam_hdr_find_tag_hd(h, "SO", &ks);  // 0 on success
+  int res = ( (ok == 0) && (kh_eq_str(ks.s, "queryname")) );
+  free(ks.s);
+  return res;  // 1 if queryname-sorted, 0 otherwise (or if SO missing)
+}
+
+static uint8_t iscsorted(sam_hdr_t *h) {
+  kstring_t ks = {0,0,NULL};
+  int ok = sam_hdr_find_tag_hd(h, "SO", &ks);  // 0 on success
+  int res = ( (ok == 0) && (kh_eq_str(ks.s, "coordinate")) );
+  free(ks.s);
+  return res;  // 1 if coordinate-sorted, 0 otherwise (or if SO missing)
+}
+
+static uint8_t isqgrouped(sam_hdr_t *h) {
+	kstring_t ks = {0,0,NULL};
+	int ok = sam_hdr_find_tag_hd(h, "GO", &ks);
+	uint8_t res = ( (ok == 0) && (kh_eq_str(ks.s, "query")) );
+	free(ks.s);
+	return res;
 }
 
 unicorn_t *unicorn_init( int threads,
@@ -31,8 +53,7 @@ unicorn_t *unicorn_init( int threads,
 {
     int ret = -1;
     unicorn_t *u = calloc(1, sizeof(unicorn_t));
-    if (!u)
-        return NULL;
+    if (!u) return NULL;
     u->threads = threads;
     u->ifile = strdup(ifile);
     if ( !( u->_FP = hts_open(ifile,"r") ) ) goto exit;
@@ -45,7 +66,11 @@ unicorn_t *unicorn_init( int threads,
     u->argc = argc;
     u->argv = argv;
     u->outbam = outbam;
-    ret = 0;
+		u->daln = bam_init1();
+		if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
+		if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
+		if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;
+		ret = 0;
     exit:
     if (ret) {
         unicorn_destroy(u);
@@ -76,6 +101,34 @@ uint64_t unicorn_loadqueues(unicorn_t *unicorn, bamq_t *q, uint8_t n)
   }
   bam_destroy1(b);
   return naln;
+}
+
+uint32_t unicorn_bamloadbyquery(unicorn_t *u, bamq_t *q)
+{
+	bam1_t *b = bam_init1();
+	if (!u || !q) goto exit;
+	if (u->dcache) {
+		if (!bam_copy1(b, u->daln)) goto exit;
+	}
+	else {
+		if (sam_read1(u->_FP, u->hdr, b) < 0) goto exit;
+	}
+	const char *qname = strdup(bam_get_qname(b));
+	uint8_t l = 1;
+	while ( kh_eq_str(qname, bam_get_qname(b)) && l ) {
+		kv_pushq(*q, b);
+    l = ( sam_read1(u->_FP, u->hdr, b) >= 0 );
+	}
+	free((void *)qname);
+	//Save last alignment for next batch of loading
+	if (l) {
+		u->dcache = 1;
+		if ( !bam_copy1(u->daln, b) ) goto exit;
+	}
+	else u->dcache = 0;
+	exit:
+		bam_destroy1(b);
+		return q->n;
 }
 
 /*

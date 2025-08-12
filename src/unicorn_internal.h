@@ -39,7 +39,19 @@ SOFTWARE.
 #include "klib/kthread.h"
 #include "klib/kavl.h"
 #include "klib/kvec.h"
-typedef kvec_t(bam1_t)   bamq_t;
+#define kv_pushq(v, x) do {                                         \
+        if ((v).n == (v).m) {                                       \
+            (v).m = (v).m? (v).m<<1 : 2;                            \
+            (v).a = realloc((v).a, sizeof(bam1_t*) * (v).m);        \
+            for (uint32_t i = (v).n; i < (v).m; i++) {              \
+                (v).a[i] = bam_init1();                             \
+            }                                                       \
+        }                                                           \
+        (v).a[(v).n] = bam_copy1( (v).a[(v).n], (x) );              \
+        (v).n++;                                                    \
+} while (0)
+#define kv_lastq(v) (v).a[(v).n-1]
+typedef kvec_t(bam1_t *)   bamq_t;
 typedef kvec_t(float)    floatq_t;
 typedef kvec_t(uint32_t) uint32q_t;
 typedef kvec_t(int32_t)  int32q_t;
@@ -66,17 +78,30 @@ static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
 typedef kvec_t(_urangeevent) ueventq_t;
 void unicorn_sorturange(uint32_t n, _urangeevent *a);
 
+/*Sort values for bam files*/
+#define UNSRTED 0x00
+#define QUERYSORTED  0x01
+#define QUERYGROUPED 0x02
+#define COORDSORTED  0x04
+
 typedef struct {
-    int  argc;
-    char **argv;
-    int  threads;
-    char *ifile;
-    char *outbam; //TODO delete this memeber
-    uint32_t minaln; // Minimum number of alignments to consider a reference
-    hts_tpool *p;
-    htsFile   *_FP;
-    bam_hdr_t *hdr;
+  int  argc;
+  char **argv;
+  int  threads;
+  char *ifile;
+  char *outbam; //TODO delete this memeber
+  uint32_t minaln; // Minimum number of alignments to consider a reference
+  hts_tpool *p;
+  htsFile   *_FP;
+  bam_hdr_t *hdr;
+  uint8_t sorted; //See sort values
+  uint8_t dcache;
+  bam1_t *daln;   //Last alignment read from the file
 } unicorn_t;
+
+uint8_t unicorn_isqgrouped(unicorn_t *u);
+uint32_t unicorn_bamloadbyquery(unicorn_t *u, bamq_t *q);
+
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 //Check if reference is too short

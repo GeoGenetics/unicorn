@@ -394,3 +394,13 @@ void unicorn_printstrq(const char *filename, strq_t accq, utax_t *utax)
   }
   fclose(fp);
 }
+
+
+uint8_t unicorn_isqgrouped(unicorn_t *u)
+{
+  uint8_t ret = 0;
+  if (!u) return ret;
+  ret |= (u->sorted & QUERYSORTED);
+  ret |= (u->sorted & QUERYGROUPED);
+  return ret;
+}

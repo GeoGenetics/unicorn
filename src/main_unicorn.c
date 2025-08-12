@@ -45,7 +45,7 @@ static const char *ERRORS[16] = { 0,
                                   "File error",
 																	"Failed writing accession map",
 																  "Memory allocation error",
-																  "Unknown error",
+																  "BAM not query grouped",
 																	"Bad argument"};
 
 typedef struct unicorn_opts {
@@ -90,8 +90,9 @@ static void unicorn_usage(FILE *fp)
   fprintf(fp, "./unicorn command [options] -b <in.bam>|<in.sam>|<in.cram>\n");
   fprintf(fp, "Commands:\n"\
           "  refstats    Compute per reference statistics.\n"\
-          "  bamstats    Compute per bam statistcs.\n"\
-          "  tidstats    Compute per taxid statistics.\n");
+          "  bamstats    Compute per bam statistics.\n"\
+          "  tidstats    Compute per taxid statistics.\n"\
+          "  reassign    Reassign reads to references.\n");
 }
 
 static void refstats_usage(FILE *fp)
@@ -148,10 +149,14 @@ static void tidstats_usage(FILE *fp)
             "  --rank <str>                 Taxonomic rank to summarize by. [species]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message\n");
+//"  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"
+//"  --onlypresent                Only report accessions found in the acc2tax map\n"
 }
-//"  --dumpacc2tax <str>          Write the accession to taxid map to <str>.khash.\n"\
-//"  --onlypresent                Only report accessions found in the acc2tax map\n"\
 
+static void reassign_usage(FILE *fp)
+{
+  fprintf(fp, "./unicorn reassign [options] -b <in.bam>|<in.sam>\n");
+}
 
 static int unicorn_refstats(int argc, char **argv)
 {
@@ -645,6 +650,116 @@ static int unicorn_tidstats(int argc, char **argv)
 										__func__,
 										(double)ns/1000000000.f);
 		return ret;
+}
+
+static int unicorn_reassign(int argc, char **argv)
+{
+  int c, ret = 1;
+  struct timespec pstart, pstop;
+	clock_gettime(CLOCK_MONOTONIC, &pstart); 
+	uint64_t ns;
+  ketopt_t o = KETOPT_INIT;
+  unicorn_opt_t opts = {0};
+	opts.minnreads = 1;
+	opts.minrefl   = 0;
+	opts.minmani	 = 0.f;
+	unicorn_t *u = NULL;
+  while ( (c = ketopt(&o, argc, argv, 1, TIDOPT_STR, unicorn_lopts)) >= 0 ) {
+    switch(c) {
+      case 'b':
+				opts.ifile = strdup(o.arg);
+        break;
+      case 't':
+        opts.threads = strtoul(o.arg, NULL, 10);
+        break;
+      case 'o':
+				opts.outstat = strdup(o.arg);
+        break;
+      case 'a':
+        opts.acc2tax = strdup(o.arg);
+        break;
+      case 'n':
+        opts.names = strdup(o.arg);  
+        break;
+      case 'd':
+        opts.nodes = strdup(o.arg);
+        break;
+      case 'h':
+        tidstats_usage(stdout);
+        return 0;
+      case 302: //names
+        opts.names = strdup(o.arg);
+        break;
+      case 303: //nodes
+        opts.nodes = strdup(o.arg);
+        break;
+      case 304: //acc2tax
+        opts.acc2tax = strdup(o.arg);
+        break;
+      case 308: //min_length
+        opts.minrefl = strtoul(o.arg, NULL, 10);
+        break;
+      case 309:   //minreadn
+        opts.minnreads = strtoul(o.arg, NULL, 10);
+        break;
+      case 310: //filelist
+				opts.filel = strdup(o.arg);
+				break;
+      case 311: //printdists
+				break;
+      case 312: //dumpacc2tax
+				opts.dumpacc2tax = strdup(o.arg);
+        break;
+			case 313: //verbose
+				opts.verbose = 1;
+        unicorn_setverbose();
+				break;
+      case 314: //onlypresent
+        opts.onlypresent = 1;
+        break;
+      case 318: //rank
+				free(opts.rank);
+        opts.rank = strdup(o.arg);
+        break;
+			case 319: //minmani
+				opts.minmani = strtof(o.arg, NULL);
+				if (opts.minmani < 0.f || opts.minmani > 1.f) {
+					fprintf(stderr, "[unicorn::%s] Error: --minmani must be between 0 and 1\n", __func__);
+					ret = 6;
+					goto exit;
+				}
+				break;
+      case ':':
+        fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
+                        __func__,
+                        argv[ o.ind - 1]);
+        goto exit;
+      case '?':
+        fprintf(stderr, "[unicorn::%s] Unknown option %s\n",
+                        __func__,
+                        argv[ o.ind - 1 ]);
+        break;
+      }
+  }
+  ret = 5;
+  u = unicorn_init(opts.threads, opts.ifile, 0, 0,0); 
+  if (!unicorn_isqgrouped(u)) goto exit;
+  ret = unicorn_computereassign(u);
+  if (ret) goto exit;
+  
+  ret = 0;
+  exit:
+  if (ret) {
+    fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
+    reassign_usage(stderr);
+  }
+  if (u) unicorn_destroy(u);
+  clock_gettime(CLOCK_MONOTONIC, &pstop);
+  ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
+  fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",
+										__func__,
+										(double)ns/1000000000.f);
+  return -1;
 }
 
 int main(int argc, char **argv)

@@ -65,8 +65,16 @@ void unicorn_destroy(unicorn_t *u);
  * @param unicorn Pointer to unicorn_t object.
  * @return Number of references.
  */
-int unicorn_getrefn(unicorn_t *unicorn);
+int unicorn_getrefn(unicorn_t *u);
 
+/**
+ * @brief Check if the BAM/CRAM file is query grouped.
+ * @param u Pointer to unicorn_t object.
+ * @return 1 if query grouped, 0 otherwise.
+ *
+ * This function checks if the SAM/BAM file is sorted or grouped by query. 
+ */
+uint8_t unicorn_isqgrouped(unicorn_t *u);
 
 /**************************************************** 
 unicorn's BAM statistic computation interface
@@ -210,4 +218,4 @@ unicorn's reassign routines
 
 
 ****************************************************/
-int unicorn_reassign(int argc, char* argv[]);
+int unicorn_computereassign(unicorn_t *u);
