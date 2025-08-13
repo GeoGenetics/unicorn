@@ -777,8 +777,7 @@ int main(int argc, char **argv)
     return unicorn_refstats(argc, argv);
   } else if (strcmp(argv[1], "tidstats") == 0) {
     return unicorn_tidstats(argc, argv);
-  }
-  else if (strcmp(argv[1], "reassign") == 0) {
+  } else if (strcmp(argv[1], "reassign") == 0) {
     return unicorn_reassign(argc, argv);
   }
   else {

@@ -39,6 +39,11 @@ SOFTWARE.
 #include "klib/kthread.h"
 #include "klib/kavl.h"
 #include "klib/kvec.h"
+typedef struct {
+	float  score;
+	uint32_t al; //Alignment length
+	uint32_t tid;
+} alnscore_t;
 #define kv_pushq(v, x) do {                                         \
         if ((v).n == (v).m) {                                       \
             (v).m = (v).m? (v).m<<1 : 2;                            \
@@ -52,11 +57,12 @@ SOFTWARE.
 } while (0)
 #define kv_lastq(v) (v).a[(v).n-1]
 typedef kvec_t(bam1_t *)   bamq_t;
-typedef kvec_t(float)    floatq_t;
-typedef kvec_t(uint32_t) uint32q_t;
-typedef kvec_t(int32_t)  int32q_t;
-typedef kvec_t(char *)   charq_t;
-typedef kvec_t(char *)   strq_t;
+typedef kvec_t(float)      floatq_t;
+typedef kvec_t(uint32_t)   uint32q_t;
+typedef kvec_t(int32_t)    int32q_t;
+typedef kvec_t(char *)     charq_t;
+typedef kvec_t(char *)     strq_t;
+typedef kvec_t(alnscore_t) alnscoreq_t;
 
 extern uint8_t VERBOSE;
 
@@ -100,7 +106,7 @@ typedef struct {
 } unicorn_t;
 
 uint8_t unicorn_isqgrouped(unicorn_t *u);
-uint32_t unicorn_bamloadbyquery(unicorn_t *u, bamq_t *q);
+uint32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q);
 
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
