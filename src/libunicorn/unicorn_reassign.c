@@ -92,11 +92,11 @@ static uint64_t unicorn_filterreassign(unicorn_t *u, alnscoreq_t q)
 		faln++;
 	}
 	exit:
-    if (ofp)    sam_close(ofp);
-    if (b)      bam_destroy1(b);
-    if (ohdr)   sam_hdr_destroy(ohdr);
-		if (tidmap) int2int_destroy(tidmap);
-		return faln;
+	if (tidmap) int2int_destroy(tidmap);
+	if (ofp)    sam_close(ofp);
+	if (b)      bam_destroy1(b);
+	if (ohdr)   sam_hdr_destroy(ohdr);
+	return faln;
 }
 
 //TODO modularize
