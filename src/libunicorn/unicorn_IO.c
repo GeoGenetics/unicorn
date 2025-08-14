@@ -9,6 +9,20 @@
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 
+uint8_t unicorn_rewind(unicorn_t *u)
+{
+	uint8_t ret = 1;
+	if (u) {
+		hts_close(u->_FP);
+		if ( !( u->_FP = hts_open(u->ifile, "r") ) ) goto exit;	
+		bam_hdr_destroy(u->hdr);
+		if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
+		ret = 0;
+	}
+	exit:
+		return ret;
+}
+
 void unicorn_destroy(unicorn_t *u)
 {
   if (u) {
@@ -108,6 +122,7 @@ uint32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	int32_t minscore = INT32_MAX;
 	bam1_t *b = bam_init1();
 	uint8_t l = 0;
+	uint32_t n = 0, p = q->n;
 	if (!u || !q) goto exit;
 	if (u->dcache) {
 		if (!bam_copy1(b, u->daln)) goto exit;
@@ -118,6 +133,7 @@ uint32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	const char *qname = strdup(bam_get_qname(b));
 	l = 1;
 	while ( kh_eq_str(qname, bam_get_qname(b)) && l ) {
+		n++;
 		alnscore_t s = {0, 0, 0};
 		uint8_t *aux = bam_aux_get(b, "AS");
 		float AS = (float)bam_aux2i(aux);
@@ -130,17 +146,18 @@ uint32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
     l = ( sam_read1(u->_FP, u->hdr, b) >= 0 );
 	}
 	free((void *)qname);
-	if (1 == q->n) {q->a[0].score = 1.0; goto exit;}
+	if (1 == n) {q->a[q->n-1].score = 1.0; goto exit;}
 	//Shift score to > 0
-	double as_sum = 0.;
-	for (uint32_t i = 0; i < q->n; i++) {
+	double as_sum = 0.0;
+	for (uint32_t i = p; i < q->n; i++) {
 		float NS = (kv_A(*q, i).score - minscore + 1)/kv_A(*q, i).al;
 		kv_A(*q, i).score = NS;
 		as_sum += NS;
 	}
 	//Scale to sum 1.0
-	for (uint32_t i = 0; i < q->n; i++)
+	for (uint32_t i = p; i < q->n; i++) {
 		kv_A(*q, i).score = kv_A(*q, i).score/as_sum;
+	}
 	exit:
 	//Save last alignment for next batch of loading
 	if (l) {
@@ -149,7 +166,7 @@ uint32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	}
 	else u->dcache = 0;
 	bam_destroy1(b);
-	return q->n;
+	return n;
 }
 
 /*

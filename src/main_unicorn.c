@@ -8,9 +8,7 @@
 
 //TODO long options
 #include "klib/ketopt.h"
-#define REFOPT_STR "b:t:h"
-#define BAMOPT_STR "b:t:h"
-#define TIDOPT_STR "b:t:a:n:d:h"
+#define OPT_STR "b:o:t:a:n:d:h"
 static ko_longopt_t unicorn_lopts[] = {
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
@@ -156,7 +154,14 @@ static void tidstats_usage(FILE *fp)
 static void reassign_usage(FILE *fp)
 {
   fprintf(fp, "./unicorn reassign [options] -b <in.bam>|<in.sam>\n");
+	fprintf(fp, "Options:\n"\
+            "  -b <str>                     Input bam|sam|cram\n"\
+            "  -o <str> | --outbam <str>    Output BAM file [stdout]\n"\
+            "  --verbose                    Prints libunicorn's messages.\n"\
+            "  -h                           Print this help message\n");
 }
+//"  --alpha <float>              Scaling factor (0.0, 1.0] [0.90]\n"\
+//"  --niter <int>                Max number of EM algorithm iterations [100]\n"\
 
 static int unicorn_refstats(int argc, char **argv)
 {
@@ -176,7 +181,7 @@ static int unicorn_refstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   //Read command line options
-  while ( (c = ketopt(&o, argc, argv, 1, REFOPT_STR, unicorn_lopts)) >= 0 ) {
+  while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
       case 't':
         opts.threads = strtoul(o.arg, NULL, 10);
@@ -336,7 +341,7 @@ static int unicorn_bamstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   //Read command line options
-  while ( (c = ketopt(&o, argc, argv, 1, REFOPT_STR, unicorn_lopts)) >= 0 ) {
+  while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
       case 'o':
         opts.outstat = strdup(o.arg);
@@ -460,7 +465,7 @@ static int unicorn_tidstats(int argc, char **argv)
   unicorn_stat_t *stats = NULL;
   strq_t accq = {0};
   FILE *ofp = NULL;
-  while ( (c = ketopt(&o, argc, argv, 1, TIDOPT_STR, unicorn_lopts)) >= 0 ) {
+  while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
       case 'b':
 				opts.ifile = strdup(o.arg);
@@ -664,7 +669,10 @@ static int unicorn_reassign(int argc, char **argv)
 	opts.minrefl   = 0;
 	opts.minmani	 = 0.f;
 	unicorn_t *u = NULL;
-  while ( (c = ketopt(&o, argc, argv, 1, TIDOPT_STR, unicorn_lopts)) >= 0 ) {
+  char *_argv[64] = {0};
+  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
+    _argv[i] = strdup(argv[i]);
+  while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
       case 'b':
 				opts.ifile = strdup(o.arg);
@@ -673,7 +681,7 @@ static int unicorn_reassign(int argc, char **argv)
         opts.threads = strtoul(o.arg, NULL, 10);
         break;
       case 'o':
-				opts.outstat = strdup(o.arg);
+				opts.outbam = strdup(o.arg);
         break;
       case 'a':
         opts.acc2tax = strdup(o.arg);
@@ -685,7 +693,7 @@ static int unicorn_reassign(int argc, char **argv)
         opts.nodes = strdup(o.arg);
         break;
       case 'h':
-        tidstats_usage(stdout);
+        reassign_usage(stdout);
         return 0;
       case 302: //names
         opts.names = strdup(o.arg);
@@ -741,25 +749,29 @@ static int unicorn_reassign(int argc, char **argv)
         break;
       }
   }
+	if (!opts.ifile) goto exit;
   ret = 5;
-  u = unicorn_init(opts.threads, opts.ifile, 0, 0,0); 
+	fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__,
+																															opts.ifile);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv); 
   if (!unicorn_isqgrouped(u)) goto exit;
-  ret = unicorn_computereassign(u);
+ 	fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u)); 
+	ret = unicorn_computereassign(u);
   if (ret) goto exit;
-  
   ret = 0;
   exit:
-  if (ret) {
-    fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
-    reassign_usage(stderr);
-  }
-  if (u) unicorn_destroy(u);
-  clock_gettime(CLOCK_MONOTONIC, &pstop);
-  ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
-  fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",
+  	if (ret) {
+    	fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
+    	reassign_usage(stderr);
+  	}
+  	if (u) unicorn_destroy(u);
+  	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);	
+		clock_gettime(CLOCK_MONOTONIC, &pstop);
+  	ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
+  	fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",
 										__func__,
 										(double)ns/1000000000.f);
-  return -1;
+  	return ret;
 }
 
 int main(int argc, char **argv)
