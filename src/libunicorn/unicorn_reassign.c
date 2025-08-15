@@ -168,6 +168,10 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	uint64_t removed, tremoved = 0;
 	uint32_t iter = 0;
 	do {
+		if (VERBOSE) {
+			fprintf(stderr, "Iteration %u\r", iter);
+			fflush(stderr);
+		}
 		iter++;
 		if (iter >= niter) break; //Stop if max iterations reached
 		removed = 0;
@@ -213,7 +217,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	} while (removed > 0);
 	clock_gettime(CLOCK_MONOTONIC, &stop);		
 	if (VERBOSE) {
-		fprintf(stderr, "[libunicorn::%s] EM end\n", __func__);
+		fprintf(stderr, "\n[libunicorn::%s] EM end\n", __func__);
 		fprintf(stderr, "\t%"PRIu64" alignments removed\n", tremoved);
 		fprintf(stderr, "\t%u iterations\n", iter);
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);

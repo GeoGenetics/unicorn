@@ -88,7 +88,7 @@ static void unicorn_addfilelist(char *filelist, strq_t *fileq)
 
 static void unicorn_usage(FILE *fp)
 {
-  fprintf(fp, "./unicorn command [options] -b <in.bam>|<in.sam>|<in.cram>\n");
+  fprintf(fp, "./unicorn command [options] -b <in.bam>|<in.sam>\n");
   fprintf(fp, "Commands:\n"\
           "  refstats    Compute per reference statistics.\n"\
           "  bamstats    Compute per bam statistics.\n"\
@@ -100,7 +100,7 @@ static void refstats_usage(FILE *fp)
 {
     fprintf(fp, "./unicorn refstats [options] -b <in.bam>|<in.sam>\n");
     fprintf(fp, "Options:\n"\
-            "  -b <str>   Input bam|sam|cram [Required]\n"\
+            "  -b <str>   Input bam|sam [Required]\n"\
             "  -t <int>, --threads <int> Number of threads [4]\n"
             "  --outbam  <str> Output BAM file with filtered alignments.\n"\
             "  --outstat <str> Output statistics file\n"\
@@ -120,9 +120,9 @@ static void refstats_usage(FILE *fp)
 
 static void bamstats_usage(FILE *fp)
 {
-    fprintf(fp, "./unicorn bamstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
+    fprintf(fp, "./unicorn bamstats [options] -b <in.bam>|<in.sam>\n");
     fprintf(fp, "Options:\n"\
-            "  -b <str>         Input bam|sam|cram\n"\
+            "  -b <str>         Input bam|sam\n"\
             "  --outstat <str>  Output statistics file\n"\
             "  --filelist <str> File containing input file paths. One per line.\n"\
             "  --printdists     Print distributions of read lengths, alignment lengths, etc.\n"\
@@ -131,9 +131,9 @@ static void bamstats_usage(FILE *fp)
 
 static void tidstats_usage(FILE *fp)
 {
-    fprintf(fp, "./unicorn tidstats [options] -b <in.bam>|<in.sam>|<in.cram>\n");
+    fprintf(fp, "./unicorn tidstats [options] -b <in.bam>|<in.sam>\n");
     fprintf(fp, "Options:\n"\
-            "  -b <str>                     Input bam|sam|cram\n"\
+            "  -b <str>                     Input bam|sam\n"\
             "  -o <str> | --outstat <str>   Output statistics file [/dev/stdout]\n"\
             "  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
             "                               Providing a .khash file is much faster.\n"\
@@ -158,7 +158,7 @@ static void reassign_usage(FILE *fp)
 {
   fprintf(fp, "./unicorn reassign [options] -b <in.bam>|<in.sam>\n");
 	fprintf(fp, "Options:\n"\
-            "  -b <str>                     Input bam|sam|cram\n"\
+            "  -b <str>                     Input bam|sam\n"\
             "  -o <str> | --outbam <str>    Output BAM file [stdout]\n"\
             "  --alpha <float>              Subject weight scaling factor (0.0, 1.0] [0.90]\n"\
             "  --niter <int>                Max number of EM algorithm iterations [100]\n"\
