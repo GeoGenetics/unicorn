@@ -29,8 +29,9 @@ static ko_longopt_t unicorn_lopts[] = {
     { "help",            ko_no_argument,       316 },
     { "version",         ko_no_argument,       317 },
     { "rank",            ko_required_argument, 318 },
-  	{ "minmani",          ko_required_argument, 319 },  
-		{ "out",             ko_required_argument, 320 },
+  	{ "minmani",         ko_required_argument, 319 },  
+		{ "alpha",           ko_required_argument, 320 },
+    { "niter",           ko_required_argument, 321 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -64,6 +65,8 @@ typedef struct unicorn_opts {
   uint32_t minnreads;   // Minimum number of reads to consider  
   uint64_t minrefl;     // Minimum reference length to consider
 	float    minmani;  	  // Minimum ANI to consider
+  float    alpha;       // Subject weight scaling factor for EM algorithm
+  uint32_t niter;       // Max number of EM algorithm iterations
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -90,7 +93,7 @@ static void unicorn_usage(FILE *fp)
           "  refstats    Compute per reference statistics.\n"\
           "  bamstats    Compute per bam statistics.\n"\
           "  tidstats    Compute per taxid statistics.\n"\
-          "  reassign    Reassign reads to references.\n");
+          "  reassign    Filter alignments via EM algorithm.\n");
 }
 
 static void refstats_usage(FILE *fp)
@@ -157,11 +160,11 @@ static void reassign_usage(FILE *fp)
 	fprintf(fp, "Options:\n"\
             "  -b <str>                     Input bam|sam|cram\n"\
             "  -o <str> | --outbam <str>    Output BAM file [stdout]\n"\
+            "  --alpha <float>              Subject weight scaling factor (0.0, 1.0] [0.90]\n"\
+            "  --niter <int>                Max number of EM algorithm iterations [100]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message\n");
 }
-//"  --alpha <float>              Scaling factor (0.0, 1.0] [0.90]\n"\
-//"  --niter <int>                Max number of EM algorithm iterations [100]\n"\
 
 static int unicorn_refstats(int argc, char **argv)
 {
@@ -248,7 +251,7 @@ static int unicorn_refstats(int argc, char **argv)
                    argc,
                    _argv);
   if (!u) goto exit;
-  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
+  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
 	fflush(stderr);
 	stats = unicorn_stat_init(opts.minnreads,
@@ -277,7 +280,7 @@ static int unicorn_refstats(int argc, char **argv)
                   (float)fread/tread);
   fprintf(stderr, "\tout of %" PRIu64 " references (%f)\n",
                   unicorn_stats_getfrefn(stats),
-                  (float)unicorn_stats_getfrefn(stats)/unicorn_getrefn(u));
+                  (float)unicorn_stats_getfrefn(stats)/unicorn_getnref(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   //Load taxonomy if needed
@@ -394,8 +397,8 @@ static int unicorn_bamstats(int argc, char **argv)
       fprintf(stderr, "[unicorn::%s] Error: Cannot initialize unicorn with file %s\n",
                        __func__, fileq.a[i]);
       continue;
-    };
-    fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
+    }
+    fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
     ret = -3;
     //Parse the statistics string and initialize stat object
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
@@ -583,8 +586,8 @@ static int unicorn_tidstats(int argc, char **argv)
       fprintf(stderr, "[unicorn::%s] Error: Cannot initialize unicorn with file %s\n",
                        __func__, fileq.a[i]);
       continue;
-    };
-    fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u));
+    }
+    fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
     stats = unicorn_stat_init(opts.minnreads,
 															opts.minrefl,
@@ -619,7 +622,7 @@ static int unicorn_tidstats(int argc, char **argv)
                   (float)fread/tread);
     fprintf(stderr, "\tout of %" PRIu64 " references (%f)\n",
                   frefs,
-                  (float)frefs/unicorn_getrefn(u));
+                  (float)frefs/unicorn_getnref(u));
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 		//Extract accessions into queue
     if (opts.onlypresent) unicorn_fillaccq(u, &accq);
@@ -667,7 +670,8 @@ static int unicorn_reassign(int argc, char **argv)
   unicorn_opt_t opts = {0};
 	opts.minnreads = 1;
 	opts.minrefl   = 0;
-	opts.minmani	 = 0.f;
+  opts.alpha     = 0.90f;
+  opts.niter     = 100;
 	unicorn_t *u = NULL;
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
@@ -737,6 +741,22 @@ static int unicorn_reassign(int argc, char **argv)
 					goto exit;
 				}
 				break;
+      case 320: //alpha
+        opts.alpha = strtof(o.arg, NULL);
+        if (opts.alpha <= 0.f || opts.alpha > 1.f) {
+          fprintf(stderr, "[unicorn::%s] Error: --alpha must be in the range (0, 1]\n", __func__);
+          ret = 6;
+          goto exit;
+        }
+        break;
+      case 321: //niter
+        opts.niter = strtoul(o.arg, NULL, 10);
+        if (opts.niter == 0) {
+          fprintf(stderr, "[unicorn::%s] Error: --niter must be at least 1\n", __func__);
+          ret = 6;
+          goto exit;
+        }
+        break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -750,14 +770,31 @@ static int unicorn_reassign(int argc, char **argv)
       }
   }
 	if (!opts.ifile) goto exit;
-  ret = 5;
+  ret = 2;
 	fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__,
 																															opts.ifile);
   u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv); 
+  if (!u) goto exit;
+  ret = 5;
   if (!unicorn_isqgrouped(u)) goto exit;
- 	fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getrefn(u)); 
-	ret = unicorn_computereassign(u);
+ 	fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u)); 
+	fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
+                  "\talpha == %f\n"\
+                  "\tniter == %u\n",
+                  __func__, opts.alpha, opts.niter);
+  ret = unicorn_computereassign(u, opts.alpha, opts.niter);
   if (ret) goto exit;
+  fprintf(stderr, "[unicorn::%s] Done\n"\
+                  "\t%"PRIu64" alignments, %" PRIu64 " passed filters (%f)\n"\
+                  "\t%u queries, %u passed filter (%f)\n"\
+                  "\t%u references, %u passed filter (%f)\n",
+                  __func__,
+                  unicorn_getnaln(u), unicorn_getnfaln(u),
+                  (float)unicorn_getnfaln(u)/unicorn_getnaln(u),
+                  unicorn_getnqueries(u), unicorn_getnfqueries(u),
+                  (float)unicorn_getnqueries(u)/unicorn_getnfqueries(u),
+                  unicorn_getnref(u), unicorn_getnfref(u),
+                  (float)unicorn_getnfref(u)/unicorn_getnref(u));
   ret = 0;
   exit:
   	if (ret) {
@@ -765,7 +802,9 @@ static int unicorn_reassign(int argc, char **argv)
     	reassign_usage(stderr);
   	}
   	if (u) unicorn_destroy(u);
-  	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);	
+  	if (opts.ifile)   free(opts.ifile);
+  	if (opts.outbam)  free(opts.outbam);
+    for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);	
 		clock_gettime(CLOCK_MONOTONIC, &pstop);
   	ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
   	fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",

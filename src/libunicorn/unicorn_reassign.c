@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 700
 #include "unicorn_internal.h"
 
 #define ALPHA 0.90
@@ -73,7 +74,10 @@ static uint64_t unicorn_filterreassign(unicorn_t *u, alnscoreq_t q)
 	if (!tidmap) goto exit;
 	ohdr = _scores2hdr(u->hdr, q, tidmap);
 	if (!ohdr) goto exit;
-	fprintf(stderr, "references %u\n", kh_size(tidmap));
+	u->values.nfref = kh_size(tidmap);
+	if (VERBOSE) {
+		fprintf(stderr, "\t%u references.\n", u->values.nfref);
+	}
 	//Add PG line for this program
   char *pgstr = stringify_argv(u->argc, u->argv);
   sam_hdr_add_pg(ohdr, "unicorn", "CL", pgstr, NULL);
@@ -100,7 +104,7 @@ static uint64_t unicorn_filterreassign(unicorn_t *u, alnscoreq_t q)
 }
 
 //TODO modularize
-int unicorn_computereassign(unicorn_t *u)
+int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 {
 	if (!unicorn_isqgrouped(u)) return 5;
 	alnscoreq_t alnscores;
@@ -109,9 +113,15 @@ int unicorn_computereassign(unicorn_t *u)
 	khint_t k;
 	int2double_t *sweights = int2double_init(); //Subject weights
 	int2scores_t *qscores  = int2scores_init(); //Query alignment scores
-	uint32_t nqueries = 0, prev = alnscores.n, n;
+	uint32_t fqueries = 0, tqueries = 0, prev = alnscores.n;
+	int32_t n;
 	//Load alignment scores, tids and compute initial subject weights
-	while ( (n = unicorn_reassignload(u, &alnscores)) > 0) {
+	struct timespec start, stop;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	while ( (n = unicorn_reassignload(u, &alnscores)) >= 0) {
+		tqueries++;
+		if (!n) continue; //No alignments loaded
+		fqueries++;
 		//Loop over freshly loaded alignments and update subject weights
 		for (uint32_t i = prev; i < alnscores.n; i++) {
 			k = int2double_get(sweights, alnscores.a[i].tid);
@@ -123,23 +133,35 @@ int unicorn_computereassign(unicorn_t *u)
 			kh_val(sweights, k) += alnscores.a[i].score;
 		}
 		//Add alignments for corresponding query to the query map
-		khint_t k = int2scores_put(qscores, nqueries, &absent);
+		khint_t k = int2scores_put(qscores, tqueries-1, &absent);
 		score_t score = {n, NULL}; //We can only add number of alignments 
 		kh_val(qscores, k) = score;
 		prev = alnscores.n;
-		nqueries++;
-	}
+	}	
 	prev = 0;
 	//Loop over queries and assign corresponding sections of scores array
-	for (uint32_t q = 0; q < nqueries; q++) {
+	for (uint32_t q = 0; q < tqueries; q++) {
 		khint_t k = int2scores_get(qscores, q);
+		if (k == kh_end(qscores)) continue; //No alignments for this query
 		//Add corresponding section of scores array
 		kh_val(qscores, k).scores = alnscores.a + prev;
 		prev += kh_val(qscores, k).nscores;
 	}
-	fprintf(stderr, "%lu alignments from %u queries\n", alnscores.n, nqueries);
+	clock_gettime(CLOCK_MONOTONIC, &stop);
+	if (VERBOSE) {
+		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+		fprintf(stderr, "[libunicorn::%s] Loaded bamfile\n"\
+										"\t%"PRIu64" alignments from %u queries\n"\
+										"\t%f seconds\n",
+					 					__func__, alnscores.n, tqueries, (double)ns/1000000000.f);
+		fprintf(stderr, "[libunicorn::%s] EM start\n", __func__);
+	}
+	u->values.naln   = alnscores.n;
+	u->values.nread  = tqueries;
+	u->values.nfread = fqueries;
 	//Iterative phase
 	//1. Compute subject weights
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	kh_foreach(sweights,k)
 		kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
 	//2. Update score probabilities
@@ -147,6 +169,7 @@ int unicorn_computereassign(unicorn_t *u)
 	uint32_t iter = 0;
 	do {
 		iter++;
+		if (iter >= niter) break; //Stop if max iterations reached
 		removed = 0;
 		kh_foreach(qscores,k) { //Loop over queries
 			score_t score = kh_val(qscores, k);
@@ -165,7 +188,7 @@ int unicorn_computereassign(unicorn_t *u)
 				score.scores[i].score /= score_sum; //Scale
 				maxp = score.scores[i].score > maxp ? score.scores[i].score : maxp;
 			}
-			maxp *= ALPHA; //Scaling factor
+			maxp *= alpha; //Scaling factor
 			for (uint32_t i = 0; i < score.nscores; i++) {
 				float p = score.scores[i].score;
 				if ( p && (p < maxp) ) { //Remove low scoring alignments
@@ -188,12 +211,27 @@ int unicorn_computereassign(unicorn_t *u)
 		kh_foreach(sweights,k) // Scale by target length
 			kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
 	} while (removed > 0);
-	fprintf(stderr, "Removed %"PRIu64" alignments.\n", tremoved);
-	fprintf(stderr, "In %u iterations\n", iter);
-
+	clock_gettime(CLOCK_MONOTONIC, &stop);		
+	if (VERBOSE) {
+		fprintf(stderr, "[libunicorn::%s] EM end\n", __func__);
+		fprintf(stderr, "\t%"PRIu64" alignments removed\n", tremoved);
+		fprintf(stderr, "\t%u iterations\n", iter);
+		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+	}
 	if (unicorn_rewind(u)) goto exit;
+	if (VERBOSE) {
+		fprintf(stderr, "[libunicorn::%s] Writing output to %s\n",
+										__func__, u->outbam ? u->outbam : "/dev/stdout");
+	}
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	uint64_t t = unicorn_filterreassign(u, alnscores);
-	fprintf(stderr, "Wrote %"PRIu64" alignments to output\n", t);
+	u->values.nfaln = t;
+	clock_gettime(CLOCK_MONOTONIC, &stop);
+	if (VERBOSE) {
+		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+		fprintf(stderr, "\tWrote %lu alignments.\n\t%f seconds\n", t, (double)ns/1000000000.f);
+	}
 	exit:
 		int2double_destroy(sweights);
 		int2scores_destroy(qscores);

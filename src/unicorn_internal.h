@@ -90,19 +90,28 @@ void unicorn_sorturange(uint32_t n, _urangeevent *a);
 #define QUERYGROUPED 0x02
 #define COORDSORTED  0x04
 
+typedef struct values_t {
+  uint64_t naln;   //Number of alignments
+  uint64_t nfaln;  //Number of filtered alignments
+  uint64_t nread;  //Number of reads
+  uint64_t nfread; //Number of filtered reads
+  uint32_t nref;   //Number of references
+  uint32_t nfref;  //Number of filtered references
+} values_t;
+
 typedef struct {
   int  argc;
   char **argv;
   int  threads;
   char *ifile;
-  char *outbam; //TODO delete this memeber
-  uint32_t minaln; // Minimum number of alignments to consider a reference
+  char *outbam;
   hts_tpool *p;
   htsFile   *_FP;
   bam_hdr_t *hdr;
   uint8_t sorted; //See sort values
-  uint8_t dcache;
+  uint8_t dcache; //Last alignment flag
   bam1_t *daln;   //Last alignment read from the file
+  values_t values; //bamfile values
 } unicorn_t;
 
 uint8_t unicorn_isqgrouped(unicorn_t *u);

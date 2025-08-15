@@ -84,6 +84,7 @@ unicorn_t *unicorn_init( int threads,
 		if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
 		if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
 		if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;
+		u->values.nref = u->hdr->n_targets;
 		ret = 0;
     exit:
     if (ret) {
@@ -93,9 +94,34 @@ unicorn_t *unicorn_init( int threads,
     return u;
 }
 
-int unicorn_getrefn(unicorn_t *unicorn)
+int32_t unicorn_getnref(unicorn_t *u)
 {
-    return unicorn ? unicorn->hdr->n_targets : -1;
+  return u ? (int32_t)u->values.nref : -1;
+}
+
+int32_t unicorn_getnfref(unicorn_t *u)
+{
+		return u ? (int32_t)u->values.nfref : -1;
+}
+
+int64_t unicorn_getnaln(unicorn_t *u)
+{
+  return u ? (int64_t)u->values.naln : -1;
+}
+
+int64_t unicorn_getnfaln(unicorn_t *u)
+{
+	return u ? (int64_t)u->values.nfaln : -1;
+}
+
+int32_t unicorn_getnqueries(unicorn_t *u)
+{
+	return u ? (int32_t)u->values.nread : -1;
+}
+
+int32_t unicorn_getnfqueries(unicorn_t *u)
+{
+	return u ? (int32_t)u->values.nfread : -1;
 }
 
 uint64_t unicorn_loadqueues(unicorn_t *unicorn, bamq_t *q, uint8_t n)
@@ -122,7 +148,8 @@ uint32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	int32_t minscore = INT32_MAX;
 	bam1_t *b = bam_init1();
 	uint8_t l = 0;
-	uint32_t n = 0, p = q->n;
+	int32_t n = -1;
+	uint32_t p = q->n;
 	if (!u || !q) goto exit;
 	if (u->dcache) {
 		if (!bam_copy1(b, u->daln)) goto exit;
@@ -130,6 +157,7 @@ uint32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	else {
 		if (sam_read1(u->_FP, u->hdr, b) < 0) goto exit;
 	}
+	n = 0;
 	const char *qname = strdup(bam_get_qname(b));
 	l = 1;
 	while ( kh_eq_str(qname, bam_get_qname(b)) && l ) {

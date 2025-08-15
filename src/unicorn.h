@@ -65,7 +65,13 @@ void unicorn_destroy(unicorn_t *u);
  * @param unicorn Pointer to unicorn_t object.
  * @return Number of references.
  */
-int unicorn_getrefn(unicorn_t *u);
+int32_t unicorn_getnref(unicorn_t *u);
+int32_t unicorn_getnfref(unicorn_t *u);
+int64_t unicorn_getnaln(unicorn_t *u);
+int64_t unicorn_getnfaln(unicorn_t *u);
+int32_t unicorn_getnqueries(unicorn_t *u);
+int32_t unicorn_getnfqueries(unicorn_t *u);
+
 
 /**
  * @brief Check if the BAM/CRAM file is query grouped.
@@ -218,4 +224,4 @@ unicorn's reassign routines
 
 
 ****************************************************/
-int unicorn_computereassign(unicorn_t *u);
+int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter);
