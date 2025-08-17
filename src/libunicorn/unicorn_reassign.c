@@ -103,6 +103,49 @@ static uint64_t unicorn_filterreassign(unicorn_t *u, alnscoreq_t q)
 	return faln;
 }
 
+typedef struct EMdata_t {
+	int2double_t *sweights;
+	int2scores_t *qscores;
+	uint32_t *removed;
+	float alpha;
+} EMdata_t;
+
+static void EMworkerfor(void *data, long i, int tid)
+{
+	EMdata_t *d = (EMdata_t *)data;
+	int2scores_t *qscores  = d->qscores;
+	int2double_t *sweights = d->sweights;
+	uint32_t *removed 		 = &(d->removed[tid]);
+	float alpha            = d->alpha;
+	if (kh_exist(qscores, i)) {
+		score_t score = kh_val(qscores, i);
+		if ( 1 == score.nscores) return; //skip if only one alignment present
+		double score_sum = 0.0;
+		for (uint32_t j = 0; j < score.nscores; j++) { //Loop over scores
+			uint32_t tid = score.scores[j].tid; //target id aka reference id
+			khint_t k = int2double_get(sweights, tid); //Fetch weight
+			float w = kh_val(sweights, k);
+			score.scores[j].score *= w; //Update score
+			score_sum += score.scores[j].score; //Record sum for scaling
+		}
+		//Rescale so that sum(scores) == 1.0
+		double maxp = 0.0; //probability of best scoring alignment
+		for (uint32_t j = 0; j < score.nscores; j++) {
+			score.scores[j].score /= score_sum; //Scale
+			maxp = score.scores[j].score > maxp ? score.scores[j].score : maxp;
+		}
+		maxp *= alpha; //Scaling factor
+		for (uint32_t j = 0; j < score.nscores; j++) {
+			float p = score.scores[j].score;
+			if ( p && (p < maxp) ) { //Remove low scoring alignments
+				score.scores[j].score = 0.0f; //By setting probability to 0
+				*removed++;
+			}
+		}
+		kh_val(qscores, i) = score;
+	}
+}
+
 //TODO modularize
 int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 {
@@ -151,7 +194,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	if (VERBOSE) {
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
 		fprintf(stderr, "[libunicorn::%s] Loaded bamfile\n"\
-										"\t%"PRIu64" alignments from %u queries\n"\
+										"\t%lu alignments from %u queries\n"\
 										"\t%f seconds\n",
 					 					__func__, alnscores.n, tqueries, (double)ns/1000000000.f);
 		fprintf(stderr, "[libunicorn::%s] EM start\n", __func__);
@@ -165,7 +208,10 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	kh_foreach(sweights,k)
 		kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
 	//2. Update score probabilities
-	uint64_t removed, tremoved = 0;
+	void *forpool = kt_forpool_init(u->threads);
+	uint32_t *removed = calloc(u->threads, sizeof(uint32_t));
+	EMdata_t emdata   = {sweights, qscores, removed, alpha};
+	uint64_t tremoved = 0, r;
 	uint32_t iter = 0;
 	do {
 		if (VERBOSE) {
@@ -174,36 +220,13 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		}
 		iter++;
 		if (iter >= niter) break; //Stop if max iterations reached
-		removed = 0;
-		kh_foreach(qscores,k) { //Loop over queries
-			score_t score = kh_val(qscores, k);
-			if ( 1 == score.nscores) continue; //skip if only one alignment present
-			double score_sum = 0.0;
-			for (uint32_t i = 0; i < score.nscores; i++) { //Loop over scores
-				uint32_t tid = score.scores[i].tid; //target id aka reference id
-				khint_t j = int2double_get(sweights, tid); //Fetch weight
-				float w = kh_val(sweights, j);
-				score.scores[i].score *= w; //Update score
-				score_sum += score.scores[i].score; //Record sum for scaling
-			}
-			//Rescale so that sum(scores) == 1.0
-			double maxp = 0.0; //probability of best scoring alignment
-			for (uint32_t i = 0; i < score.nscores; i++) {
-				score.scores[i].score /= score_sum; //Scale
-				maxp = score.scores[i].score > maxp ? score.scores[i].score : maxp;
-			}
-			maxp *= alpha; //Scaling factor
-			for (uint32_t i = 0; i < score.nscores; i++) {
-				float p = score.scores[i].score;
-				if ( p && (p < maxp) ) { //Remove low scoring alignments
-					score.scores[i].score = 0.0f; //By setting probability to 0
-					removed++;
-				}
-			}
-			kh_val(qscores, k) = score;
-		}
-		if (!removed) break; //No alignments removed we can stop
-		tremoved += removed;
+		memset(removed, 0, u->threads * sizeof(uint32_t));
+		r = 0;
+		kt_forpool(forpool, EMworkerfor, &emdata, kh_end(qscores));
+		for (int i = 0; i < u->threads; i++)
+			r += removed[i];
+		if (!r) break; //No alignments removed we can stop
+		tremoved += r;
 		//Update subject weights
 		kh_foreach(sweights,k) //Reset weights to 0
 			kh_val(sweights, k) = 0.0;
@@ -214,8 +237,9 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		}
 		kh_foreach(sweights,k) // Scale by target length
 			kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
-	} while (removed > 0);
+	} while (r > 0);
 	clock_gettime(CLOCK_MONOTONIC, &stop);		
+	kt_forpool_destroy(forpool);
 	if (VERBOSE) {
 		fprintf(stderr, "\n[libunicorn::%s] EM end\n", __func__);
 		fprintf(stderr, "\t%"PRIu64" alignments removed\n", tremoved);
@@ -234,7 +258,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	clock_gettime(CLOCK_MONOTONIC, &stop);
 	if (VERBOSE) {
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-		fprintf(stderr, "\tWrote %lu alignments.\n\t%f seconds\n", t, (double)ns/1000000000.f);
+		fprintf(stderr, "\tWrote %"PRIu64" alignments.\n\t%f seconds\n", t, (double)ns/1000000000.f);
 	}
 	exit:
 		int2double_destroy(sweights);

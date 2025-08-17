@@ -160,6 +160,7 @@ static void reassign_usage(FILE *fp)
 	fprintf(fp, "Options:\n"\
             "  -b <str>                     Input bam|sam\n"\
             "  -o <str> | --outbam <str>    Output BAM file [stdout]\n"\
+            "  -t <int>                     Number of threads to use [4]\n"\
             "  --alpha <float>              Subject weight scaling factor (0.0, 1.0] [0.90]\n"\
             "  --niter <int>                Max number of EM algorithm iterations [100]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
