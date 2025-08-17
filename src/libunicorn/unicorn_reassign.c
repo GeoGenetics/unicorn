@@ -139,7 +139,7 @@ static void EMworkerfor(void *data, long i, int tid)
 			float p = score.scores[j].score;
 			if ( p && (p < maxp) ) { //Remove low scoring alignments
 				score.scores[j].score = 0.0f; //By setting probability to 0
-				*removed++;
+				(*removed)++;
 			}
 		}
 		kh_val(qscores, i) = score;
