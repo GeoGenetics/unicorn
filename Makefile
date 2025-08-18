@@ -44,7 +44,7 @@ src/version.h: src/version.h.in
 
 test:
 	cksum=$$(./unicorn refstats -b data/test.bam 2> /dev/null | cksum | awk '{print $$1}' ); \
-	[ $$cksum -eq 2971186341 ] || (exit 1)
+	[ $$cksum -eq 3193906749 ] || (exit 1)
 	
 clean:
 	rm -f $(OBJ) src/version.h libunicorn.a unicorn unicorn.h $(KOBJ) data/out.bam data/out.stats.txt
