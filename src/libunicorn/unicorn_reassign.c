@@ -112,7 +112,9 @@ typedef struct EMdata_t {
 } EMdata_t;
 
 typedef struct SWdata_t {
-
+	int2double_t *sweights;
+	alnscoreq_t  *alnscores;
+	sam_hdr_t *hdr;
 } SWdata_t;
 
 static void EMworkerfor(void *data, long i, int tid)
