@@ -111,12 +111,6 @@ typedef struct EMdata_t {
 	float alpha;
 } EMdata_t;
 
-typedef struct SWdata_t {
-	int2double_t *sweights;
-	alnscoreq_t  *alnscores;
-	sam_hdr_t *hdr;
-} SWdata_t;
-
 static void EMworkerfor(void *data, long i, int tid)
 {
 	EMdata_t *d = (EMdata_t *)data;
@@ -151,23 +145,6 @@ static void EMworkerfor(void *data, long i, int tid)
 		}
 		kh_val(qscores, i) = score;
 	}
-}
-
-static void SWworkerfor(void *data, long i, int tid)
-{
-	SWdata_t *d = (SWdata_t *)data;
-	int2double_t *sweights  = d->sweights;
-	alnscoreq_t  *alnscores = d->alnscores;
-	sam_hdr_t *hdr          = d->hdr;
-	if (kh_exist(sweights, i)) {
-		int32_t tid = kh_key(sweights, i);
-		kh_val(sweights, i) = 0.0;
-		for (uint32_t j = 0; j < alnscores->n; j++) {
-			if ( (tid != alnscores.a[j].tid) || !alnscores.a[j].score) continue;
-			kh_val(sweights, j) += alnscores->a[j].score;
-		}
-		kh_val(sweights, i) /= hdr->target_len[tid];
-	}	
 }
 
 //TODO modularize
@@ -256,7 +233,6 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		//Update subject weights
 		kh_foreach(sweights,k) //Reset weights to 0
 			kh_val(sweights, k) = 0.0;
-		
 		for (uint32_t i = 0; i < alnscores.n; i++) {
 			if (!alnscores.a[i].score) continue; //Ignore removed alignments
 			khint_t k = int2double_get(sweights, alnscores.a[i].tid);
@@ -264,6 +240,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		}
 		kh_foreach(sweights,k) // Scale by target length
 			kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
+		
 		if (VERBOSE) {
 			fprintf(stderr, "%u\t%"PRIu64"\t%f\n", iter, tremoved, tremoved/(float)alnscores.n);
 			fflush(stderr);
