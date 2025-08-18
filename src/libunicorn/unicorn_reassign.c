@@ -69,6 +69,7 @@ static uint64_t unicorn_filterreassign(unicorn_t *u, alnscoreq_t q)
 	sam_hdr_t *ohdr = NULL;
 	htsFile *ofp = hts_open(u->outbam ? u->outbam : "/dev/stdout", "wb5");
 	if (!ofp) goto exit;
+	bgzf_thread_pool(ofp->fp.bgzf, u->p, 0);
 	//Create header for output file
 	tidmap = int2int_init();
 	if (!tidmap) goto exit;
@@ -159,6 +160,9 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	uint32_t fqueries = 0, tqueries = 0, prev = alnscores.n;
 	int32_t n;
 	//Load alignment scores, tids and compute initial subject weights
+	if (VERBOSE) {
+		fprintf(stderr, "[libunicorn::%s] Loading alignments\n", __func__);
+	}
 	struct timespec start, stop;
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	while ( (n = unicorn_reassignload(u, &alnscores)) >= 0) {
@@ -193,10 +197,9 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	clock_gettime(CLOCK_MONOTONIC, &stop);
 	if (VERBOSE) {
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-		fprintf(stderr, "[libunicorn::%s] Loaded bamfile\n"\
-										"\t%lu alignments from %u queries\n"\
+		fprintf(stderr, "\t%lu alignments from %u queries\n"\
 										"\t%f seconds\n",
-					 					__func__, alnscores.n, tqueries, (double)ns/1000000000.f);
+					 					alnscores.n, tqueries, (double)ns/1000000000.f);
 		fprintf(stderr, "[libunicorn::%s] EM start\n", __func__);
 	}
 	u->values.naln   = alnscores.n;
@@ -218,8 +221,8 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 			fprintf(stderr, "Iteration %u\r", iter);
 			fflush(stderr);
 		}
-		iter++;
 		if (iter >= niter) break; //Stop if max iterations reached
+		iter++;
 		memset(removed, 0, u->threads * sizeof(uint32_t));
 		r = 0;
 		kt_forpool(forpool, EMworkerfor, &emdata, kh_end(qscores));

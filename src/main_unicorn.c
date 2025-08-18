@@ -159,10 +159,10 @@ static void reassign_usage(FILE *fp)
   fprintf(fp, "./unicorn reassign [options] -b <in.bam>|<in.sam>\n");
 	fprintf(fp, "Options:\n"\
             "  -b <str>                     Input bam|sam\n"\
-            "  -o <str> | --outbam <str>    Output BAM file [stdout]\n"\
-            "  -t <int>                     Number of threads to use [4]\n"\
-            "  --alpha <float>              Subject weight scaling factor (0.0, 1.0] [0.90]\n"\
-            "  --niter <int>                Max number of EM algorithm iterations [100]\n"\
+            "  -o <str> | --outbam  <str>   Output BAM file [stdout]\n"\
+            "  -t <int> | --threads <int>   Number of threads to use [4]\n"\
+            "  --alpha <float>              Score retention scaling factor (0.0, 1.0] [0.80]\n"\
+            "  --niter <int>                Max number of EM algorithm iterations [5]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message\n");
 }
@@ -664,15 +664,15 @@ static int unicorn_tidstats(int argc, char **argv)
 static int unicorn_reassign(int argc, char **argv)
 {
   int c, ret = 1;
-  struct timespec pstart, pstop;
+  struct timespec start, stop, pstart, pstop;
 	clock_gettime(CLOCK_MONOTONIC, &pstart); 
 	uint64_t ns;
   ketopt_t o = KETOPT_INIT;
   unicorn_opt_t opts = {0};
 	opts.minnreads = 1;
 	opts.minrefl   = 0;
-  opts.alpha     = 0.90f;
-  opts.niter     = 100;
+  opts.alpha     = 0.80f;
+  opts.niter     = 5;
 	unicorn_t *u = NULL;
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
@@ -700,6 +700,9 @@ static int unicorn_reassign(int argc, char **argv)
       case 'h':
         reassign_usage(stdout);
         return 0;
+      case 300: //threads
+        opts.threads = strtoul(o.arg, NULL, 10);
+        break;
       case 302: //names
         opts.names = strdup(o.arg);
         break;
@@ -772,14 +775,18 @@ static int unicorn_reassign(int argc, char **argv)
   }
 	if (!opts.ifile) goto exit;
   ret = 2;
-	fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__,
-																															opts.ifile);
+	fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
+																															       opts.ifile);
+  clock_gettime(CLOCK_MONOTONIC, &start); 
   u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv); 
   if (!u) goto exit;
   ret = 5;
   if (!unicorn_isqgrouped(u)) goto exit;
- 	fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u)); 
-	fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u)); 
+	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+  fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
                   "\talpha == %f\n"\
                   "\tniter == %u\n",
                   __func__, opts.alpha, opts.niter);

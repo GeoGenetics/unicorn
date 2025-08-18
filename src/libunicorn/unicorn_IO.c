@@ -72,7 +72,7 @@ unicorn_t *unicorn_init( int threads,
     u->ifile = strdup(ifile);
     if ( !( u->_FP = hts_open(ifile,"r") ) ) goto exit;
     if (threads > 1) {
-        u->p = hts_tpool_init(threads);
+        u->p = hts_tpool_init(threads < 4 ? threads : 4);
         if (!u->p) goto exit;
         bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0);
     }

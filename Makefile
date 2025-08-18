@@ -1,4 +1,9 @@
-PREFIX ?= /usr/local
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  PREFIX ?= $(shell if [ -d /opt/homebrew ]; then echo /opt/homebrew; else echo /usr/local; fi)
+else
+  PREFIX ?= /usr/local
+endif
 
 ifeq ($(origin HTSSRC), undefined)
   HTSINC = -I$(PREFIX)
