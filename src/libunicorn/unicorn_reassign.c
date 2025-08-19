@@ -162,6 +162,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	//Load alignment scores, tids and compute initial subject weights
 	if (VERBOSE) {
 		fprintf(stderr, "[libunicorn::%s] Loading alignments\n", __func__);
+		fflush(stderr);
 	}
 	struct timespec start, stop;
 	clock_gettime(CLOCK_MONOTONIC, &start);
@@ -185,6 +186,11 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		kh_val(qscores, k) = score;
 		prev = alnscores.n;
 	}	
+	if (VERBOSE) {
+		fprintf(stderr, "\t%lu alignments from %u queries\n", alnscores.n, tqueries);
+		fprintf(stderr, "[libunicorn::%s] Assigning scores\n", __func__);
+		fflush(stderr);
+	}
 	prev = 0;
 	//Loop over queries and assign corresponding sections of scores array
 	for (uint32_t q = 0; q < tqueries; q++) {
@@ -197,10 +203,9 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	clock_gettime(CLOCK_MONOTONIC, &stop);
 	if (VERBOSE) {
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-		fprintf(stderr, "\t%lu alignments from %u queries\n"\
-										"\t%f seconds\n",
-					 					alnscores.n, tqueries, (double)ns/1000000000.f);
+		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 		fprintf(stderr, "[libunicorn::%s] EM start\n", __func__);
+		fflush(stderr);
 	}
 	u->values.naln   = alnscores.n;
 	u->values.nread  = tqueries;
