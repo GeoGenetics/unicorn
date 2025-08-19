@@ -157,7 +157,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	khint_t k;
 	int2double_t *sweights = int2double_init(); //Subject weights
 	int2scores_t *qscores  = int2scores_init(); //Query alignment scores
-	uint32_t fqueries = 0, tqueries = 0, prev = alnscores.n;
+	uint64_t fqueries = 0, tqueries = 0, prev = alnscores.n;
 	int32_t n;
 	//Load alignment scores, tids and compute initial subject weights
 	if (VERBOSE) {
@@ -187,7 +187,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		prev = alnscores.n;
 	}	
 	if (VERBOSE) {
-		fprintf(stderr, "\t%lu alignments from %u queries\n", alnscores.n, tqueries);
+		fprintf(stderr, "\t%"PRIu64" alignments from %u queries\n", alnscores.n, tqueries);
 		fprintf(stderr, "[libunicorn::%s] Assigning scores\n", __func__);
 		fflush(stderr);
 	}
@@ -238,7 +238,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		//Update subject weights
 		kh_foreach(sweights,k) //Reset weights to 0
 			kh_val(sweights, k) = 0.0;
-		for (uint32_t i = 0; i < alnscores.n; i++) {
+		for (uint64_t i = 0; i < alnscores.n; i++) {
 			if (!alnscores.a[i].score) continue; //Ignore removed alignments
 			khint_t k = int2double_get(sweights, alnscores.a[i].tid);
 			kh_val(sweights, k) += alnscores.a[i].score;
