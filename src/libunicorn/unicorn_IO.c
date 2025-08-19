@@ -179,13 +179,13 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	if (1 == n) {q->a[q->n-1].score = 1.0; goto exit;}
 	//Shift score to > 0
 	double as_sum = 0.0;
-	for (uint32_t i = p; i < q->n; i++) {
+	for (uint64_t i = p; i < q->n; i++) {
 		float NS = (kv_A(*q, i).score - minscore + 1)/kv_A(*q, i).al;
 		kv_A(*q, i).score = NS;
 		as_sum += NS;
 	}
 	//Scale to sum 1.0
-	for (uint32_t i = p; i < q->n; i++) {
+	for (uint64_t i = p; i < q->n; i++) {
 		kv_A(*q, i).score = kv_A(*q, i).score/as_sum;
 	}
 	exit:
