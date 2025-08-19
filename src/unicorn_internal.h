@@ -115,7 +115,7 @@ typedef struct {
 } unicorn_t;
 
 uint8_t unicorn_isqgrouped(unicorn_t *u);
-uint32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q);
+int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q);
 uint8_t unicorn_rewind(unicorn_t *u);
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)

@@ -673,7 +673,8 @@ static int unicorn_reassign(int argc, char **argv)
 	opts.minrefl   = 0;
   opts.alpha     = 0.80f;
   opts.niter     = 5;
-	unicorn_t *u = NULL;
+	opts.threads   = 4;
+  unicorn_t *u = NULL;
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
@@ -790,6 +791,7 @@ static int unicorn_reassign(int argc, char **argv)
                   "\talpha == %f\n"\
                   "\tniter == %u\n",
                   __func__, opts.alpha, opts.niter);
+  fflush(stderr);
   ret = unicorn_computereassign(u, opts.alpha, opts.niter);
   if (ret) goto exit;
   fprintf(stderr, "[unicorn::%s] Done\n"\
