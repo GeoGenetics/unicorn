@@ -778,6 +778,7 @@ static int unicorn_reassign(int argc, char **argv)
   ret = 2;
 	fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
 																															       opts.ifile);
+  fflush(stderr);
   clock_gettime(CLOCK_MONOTONIC, &start); 
   u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv); 
   if (!u) goto exit;
