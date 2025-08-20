@@ -150,8 +150,12 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	int32_t l = -1, n = -1;
 	uint64_t p = q->n;
 	if (!u || !q) goto exit;
-	if (u->dcache) if (!bam_copy1(b, u->daln)) goto exit;
-	else if (sam_read1(u->_FP, u->hdr, b) < 0) goto exit;
+	if (u->dcache) {
+		if (!bam_copy1(b, u->daln)) goto exit;
+	}
+	else {
+		if (sam_read1(u->_FP, u->hdr, b) < 0) goto exit;
+	}
 	const char *qname = strdup(bam_get_qname(b));
 	n = 0, l = 1;
 	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
