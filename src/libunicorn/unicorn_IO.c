@@ -124,18 +124,18 @@ int32_t unicorn_getnfqueries(unicorn_t *u)
 	return u ? (int32_t)u->values.nfread : -1;
 }
 
-uint64_t unicorn_loadqueues(unicorn_t *unicorn, bamq_t *q, uint8_t n)
+uint64_t unicorn_loadqueues(unicorn_t *u, bamq_t *q, uint8_t n)
 {
-  if (!unicorn || !q) return 0;
+  if (!u || !q) return 0;
   bam1_t *b = bam_init1();
   uint64_t naln = 0;
   for (uint8_t i = 0; i < n; i++) { //Loop over queues
-    bamq_t _q = q[i]; 
-    while (sam_read1(unicorn->_FP, unicorn->hdr, b) >= 0) {
+    bamq_t _q = q[i];
+    while (sam_read1(u->_FP, u->hdr, b) >= 0) {
       naln++;
       if (_unmapped(b)) continue; // Skip unmapped reads
       //Push alignment into queue
-      //kv_pushish(bam1_t, _q, b);
+      kv_pushq(_q, b);
       if (kv_size(_q) >= MAXALNS) break;
     }
   }

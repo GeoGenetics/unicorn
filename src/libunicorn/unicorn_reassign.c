@@ -26,7 +26,7 @@ static sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap)
   sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
 	khint32_t k, ntid = 0;
 	int absent, err = 1;
-	for (uint32_t i = 0; i < q.n; i++) { //Loop over scores
+	for (uint64_t i = 0; i < q.n; i++) { //Loop over scores
 		if (q.a[i].score)	{
 			int32_t tid = q.a[i].tid;
 			if ( sam_hdr_find_line_pos(hdr, "SQ", tid, &kstr) )
