@@ -365,7 +365,7 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
 
 void unicorn_fillaccq(unicorn_t *u, strq_t *accq)
 {
-  for (uint32_t i = 0; i < u->hdr->n_targets; i++) {
+  for (int32_t i = 0; i < u->hdr->n_targets; i++) {
     const char *acc = u->hdr->target_name[i];
     if (!acc) continue;
     kv_push(char *, *accq, strdup(acc));

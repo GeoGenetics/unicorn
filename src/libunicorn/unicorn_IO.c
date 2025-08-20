@@ -147,20 +147,13 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 {
 	int32_t minscore = INT32_MAX;
 	bam1_t *b = bam_init1();
-	int32_t l = -1;
-	int32_t n = -1;
-	uint32_t p = q->n;
+	int32_t l = -1, n = -1;
+	uint64_t p = q->n;
 	if (!u || !q) goto exit;
-	fprintf(stderr, "========== dcache %u naln: %lu\n", u->dcache, q->n);
-	if (u->dcache) {
-		if (!bam_copy1(b, u->daln)) goto exit;
-	}
-	else {
-		if (sam_read1(u->_FP, u->hdr, b) < 0) goto exit;
-	}
+	if (u->dcache) if (!bam_copy1(b, u->daln)) goto exit;
+	else if (sam_read1(u->_FP, u->hdr, b) < 0) goto exit;
 	const char *qname = strdup(bam_get_qname(b));
-	n = 0;
-	l = 1;
+	n = 0, l = 1;
 	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
 		n++;
 		alnscore_t s = {0, 0, 0};
@@ -174,7 +167,6 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 		kv_push(alnscore_t, *q, s);
     l = sam_read1(u->_FP, u->hdr, b);
 	}
-	fprintf(stderr, "OUTOFLOOP %lu\n", q->n);
 	free((void *)qname);
 	if (1 == n) {q->a[q->n-1].score = 1.0; goto exit;}
 	//Shift score to > 0
@@ -185,21 +177,17 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 		as_sum += NS;
 	}
 	//Scale to sum 1.0
-	for (uint64_t i = p; i < q->n; i++) {
+	for (uint64_t i = p; i < q->n; i++)
 		kv_A(*q, i).score = kv_A(*q, i).score/as_sum;
-	}
 	exit:
-	//Save last alignment for next batch of loading
-	fprintf(stderr, "l: %d\n", l);
-	if (l >= 0) {
-		u->dcache = 1;
-		if ( !bam_copy1(u->daln, b) ) u->dcache = 0;
-	}
-	else u->dcache = 0;
-	bam_destroy1(b);
-	fprintf(stderr, "RETURNING: %d cach: %u\n", n, u->dcache);
-	fflush(stderr);
-	return n;
+		//Save last alignment for next batch of loading
+		if (l >= 0) {
+			u->dcache = 1;
+			if ( !bam_copy1(u->daln, b) ) u->dcache = 0;
+		}
+		else u->dcache = 0;
+		bam_destroy1(b);
+		return n;
 }
 
 /*

@@ -13,7 +13,7 @@ else
   HTSLIB = -L$(HTSSRC)
 endif
 
-CFLAGS+=-Wall -Wextra -Wno-unused-function -pedantic -std=c11 -g3 -Isrc $(HTSINC)/include -fPIC #-fsanitize=address
+CFLAGS+=-Wall -Wextra -Wsign-compare -Wno-unused-function -pedantic -std=c11 -g3 -Isrc $(HTSINC)/include -fPIC #-fsanitize=address
 KFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -g3 #-fsanitize=address
 SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)

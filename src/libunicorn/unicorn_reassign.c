@@ -171,7 +171,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		if (!n) continue; //No alignments loaded
 		fqueries++;
 		//Loop over freshly loaded alignments and update subject weights
-		for (uint32_t i = prev; i < alnscores.n; i++) {
+		for (uint64_t i = prev; i < alnscores.n; i++) {
 			k = int2double_get(sweights, alnscores.a[i].tid);
 			if (k == kh_end(sweights)) {
 				int absent;
@@ -187,13 +187,14 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		prev = alnscores.n;
 	}	
 	if (VERBOSE) {
-		fprintf(stderr, "\t%"PRIu64" alignments from %u queries\n", alnscores.n, tqueries);
+		fprintf(stderr, "\t%"PRIu64" alignments from %"PRIu64" queries\n",
+										alnscores.n, tqueries);
 		fprintf(stderr, "[libunicorn::%s] Assigning scores\n", __func__);
 		fflush(stderr);
 	}
 	prev = 0;
 	//Loop over queries and assign corresponding sections of scores array
-	for (uint32_t q = 0; q < tqueries; q++) {
+	for (uint64_t q = 0; q < tqueries; q++) {
 		khint_t k = int2scores_get(qscores, q);
 		if (k == kh_end(qscores)) continue; //No alignments for this query
 		//Add corresponding section of scores array
@@ -222,7 +223,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	uint64_t tremoved = 0, r;
 	uint32_t iter = 0;
 	if (VERBOSE) {
-			fprintf(stderr, "Iteration\talnRemoved\t%%\n");
+			fprintf(stderr, "Iteration\talnRemoved\ttotal %% removed\n");
 			fflush(stderr);
 	}
 	do {
@@ -247,7 +248,8 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 			kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
 		
 		if (VERBOSE) {
-			fprintf(stderr, "%u\t%"PRIu64"\t%f\n", iter, tremoved, tremoved/(float)alnscores.n);
+			fprintf(stderr, "%u\t%"PRIu64"\t%f\n",
+											iter, r, tremoved/(float)alnscores.n);
 			fflush(stderr);
 		}
 	} while (r > 0);
