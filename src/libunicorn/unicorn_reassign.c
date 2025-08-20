@@ -232,13 +232,11 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		memset(removed, 0, u->threads * sizeof(uint32_t));
 		r = 0;
 		kt_forpool(forpool, EMworkerfor, &emdata, kh_end(qscores));
-		for (int i = 0; i < u->threads; i++)
-			r += removed[i];
+		for (int i = 0; i < u->threads; i++) r += removed[i];
 		if (!r) break; //No alignments removed we can stop
 		tremoved += r;
 		//Update subject weights
-		kh_foreach(sweights,k) //Reset weights to 0
-			kh_val(sweights, k) = 0.0;
+		kh_foreach(sweights,k) kh_val(sweights, k) = 0.0; //Reset weights to 0
 		for (uint64_t i = 0; i < alnscores.n; i++) {
 			if (!alnscores.a[i].score) continue; //Ignore removed alignments
 			khint_t k = int2double_get(sweights, alnscores.a[i].tid);
@@ -246,7 +244,6 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		}
 		kh_foreach(sweights,k) // Scale by target length
 			kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
-		
 		if (VERBOSE) {
 			fprintf(stderr, "%u\t%"PRIu64"\t%f\n",
 											iter, r, tremoved/(float)alnscores.n);
@@ -257,10 +254,10 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	free(removed);
 	kt_forpool_destroy(forpool);
 	if (VERBOSE) {
+		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
 		fprintf(stderr, "[libunicorn::%s] EM end\n", __func__);
 		fprintf(stderr, "\t%"PRIu64" alignments removed\n", tremoved);
 		fprintf(stderr, "\t%u iterations\n", iter);
-		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
 		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 	}
 	if (unicorn_rewind(u)) goto exit;
