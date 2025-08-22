@@ -228,13 +228,18 @@ static void *EMpipe(void *shared, int step, void *in)
 	return 0;
 }
 
-static inline double scale_den_none(const unicorn_t *u, uint32_t tid) {
+static inline double scale_den_none(const unicorn_t *u, uint32_t tid)
+{
     (void)u; (void)tid; return 1.0;
 }
-static inline double scale_den_len(const unicorn_t *u, uint32_t tid) {
+
+static inline double scale_den_len(const unicorn_t *u, uint32_t tid)
+{
     return (double)u->hdr->target_len[tid];
 }
-static inline double scale_den_sqrtlen(const unicorn_t *u, uint32_t tid) {
+
+static inline double scale_den_sqrtlen(const unicorn_t *u, uint32_t tid)
+{
     return sqrt((double)u->hdr->target_len[tid]);
 }
 
