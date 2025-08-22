@@ -17,6 +17,8 @@ uint8_t unicorn_rewind(unicorn_t *u)
 		if ( !( u->_FP = hts_open(u->ifile, "r") ) ) goto exit;	
 		bam_hdr_destroy(u->hdr);
 		if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
+		if (u->threads > 1)
+      bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0);
 		ret = 0;
 	}
 	exit:
@@ -192,6 +194,25 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 		else u->dcache = 0;
 		bam_destroy1(b);
 		return n;
+}
+
+dataq_t *unicorn_qloadqueue(unicorn_t *u, uint64_t *naln)
+{
+	*naln = 0;
+	dataq_t *dq = calloc(u->threads, sizeof(dataq_t));
+	for (int32_t i = 0; i < u->threads; i++) {
+		kv_init(dq[i]);
+		alnscoreq_t threadq;
+		kv_init(threadq);
+		uint32_t _naln = 0;
+		while (unicorn_reassignload(u, &threadq) >= 0 ) {
+			_naln += threadq.n;
+			kv_push(alnscoreq_t, dq[i], threadq);
+			if (1000000 < _naln) break;
+		}
+		*naln += _naln;
+	}
+	return dq;
 }
 
 /*

@@ -111,6 +111,20 @@ typedef struct EMdata_t {
 	float alpha;
 } EMdata_t;
 
+typedef struct EMpipe_t {
+	unicorn_t *u;
+	int2double_t *sweights;
+	int2scores_t *qscores;
+	uint32_t qids;
+} EMpipe_t;
+
+typedef struct EMstep_t {
+	dataq_t *dq;
+	uint64_t naln;
+	uint32_t nqueries;
+	uint32_t step_qids;
+} EMstep_t;
+
 static void EMworkerfor(void *data, long i, int tid)
 {
 	EMdata_t *d = (EMdata_t *)data;
@@ -147,6 +161,71 @@ static void EMworkerfor(void *data, long i, int tid)
 	}
 }
 
+static void *EMpipe(void *shared, int step, void *in)
+{
+	EMpipe_t *data = (EMpipe_t *)shared;
+	unicorn_t *u = data->u;
+	if      ( 0 == step ) { //Load alignments
+		uint64_t naln = 0;
+		dataq_t *dq = unicorn_qloadqueue(u, &naln);
+		if (naln) {
+			EMstep_t *EMstep = calloc(1, sizeof(EMstep_t));
+			EMstep->dq   = dq;
+			EMstep->naln = naln;
+			return EMstep;
+		}
+		for (int32_t i = 0; i < u->threads; i++)
+			kv_destroy(dq[i]);
+		free(dq);
+		fprintf(stderr, "DONSOE\n");
+		sleep(1000);
+	}
+	else if ( 1 == step ) { //Compute thread local sweights
+		EMstep_t *EMstep = (EMstep_t *)in;
+		int2double_t *sweights = data->sweights;
+		int2scores_t  *qscores  = data->qscores;
+		uint32_t qids = data->qids;
+		int absent;
+		khint_t k;
+		//Loop over number of nthreads
+		for (int32_t i = 0; i < u->threads; i++) {
+			dataq_t dq = EMstep->dq[i];
+			EMstep->nqueries += dq.n;
+			//Loop over number of queries
+			for (uint32_t j = 0; j < dq.n; j++) {
+				//Process each query
+				alnscoreq_t q = dq.a[j];
+				//Process each alignment
+				for (uint32_t l = 0; l < q.n; l++) {
+					alnscore_t score = q.a[l];
+					//Update subject weights
+					k = int2double_get(sweights, score.tid);
+					if (k == kh_end(sweights)) {
+						k = int2double_put(sweights, score.tid, &absent);
+						kh_val(sweights, k) = 0.0;
+					}
+					kh_val(sweights, k) += score.score;
+				}
+				//Add alignments for corresponding query to the query map
+				k = int2scores_put(qscores, qids++, &absent);
+				score_t score = {q.n, NULL}; //We can only add number of alignments
+				kh_val(qscores, k) = score;
+			}
+		}
+		EMstep->step_qids = qids;
+		return EMstep;
+	}
+	else if ( 2 == step ) { //Merge data
+		EMstep_t *EMstep = (EMstep_t *)in;
+		fprintf(stderr, "\tstep3\n");
+		fprintf(stderr, "\t%u queries\n", EMstep->nqueries);
+		fprintf(stderr, "\t@qid %u\n", EMstep->step_qids);
+		fprintf(stderr, "\t%llu alignments\n", EMstep->naln);
+		sleep(10000);
+	}
+	return 0;
+}
+
 //TODO modularize
 int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 {
@@ -165,7 +244,9 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 		fflush(stderr);
 	}
 	struct timespec start, stop;
+	EMpipe_t empipe = {u, sweights, qscores, 0};
 	clock_gettime(CLOCK_MONOTONIC, &start);
+	kt_pipeline(3, EMpipe, &empipe, 3);
 	while ( (n = unicorn_reassignload(u, &alnscores)) >= 0) {
 		tqueries++;
 		if (!n) continue; //No alignments loaded
@@ -181,13 +262,13 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 			kh_val(sweights, k) += alnscores.a[i].score;
 		}
 		//Add alignments for corresponding query to the query map
-		khint_t k = int2scores_put(qscores, tqueries-1, &absent);
+		k = int2scores_put(qscores, tqueries-1, &absent);
 		score_t score = {n, NULL}; //We can only add number of alignments 
 		kh_val(qscores, k) = score;
 		prev = alnscores.n;
 	}	
 	if (VERBOSE) {
-		fprintf(stderr, "\t%"PRIu64" alignments from %"PRIu64" queries\n",
+		fprintf(stderr, "\t%lu alignments from %"PRIu64" queries\n",
 										alnscores.n, tqueries);
 		fprintf(stderr, "[libunicorn::%s] Assigning scores\n", __func__);
 		fflush(stderr);

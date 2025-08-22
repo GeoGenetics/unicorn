@@ -56,13 +56,14 @@ typedef struct {
         (v).n++;                                                    \
 } while (0)
 #define kv_lastq(v) (v).a[(v).n-1]
-typedef kvec_t(bam1_t *)   bamq_t;
-typedef kvec_t(float)      floatq_t;
-typedef kvec_t(uint32_t)   uint32q_t;
-typedef kvec_t(int32_t)    int32q_t;
-typedef kvec_t(char *)     charq_t;
-typedef kvec_t(char *)     strq_t;
-typedef kvec_t(alnscore_t) alnscoreq_t;
+typedef kvec_t(bam1_t *)    bamq_t;
+typedef kvec_t(float)       floatq_t;
+typedef kvec_t(uint32_t)    uint32q_t;
+typedef kvec_t(int32_t)     int32q_t;
+typedef kvec_t(char *)      charq_t;
+typedef kvec_t(char *)      strq_t;
+typedef kvec_t(alnscore_t)  alnscoreq_t;
+typedef kvec_t(alnscoreq_t) dataq_t; 
 
 extern uint8_t VERBOSE;
 
@@ -116,6 +117,7 @@ typedef struct {
 
 uint8_t unicorn_isqgrouped(unicorn_t *u);
 int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q);
+dataq_t *unicorn_qloadqueue(unicorn_t *u, uint64_t *naln);
 uint8_t unicorn_rewind(unicorn_t *u);
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
