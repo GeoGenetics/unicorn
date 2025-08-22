@@ -23,10 +23,10 @@ typedef struct data_t {
     uint32_t taxid;
 } data_t;
 
-typedef kvec_t(data_t) dataq_t;
+typedef kvec_t(data_t) tdataq_t;
 
 typedef struct accmapstep_t {
-  dataq_t *dataq;
+  tdataq_t *dataq;
   uint32_t n;
   emap_chr2int_t *map;
   uint32_t *dups;
@@ -188,7 +188,7 @@ static void _forINSERT(void *data, long i, int tid)
 {
   accmapstep_t *step = (accmapstep_t *)data;
   const emap_chr2int_t *map = step->map;
-  dataq_t   q         = step->dataq[i];
+  tdataq_t   q         = step->dataq[i];
   chr2int_t *submap   = map->maps[i];
   int absent, dup = 0;
   khint_t k;
@@ -204,12 +204,12 @@ static void _forINSERT(void *data, long i, int tid)
   step->dups[i] = dup;
 }
 
-static dataq_t *_loaddqueue(kstream_t *ks, uint8_t bits, uint32_t *_nacc)
+static tdataq_t *_loaddqueue(kstream_t *ks, uint8_t bits, uint32_t *_nacc)
 {
 	uint32_t nacc = 0;
-	dataq_t *dataq = NULL;
+	tdataq_t *dataq = NULL;
 	if (!ks) goto exit;
-	dataq = calloc(1U<<bits, sizeof(dataq_t));
+	dataq = calloc(1U<<bits, sizeof(tdataq_t));
 	for (uint8_t i = 0; i < 1U<<bits; i++)
 		kv_resize(data_t, dataq[i], MAXLOAD);
 	kstring_t kstr = {0};
@@ -241,7 +241,7 @@ static void *_accmapP(void *shared, int step, void *in)
   accmappipe_t *p = (accmappipe_t *)shared;
   if      ( 0 == step) { //Load data into queues
     uint32_t nacc = 0;
-		dataq_t *dataq = _loaddqueue(p->ks, EBITS, &nacc);
+		tdataq_t *dataq = _loaddqueue(p->ks, EBITS, &nacc);
     if (nacc) {
         accmapstep_t *stepd = calloc(1, sizeof(accmapstep_t));
         stepd->dataq = dataq;
@@ -251,7 +251,7 @@ static void *_accmapP(void *shared, int step, void *in)
         return stepd;
     }
     for (uint8_t i = 0; i < 1U<<EBITS; i++) {
-        dataq_t q = dataq[i];
+        tdataq_t q = dataq[i];
         kv_destroy(q);
     }
     free(dataq);
@@ -264,9 +264,9 @@ static void *_accmapP(void *shared, int step, void *in)
   }
   else if ( 2 == step) { //Free data
     accmapstep_t *stepd   = (accmapstep_t *)in;
-    dataq_t *dataq = stepd->dataq;
+    tdataq_t *dataq = stepd->dataq;
     for (uint8_t i = 0; i < 1U<<EBITS; i++) {
-        dataq_t q = dataq[i];
+        tdataq_t q = dataq[i];
         kv_destroy(q);
     }
     for (uint32_t i = 0; i < 1U<<EBITS; i++)

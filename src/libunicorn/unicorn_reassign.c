@@ -1,6 +1,8 @@
 #define _XOPEN_SOURCE 700
 #include "unicorn_internal.h"
 
+
+
 #define ALPHA 0.90
 
 typedef struct score_t {
@@ -246,7 +248,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	struct timespec start, stop;
 	EMpipe_t empipe = {u, sweights, qscores, 0};
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	kt_pipeline(3, EMpipe, &empipe, 3);
+	//kt_pipeline(3, EMpipe, &empipe, 3); If you uncomment this line, the program will not work
 	while ( (n = unicorn_reassignload(u, &alnscores)) >= 0) {
 		tqueries++;
 		if (!n) continue; //No alignments loaded
