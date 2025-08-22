@@ -676,11 +676,12 @@ static int unicorn_reassign(int argc, char **argv)
 	uint64_t ns;
   ketopt_t o = KETOPT_INIT;
   unicorn_opt_t opts = {0};
-	opts.minnreads = 1;
-	opts.minrefl   = 0;
-  opts.alpha     = 0.80f;
-  opts.niter     = 5;
-	opts.threads   = 4;
+	opts.minnreads  = 1;
+	opts.minrefl    = 0;
+  opts.alpha      = 0.80f;
+  opts.niter      = 5;
+	opts.threads    = 4;
+  opts.scale_type = UNICORN_SCALE_LENGTH;
   unicorn_t *u = NULL;
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
@@ -809,9 +810,10 @@ static int unicorn_reassign(int argc, char **argv)
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u)); 
 	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
-                  "\talpha == %f\n"\
-                  "\tniter == %u\n",
-                  __func__, opts.alpha, opts.niter);
+                  "\talpha      == %f\n"\
+                  "\tniter      == %u\n"\
+                  "\tscale_type == %s\n",
+                  __func__, opts.alpha, opts.niter, SCALE_TYPES[opts.scale_type]);
   fflush(stderr);
   ret = unicorn_computereassign(u, opts.alpha, opts.niter, opts.scale_type);
   if (ret) goto exit;

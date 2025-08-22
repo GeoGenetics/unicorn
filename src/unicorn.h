@@ -30,6 +30,12 @@ SOFTWARE.
 #define UNICORN_SCALE_LENGTH  1
 #define UNICORN_SCALE_SQRTLEN 2
 
+const char *SCALE_TYPES[] = {
+    "NONE",     // 0: UNICORN_SCALE_NONE
+    "LENGTH",   // 1: UNICORN_SCALE_LENGTH
+    "SQRTLEN"   // 2: UNICORN_SCALE_SQRTLEN
+};
+
 /**
  * @brief Enable verbose output for unicorn library functions.
  */
