@@ -32,6 +32,7 @@ static ko_longopt_t unicorn_lopts[] = {
   	{ "minmani",         ko_required_argument, 319 },  
 		{ "alpha",           ko_required_argument, 320 },
     { "niter",           ko_required_argument, 321 },
+    { "scale-type",      ko_required_argument, 322 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -67,6 +68,7 @@ typedef struct unicorn_opts {
 	float    minmani;  	  // Minimum ANI to consider
   float    alpha;       // Subject weight scaling factor for EM algorithm
   uint32_t niter;       // Max number of EM algorithm iterations
+  uint8_t  scale_type;  // Subject weight scaling type for EM algorithm
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -163,6 +165,11 @@ static void reassign_usage(FILE *fp)
             "  -t <int> | --threads <int>   Number of threads to use [4]\n"\
             "  --alpha <float>              Score retention scaling factor (0.0, 1.0] [0.80]\n"\
             "  --niter <int>                Max number of EM algorithm iterations [5]\n"\
+            "  --scale-type <str>           Scaling type subject weights [LENGTH]\n"\
+            "                               Available types:\n"\
+            "                                NONE    - No subject weight scaling\n"\
+            "                                LENGTH  - Scale by subject length\n"\
+            "                                SQRTLEN - Scale by square root of subject length\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message\n");
 }
@@ -762,6 +769,19 @@ static int unicorn_reassign(int argc, char **argv)
           goto exit;
         }
         break;
+      case 322: //scale-type
+        if (strcmp(o.arg, "NONE") == 0) {
+          opts.scale_type = UNICORN_SCALE_NONE;
+        } else if (strcmp(o.arg, "LENGTH") == 0) {
+          opts.scale_type = UNICORN_SCALE_LENGTH;
+        } else if (strcmp(o.arg, "SQRTLEN") == 0) {
+          opts.scale_type = UNICORN_SCALE_SQRTLEN;
+        } else {
+          fprintf(stderr, "[unicorn::%s] Error: Unknown scale type %s\n", __func__, o.arg);
+          ret = 6;
+          goto exit;
+        }
+      break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -793,7 +813,7 @@ static int unicorn_reassign(int argc, char **argv)
                   "\tniter == %u\n",
                   __func__, opts.alpha, opts.niter);
   fflush(stderr);
-  ret = unicorn_computereassign(u, opts.alpha, opts.niter);
+  ret = unicorn_computereassign(u, opts.alpha, opts.niter, opts.scale_type);
   if (ret) goto exit;
   fprintf(stderr, "[unicorn::%s] Done\n"\
                   "\t%"PRIu64" alignments, %" PRIu64 " passed filters (%f)\n"\

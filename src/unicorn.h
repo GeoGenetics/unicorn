@@ -26,6 +26,10 @@ SOFTWARE.
 
 #define unicorn_version() VERSION
 
+#define UNICORN_SCALE_NONE    0
+#define UNICORN_SCALE_LENGTH  1
+#define UNICORN_SCALE_SQRTLEN 2
+
 /**
  * @brief Enable verbose output for unicorn library functions.
  */
@@ -224,4 +228,4 @@ unicorn's reassign routines
 
 
 ****************************************************/
-int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter);
+int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter, uint8_t scale_type);

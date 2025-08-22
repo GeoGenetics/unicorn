@@ -222,14 +222,31 @@ static void *EMpipe(void *shared, int step, void *in)
 		fprintf(stderr, "\tstep3\n");
 		fprintf(stderr, "\t%u queries\n", EMstep->nqueries);
 		fprintf(stderr, "\t@qid %u\n", EMstep->step_qids);
-		fprintf(stderr, "\t%llu alignments\n", EMstep->naln);
+		fprintf(stderr, "\t%"PRIu64" alignments\n", EMstep->naln);
 		sleep(10000);
 	}
 	return 0;
 }
 
+static inline double scale_den_none(const unicorn_t *u, uint32_t tid) {
+    (void)u; (void)tid; return 1.0;
+}
+static inline double scale_den_len(const unicorn_t *u, uint32_t tid) {
+    return (double)u->hdr->target_len[tid];
+}
+static inline double scale_den_sqrtlen(const unicorn_t *u, uint32_t tid) {
+    return sqrt((double)u->hdr->target_len[tid]);
+}
+
+typedef double (*scale_fn)(const unicorn_t*, uint32_t);
+static const scale_fn SCALE_TBL[] = {
+    scale_den_none,     // 0: UNICORN_SCALE_NONE
+    scale_den_len,      // 1: UNICORN_SCALE_LENGTH
+    scale_den_sqrtlen   // 2: UNICORN_SCALE_SQRTLEN
+};
+
 //TODO modularize
-int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
+int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter, uint8_t scale_type)
 {
 	if (!unicorn_isqgrouped(u)) return 5;
 	alnscoreq_t alnscores;
@@ -240,13 +257,14 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	int2scores_t *qscores  = int2scores_init(); //Query alignment scores
 	uint64_t fqueries = 0, tqueries = 0, prev = alnscores.n;
 	int32_t n;
+	scale_fn denom = SCALE_TBL[scale_type];
 	//Load alignment scores, tids and compute initial subject weights
 	if (VERBOSE) {
 		fprintf(stderr, "[libunicorn::%s] Loading alignments\n", __func__);
 		fflush(stderr);
 	}
 	struct timespec start, stop;
-	EMpipe_t empipe = {u, sweights, qscores, 0};
+	//EMpipe_t empipe = {u, sweights, qscores, 0};
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	//kt_pipeline(3, EMpipe, &empipe, 3); If you uncomment this line, the program will not work
 	while ( (n = unicorn_reassignload(u, &alnscores)) >= 0) {
@@ -298,7 +316,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 	//1. Compute subject weights
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	kh_foreach(sweights,k)
-		kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
+		kh_val(sweights, k) /= denom(u, kh_key(sweights, k));
 	//2. Update score probabilities
 	void *forpool = kt_forpool_init(u->threads);
 	uint32_t *removed = calloc(u->threads, sizeof(uint32_t));
@@ -326,7 +344,7 @@ int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter)
 			kh_val(sweights, k) += alnscores.a[i].score;
 		}
 		kh_foreach(sweights,k) // Scale by target length
-			kh_val(sweights, k) /= u->hdr->target_len[kh_key(sweights, k)];
+			kh_val(sweights, k) /= denom(u, kh_key(sweights, k));	
 		if (VERBOSE) {
 			fprintf(stderr, "%u\t%"PRIu64"\t%f\n",
 											iter, r, tremoved/(float)alnscores.n);
