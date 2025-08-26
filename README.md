@@ -4,7 +4,6 @@
 
 Unicorn computes alignment-based statistics from BAM/SAM files for metagenomic analysis.
 
-Unicorn expects query-grouped BAM files (use `samtools sort -n` to sort by query name).
 
 ## Dependencies
 
@@ -28,9 +27,16 @@ make
 If htslib is in a non-standard location, set HTSSRC:
 
 ```bash
-export HTSSRC=/path/to/htslib/src
+export HTSSRC=/path/to/htslib/
 make
 ```
+
+```
+/path/to/htslib
+```
+Must contain ```lib``` and ```include``` and be searchable by the linker at runtime.:w
+
+
 
 For conda environments:
 
