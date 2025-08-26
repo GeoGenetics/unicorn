@@ -191,7 +191,9 @@ Options:
 ### 4. reassign - EM algorithm filtering
 
 Filter alignments using an Expectation-Maximization algorithm to reassign reads with multiple alignments.
-'''unicorn reassign''' Is a reimplementation of [bamfilter](https://github.com/genomewalker/bam-filter?tab=readme-ov-file#how-the-reassignment-process-works).
+```unicorn reassign``` Is a reimplementation of [bamfilter](https://github.com/genomewalker/bam-filter?tab=readme-ov-file#how-the-reassignment-process-works).
+
+bam files are required to be query grouped. That is, collated by query name or sorted by query name.
 
 ```bash
 $ ./unicorn reassign [options] -b <in.bam>|<in.sam>
@@ -212,19 +214,6 @@ Options:
   --verbose                    Prints libunicorn's messages.
   -h                           Print this help message
 ```
-
-**Options:**
-- `-b <str>` - Input BAM/SAM file
-- `-o <str>, --outbam <str>` - Output BAM file [stdout]
-- `-t <int>, --threads <int>` - Number of threads [4]
-- `--alpha <float>` - Score retention scaling factor (0.0, 1.0] [0.80]
-- `--niter <int>` - Max number of EM algorithm iterations [5]
-- `--scale-type <str>` - Scaling type for subject weights [LENGTH]
-  - `NONE` - No subject weight scaling
-  - `LENGTH` - Scale by subject length
-  - `SQRTLEN` - Scale by square root of subject length
-- `--verbose` - Print detailed messages
-- `-h` - Print help message
 
 **Example:**
 ```bash
@@ -258,13 +247,13 @@ Options:
 ## File Formats
 
 ### Taxonomy files
-- **acc2tax**: Tab-separated file mapping accession IDs to taxonomy IDs
-- **names.dmp**: NCBI taxonomy names file
-- **nodes.dmp**: NCBI taxonomy nodes file
-- **.khash files**: Binary format for faster acc2tax lookups (created automatically)
+- **acc2tax**:      Tab-separated file mapping accession IDs to taxonomy IDs
+- **names.dmp**:    NCBI taxonomy names file
+- **nodes.dmp**:    NCBI taxonomy nodes file
+- **.khash files**: Binary format for faster acc2tax lookups.
 
 ### Input requirements
-- BAM/SAM files must be **query-grouped** (sorted by read name)
+- BAM/SAM files must be **query-grouped** (sorted/collated by read name) 
 - Use `samtools sort -n input.bam -o query_grouped.bam` if needed
 
 ## Testing
