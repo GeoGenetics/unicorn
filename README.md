@@ -64,7 +64,28 @@ Commands:
 Compute statistics for each reference sequence in the alignment.
 
 ```bash
+$ ./unicorn refstats [options] -b <in.bam>|<in.sam>
+unicorn 2.2.0 31750bf
+        Aug 22 2025 12:04:35
+[unicorn::unicorn_refstats] Error: Missing argument(s)
 ./unicorn refstats [options] -b <in.bam>|<in.sam>
+Options:
+  -b <str>   Input bam|sam [Required]
+  -t <int>, --threads <int> Number of threads [4]
+  --outbam  <str> Output BAM file with filtered alignments.
+  --outstat <str> Output statistics file
+  --[FILTER] <PARAM>  Apply filter "FILTER" with parameter "PARAM"
+      For example "--minreads 100" to filter out references with
+      less than 100 reads.
+      Available filters:
+       - minrefl  <int>  Minimum reference length to consider [0]
+       - minreads <int>  Minimum number of reads to consider  [1]
+  --withtid  Report taxid of reference sequence. Requires --acc2tax, --names and --nodes options.
+  --names   <str> Taxonomy nodeid to name mapping file.
+  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.
+  --acc2tax <str> Accession to taxid mapping file or .khash file.
+  --verbose     Print libunicorn's messages.
+  -h         print this help message
 ```
 
 **Basic usage:**
@@ -72,23 +93,14 @@ Compute statistics for each reference sequence in the alignment.
 ./unicorn refstats -b input.bam > refstats.txt
 ```
 
-**Options:**
-- `-b <str>` - Input BAM/SAM file [Required]
-- `-t <int>, --threads <int>` - Number of threads [4]
-- `--outbam <str>` - Output BAM file with filtered alignments
-- `--outstat <str>` - Output statistics file
-- `--minrefl <int>` - Minimum reference length to consider [0]
-- `--minreads <int>` - Minimum number of reads to consider [1]
-- `--withtid` - Report taxid of reference sequence (requires taxonomy files)
-- `--names <str>` - Taxonomy names file (for --withtid)
-- `--nodes <str>` - Taxonomy nodes file (for --withtid)
-- `--acc2tax <str>` - Accession to taxid mapping file (for --withtid)
-- `--verbose` - Print detailed messages
-- `-h` - Print help message
-
 **Example with filtering:**
 ```bash
 ./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outstat filtered_refs.txt
+```
+
+**Example with filtering and filtered bam output:**
+```bash
+./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outbam filtered.bam > filtered_refs.txt
 ```
 
 **Output format (13 columns):**
