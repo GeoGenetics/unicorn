@@ -191,7 +191,7 @@ Options:
 ### 4. reassign - EM algorithm filtering
 
 Filter alignments using an Expectation-Maximization algorithm to reassign reads with multiple alignments.
-'''unicorn reassign''' Is a reimplementation of (bamfilter)[https://github.com/genomewalker/bam-filter?tab=readme-ov-file#how-the-reassignment-process-works].
+'''unicorn reassign''' Is a reimplementation of [bamfilter](https://github.com/genomewalker/bam-filter?tab=readme-ov-file#how-the-reassignment-process-works).
 
 ```bash
 $ ./unicorn reassign [options] -b <in.bam>|<in.sam>
