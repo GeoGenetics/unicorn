@@ -31,11 +31,7 @@ export HTSSRC=/path/to/htslib/
 make
 ```
 
-```
-/path/to/htslib
-```
-Must contain ```lib``` and ```include``` and be searchable by the linker at runtime.:w
-
+```/path/to/htslib``` Must contain ```lib``` and ```include``` and be searchable by the linker at runtime.:w
 
 
 For conda environments:
@@ -47,18 +43,19 @@ make
 
 ## Usage
 
-Unicorn provides four main commands for different types of alignment statistics:
+Unicorn provides four commands for different types of alignment statistics or filtering:
 
 ```bash
+$ ./unicorn
+unicorn 2.2.0 31750bf
+        Aug 22 2025 12:04:35
 ./unicorn command [options] -b <in.bam>|<in.sam>
+Commands:
+  refstats    Compute per reference statistics.
+  bamstats    Compute per bam statistics.
+  tidstats    Compute per taxid statistics.
+  reassign    Filter alignments via EM algorithm.
 ```
-
-### Commands
-
-- **refstats** - Compute per-reference statistics
-- **bamstats** - Compute per-BAM statistics  
-- **tidstats** - Compute per-taxid statistics
-- **reassign** - Filter alignments using EM algorithm
 
 ## Commands in Detail
 
