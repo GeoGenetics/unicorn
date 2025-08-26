@@ -64,7 +64,7 @@ Commands:
 Compute statistics for each reference sequence in the alignment.
 
 ```bash
-$ ./unicorn refstats [options] -b <in.bam>|<in.sam>
+$ ./unicorn refstats
 unicorn 2.2.0 31750bf
         Aug 22 2025 12:04:35
 [unicorn::unicorn_refstats] Error: Missing argument(s)
@@ -103,20 +103,35 @@ Options:
 ./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outbam filtered.bam > filtered_refs.txt
 ```
 
-**Output format (13 columns):**
-1. **Id** - Reference name
-2. **Length** - Reference length
-3. **n_alns** - Number of alignments to the reference
-4. **n_reads** - Number of reads to the reference (always ≤ n_alns)
-5. **m_readl** - Median read length
+**Output format (27 columns):**
+1. **Id** -        Reference name
+2. **Length** -    Reference length
+3. **n_alns** -    Number of alignments to the reference
+4. **n_reads** -   Number of reads to the reference (always ≤ n_alns)
+5. **m_readl** -   Median read length
 6. **std_readl** - Standard deviation of read length
-7. **md_readl** - Mode of read length
-8. **readl_min** - Smallest read length
-9. **readl_max** - Largest read length
-10. **m_alnnm** - Mean alignment edit distance
-11. **m_alnani** - Mean alignment ANI (Average Nucleotide Identity)
-12. **std_alnani** - Standard deviation of alignment ANI
-13. **md_alnani** - Mode of alignment ANI
+7. **md_readl** -  Median of read length
+8. **mo_readl** -  Mode of read length
+9. **readl_min** -     Smallest read length
+10. **readl_max** -    Largest read length
+11. **m_alnnm** -      Mean alignment edit distance
+12. **m_alnani** -     Mean alignment ANI (Average Nucleotide Identity)
+13. **std_alnani** -   Standard deviation of alignment ANI
+14. **md_alnani** -    Median of alignment ANI
+15. **n_covbases** -   Number of covered bases
+16. **m_cov** -        Mean coverage depth
+17. **breath_cov** -   Breadth of coverage
+18. **exp_breath** -   Expected breadth
+19. **breath_ratio** - Breadth ratio
+20. **m_covcovered** - Mean coverage of covered positions
+21. **std_covcovered** - Standard deviation of coverage of covered positions
+22. **evenness_cov** -   Evenness of coverage
+23. **site_density** -   Site density
+24. **entropy** -        Coverage entropy
+25. **gini** -           Coverage gini coefficient
+26. **n_entropy** -      Normalized entropy
+27. **n_gini** -         Normalized Gini coefficient
+  28. **tad80** -        Truncated Average Depth at 80% of covergae mass
 
 ### 2. bamstats - Per-BAM statistics
 
