@@ -67,7 +67,6 @@ Compute statistics for each reference sequence in the alignment.
 $ ./unicorn refstats
 unicorn 2.2.0 31750bf
         Aug 22 2025 12:04:35
-[unicorn::unicorn_refstats] Error: Missing argument(s)
 ./unicorn refstats [options] -b <in.bam>|<in.sam>
 Options:
   -b <str>   Input bam|sam [Required]
@@ -103,7 +102,7 @@ Options:
 ./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outbam filtered.bam > filtered_refs.txt
 ```
 
-**Output format (27 columns):**
+**Output format (28 columns):**
 1. **Id** -        Reference name
 2. **Length** -    Reference length
 3. **n_alns** -    Number of alignments to the reference
@@ -138,42 +137,51 @@ Options:
 Compute overall statistics for BAM/SAM files.
 
 ```bash
+$ ./unicorn bamstats
+unicorn 2.2.0 31750bf
+        Aug 22 2025 12:04:35
 ./unicorn bamstats [options] -b <in.bam>|<in.sam>
+Options:
+  -b <str>         Input bam|sam
+  --outstat <str>  Output statistics file
+  --filelist <str> File containing input file paths. One per line.
+  --printdists     Print distributions of read lengths, alignment lengths, etc.
+                   This will create a files <inputname>.dists.txt
 ```
-
-**Options:**
-- `-b <str>` - Input BAM/SAM file
-- `--outstat <str>` - Output statistics file
-- `--filelist <str>` - File containing input file paths (one per line)
-- `--printdists` - Print distributions of read lengths, alignment lengths, etc.
-                   Creates additional `<inputname>.dists.txt` files
 
 **Example:**
 ```bash
-./unicorn bamstats -b input.bam --outstat bam_summary.txt
+./unicorn bamstats -b input.bam > bam_summary.txt
 ```
 
 ### 3. tidstats - Per-taxid statistics
 
-Compute statistics grouped by taxonomic ID, useful for metagenomic classification analysis.
+Compute statistics grouped by taxonomic ID.
 
 ```bash
+$ ./unicorn tidstats [options] -b <in.bam>|<in.sam>
+unicorn 2.2.0 31750bf
+        Aug 22 2025 12:04:35
 ./unicorn tidstats [options] -b <in.bam>|<in.sam>
+Options:
+  -b <str>                     Input bam|sam
+  -o <str> | --outstat <str>   Output statistics file [/dev/stdout]
+  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.
+                               Providing a .khash file is much faster.
+  -n <str> | --names <str>     Taxonomy names file.
+  -d <str> | --nodes <str>     Taxonomy nodes file
+  --[FILTER] <PARAM>  Apply filter "FILTER" with parameter "PARAM"
+      For example "--minreads 100" to filter out taxids with
+      less than 100 reads.
+      Available filters:
+       - minrefl  <int>   Minimum reference length. [0]
+       - minreads <int>   Minimum number of reads per taxid. [1]
+       - minmani  <float> Minimum mean ANI per taxid. [0]
+  --filelist <str>             File containing input file paths. One per line.
+  --rank <str>                 Taxonomic rank to summarize by. [species]
+  --verbose                    Prints libunicorn's messages.
+  -h                           Print this help message
 ```
-
-**Options:**
-- `-b <str>` - Input BAM/SAM file
-- `-o <str>, --outstat <str>` - Output statistics file [/dev/stdout]
-- `-a <str>, --acc2tax <str>` - Accession to taxid mapping file or .khash file
-- `-n <str>, --names <str>` - Taxonomy names file
-- `-d <str>, --nodes <str>` - Taxonomy nodes file
-- `--minrefl <int>` - Minimum reference length [0]
-- `--minreads <int>` - Minimum number of reads per taxid [1]
-- `--minmani <float>` - Minimum mean ANI per taxid [0]
-- `--filelist <str>` - File containing input file paths (one per line)
-- `--rank <str>` - Taxonomic rank to summarize by [species]
-- `--verbose` - Print detailed messages
-- `-h` - Print help message
 
 **Example:**
 ```bash
@@ -183,9 +191,26 @@ Compute statistics grouped by taxonomic ID, useful for metagenomic classificatio
 ### 4. reassign - EM algorithm filtering
 
 Filter alignments using an Expectation-Maximization algorithm to reassign reads with multiple alignments.
+'''unicorn reassign''' Is a reimplementation of (bamfilter)[https://github.com/genomewalker/bam-filter?tab=readme-ov-file#how-the-reassignment-process-works].
 
 ```bash
+$ ./unicorn reassign [options] -b <in.bam>|<in.sam>
+unicorn 2.2.0 31750bf
+        Aug 22 2025 12:04:35
 ./unicorn reassign [options] -b <in.bam>|<in.sam>
+Options:
+  -b <str>                     Input bam|sam
+  -o <str> | --outbam  <str>   Output BAM file [stdout]
+  -t <int> | --threads <int>   Number of threads to use [4]
+  --alpha <float>              Score retention scaling factor (0.0, 1.0] [0.80]
+  --niter <int>                Max number of EM algorithm iterations [5]
+  --scale-type <str>           Scaling type subject weights [LENGTH]
+                               Available types:
+                                NONE    - No subject weight scaling
+                                LENGTH  - Scale by subject length
+                                SQRTLEN - Scale by square root of subject length
+  --verbose                    Prints libunicorn's messages.
+  -h                           Print this help message
 ```
 
 **Options:**
