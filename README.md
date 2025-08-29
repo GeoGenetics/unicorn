@@ -42,6 +42,8 @@ Install with conda
 conda -c conda-forge -c bioconda enhjoerning
 ```
 
+Or if you installed htslib from conda and want to compile unicorn yourself.
+
 ```bash
 export HTSSRC=$CONDA_PREFIX
 make
