@@ -102,12 +102,12 @@ Options:
 
 **Example with filtering:**
 ```bash
-./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outstat filtered_refs.txt
+./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outstat refstats.txt
 ```
 
 **Example with filtering and filtered bam output:**
 ```bash
-./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outbam filtered.bam > filtered_refs.txt
+./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outbam filtered.bam > refstats.txt
 ```
 
 **Output format (28 columns):**
