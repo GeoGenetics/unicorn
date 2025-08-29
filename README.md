@@ -31,10 +31,16 @@ export HTSSRC=/path/to/htslib/
 make
 ```
 
-```/path/to/htslib``` Must contain ```lib``` and ```include``` and be searchable by the linker at runtime.:w
+```/path/to/htslib``` Must contain ```lib``` and ```include``` and be searchable by the linker at runtime.
 
 
 For conda environments:
+
+Install with conda
+
+```bash
+conda -c conda-forge -c bioconda enhjoerning
+```
 
 ```bash
 export HTSSRC=$CONDA_PREFIX
@@ -61,7 +67,7 @@ Commands:
 
 ### 1. refstats - Per-reference statistics
 
-Compute statistics for each reference sequence in the alignment.
+Compute statistics for each reference sequence.
 
 ```bash
 $ ./unicorn refstats
