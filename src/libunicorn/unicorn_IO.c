@@ -145,6 +145,43 @@ uint64_t unicorn_loadqueues(unicorn_t *u, bamq_t *q, uint8_t n)
   return naln;
 }
 
+int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q)
+{
+	bam1_t *b = bam_init1();
+	int32_t l = -1, n = -1;
+	if (!u || !q) return -1;
+	if (u->dcache) {
+		if (!bam_copy1(b, u->daln)) return -1;
+	}
+	else {
+		if (sam_read1(u->_FP, u->hdr, b) < 0) return -1;
+	}
+	const char *qname = strdup(bam_get_qname(b));
+	n = 0, l = 1;
+	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
+		n++;
+		alnscore_t s = {0, 0, 0};
+		uint8_t *aux = bam_aux_get(b, "NM");
+		uint8_t NM = bam_aux2i(aux);
+		//if (AS < minscore) minscore = AS;
+		uint32_t al = bam_endpos(b) - b->core.pos;
+		s.score = (1.0 - ((float)NM / (float)al)) * 100;
+		s.tid = b->core.tid;
+		s.al = al;
+		kv_push(alnscore_t, *q, s);
+    l = sam_read1(u->_FP, u->hdr, b);
+	}
+	free((void *)qname);
+	//Save last alignment for next batch of loading
+	if (l >= 0) {
+		u->dcache = 1;
+		if ( !bam_copy1(u->daln, b) ) u->dcache = 0;
+	}
+	else u->dcache = 0;
+	bam_destroy1(b);
+	return n;
+}
+
 int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 {
 	int32_t minscore = INT32_MAX;

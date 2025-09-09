@@ -117,6 +117,7 @@ typedef struct {
 
 uint8_t unicorn_isqgrouped(unicorn_t *u);
 int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q);
+int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q);
 dataq_t *unicorn_qloadqueue(unicorn_t *u, uint64_t *naln);
 uint8_t unicorn_rewind(unicorn_t *u);
 

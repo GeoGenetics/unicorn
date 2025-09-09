@@ -17,7 +17,7 @@ KHASHL_MAP_INIT(static, int2scores_t, int2scores,
 								uint32_t, score_t,
 								kh_hash_uint32, kh_eq_generic)
 
-static sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap)
+sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap)
 {
   if ( !hdr || !q.n ) return NULL;
   kstring_t kstr = {0};

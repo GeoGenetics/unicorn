@@ -30,10 +30,20 @@ SOFTWARE.
 #define UNICORN_SCALE_LENGTH  1
 #define UNICORN_SCALE_SQRTLEN 2
 
+#define UNICORN_ALNFILT_ALLTOP 0
+#define UNICORN_ALNFILT_RNDTOP 1
+#define UNICORN_ALNFILT_PCTTOP 2
+
 const char *SCALE_TYPES[] = {
     "NONE",     // 0: UNICORN_SCALE_NONE
     "LENGTH",   // 1: UNICORN_SCALE_LENGTH
     "SQRTLEN"   // 2: UNICORN_SCALE_SQRTLEN
+};
+
+const char *ALNFILT_MODES[] = {
+    "ALLTOP",   // 0: UNICORN_ALNFILT_ALLTOP
+    "RNDTOP",   // 1: UNICORN_ALNFILT_RNDTOP
+    "PCTTOP"    // 2: UNICORN_ALNFILT_PCTTOP
 };
 
 /**
@@ -235,3 +245,10 @@ unicorn's reassign routines
 
 ****************************************************/
 int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter, uint8_t scale_type);
+
+/**************************************************** 
+unicorn's alnfilt routines
+
+
+****************************************************/
+int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float pct);
