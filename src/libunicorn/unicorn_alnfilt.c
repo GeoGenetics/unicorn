@@ -107,7 +107,7 @@ static uint64_t unicorn_filter(unicorn_t *u, alnscoreq_t q)
 	return faln;
 }
 
-int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float pct)
+int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct)
 {
 	int ret = 5;
 	if (!unicorn_isqgrouped(u)) goto exit;
@@ -125,7 +125,7 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float pct)
 		//Loop over freshly loaded alignments and apply minani filter
 		uint32_t _n = 0;
 		for (uint64_t i = prev; i < alnscores.n; i++) {
-			if (alnscores.a[i].score < minani) {
+			if ((alnscores.a[i].score < minani) || (alnscores.a[i].score > maxani)) {
 				alnscores.a[i].score = 0;
 				_n++;
 				n--;

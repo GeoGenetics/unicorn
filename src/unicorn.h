@@ -251,4 +251,4 @@ unicorn's alnfilt routines
 
 
 ****************************************************/
-int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float pct);
+int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct);

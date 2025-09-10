@@ -58,6 +58,7 @@ static ko_longopt_t unicorn_lopts[] = {
 		{ "mode",            ko_required_argument, 323 },
 		{ "minani",          ko_required_argument, 324 },
 		{ "pct",             ko_required_argument, 325 },
+    { "maxani",          ko_required_argument, 326 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -99,6 +100,7 @@ typedef struct unicorn_opts {
 	float minani;         // Minimum average nucleotide identity
 	uint8_t alnfiltmode;  // Alignment filtering mode
 	float pct;            // Percentage threshold for filtering
+  float maxani;         // Maximum average nucleotide identity
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -219,6 +221,7 @@ static void alnfilt_usage(FILE *fp)
             "                                           percentage of best alignment.\n"\
             "  --pct <float>                Percentage threshold for PCTTOP mode [0.90]\n"\
             "  --minani <float>             Minimum average nucleotide identity [90.0]\n"\
+            "  --maxani <float>             Maximum average nucleotide identity [100.0]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message\n");
 }
@@ -352,7 +355,15 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
           ret = 6;
           goto exit;
         }
-      	break;			
+      	break;
+      case 326: //maxani
+        opts->maxani = strtof(o.arg, NULL);
+        if (opts->maxani < 0.f || opts->maxani > 100.f) {
+          fprintf(stderr, "[unicorn::%s] Error: --maxani must be between (0.0 and 100.0]\n", __func__);
+          ret = 6;
+          goto exit;
+        }
+        break;			
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -1076,12 +1087,13 @@ static int unicorn_alnfilt(int argc, char **argv)
 	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 	fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
                   "\tmode      == %s\n"\
-                  "\tminani    == %f\n",
-                  __func__, ALNFILT_MODES[opts.alnfiltmode], opts.minani);
+                  "\tminani    == %f\n"\
+                  "\tmaxani    == %f\n",
+                  __func__, ALNFILT_MODES[opts.alnfiltmode], opts.minani, opts.maxani);
 	if (opts.alnfiltmode == UNICORN_ALNFILT_PCTTOP)
 		fprintf(stderr, "\tpct       == %f\n", opts.pct);
 	fflush(stderr);
-  ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minani, opts.pct);
+  ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minani, opts.maxani, opts.pct);
   if (ret) goto exit;
 	fprintf(stderr, "[unicorn::%s] Done\n"\
                   "\t%"PRIu64" alignments, %" PRIu64 " passed filters (%f)\n"\
