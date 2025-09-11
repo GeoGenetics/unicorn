@@ -9,7 +9,7 @@ Unicorn computes alignment-based statistics from BAM/SAM files for metagenomic a
 
 Unicorn depends on:
 - [htslib](https://github.com/samtools/htslib) for BAM/SAM file handling
-- klib (included as submodule)
+- [klib](https://github.com/attractivechaos/klib) (included as submodule)
 
 ## Installation
 
