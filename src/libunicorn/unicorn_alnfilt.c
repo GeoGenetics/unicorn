@@ -107,7 +107,7 @@ static uint64_t unicorn_filter(unicorn_t *u, alnscoreq_t q)
 	return faln;
 }
 
-int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct)
+int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct, uint8_t strictb)
 {
 	int ret = 5;
 	if (!unicorn_isqgrouped(u)) goto exit;
@@ -120,18 +120,25 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, fl
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	while ( (n = unicorn_alnfiltload(u, &alnscores)) >= 0) {
 		tqueries++;
-		//fprintf(stderr, "Loaded %d alignments\n", n);
 		float max = 0.0;
 		//Loop over freshly loaded alignments and apply minani filter
 		uint32_t _n = 0;
 		for (uint64_t i = prev; i < alnscores.n; i++) {
+			//Check for ANI bounds
 			if ((alnscores.a[i].score < minani) || (alnscores.a[i].score > maxani)) {
+				if (strictb) {
+					for (uint64_t j = prev; j < alnscores.n; j++) {
+						alnscores.a[j].score = 0;
+					}
+					_n = n;
+					n = 0;
+					break;
+				}
 				alnscores.a[i].score = 0;
 				_n++;
 				n--;
 			}
 			max = alnscores.a[i].score > max ? alnscores.a[i].score : max;
-			//fprintf(stderr, "\t%f\n", alnscores.a[i].score);
 		}
 		if (!n) {
 			falns += _n;
