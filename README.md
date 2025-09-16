@@ -9,7 +9,7 @@ Unicorn computes alignment-based statistics from BAM/SAM files for metagenomic a
 
 Unicorn depends on:
 - [htslib](https://github.com/samtools/htslib) for BAM/SAM file handling
-- klib (included as submodule)
+- [klib](https://github.com/attractivechaos/klib) (included as submodule)
 
 ## Installation
 
@@ -31,10 +31,18 @@ export HTSSRC=/path/to/htslib/
 make
 ```
 
-```/path/to/htslib``` Must contain ```lib``` and ```include``` and be searchable by the linker at runtime.:w
+```/path/to/htslib``` Must contain ```lib``` and ```include``` and be searchable by the linker at runtime.
 
 
 For conda environments:
+
+Install with conda
+
+```bash
+conda install -c conda-forge -c bioconda enhjoerning
+```
+
+Or if you installed htslib from conda and want to compile unicorn yourself.
 
 ```bash
 export HTSSRC=$CONDA_PREFIX
@@ -61,7 +69,7 @@ Commands:
 
 ### 1. refstats - Per-reference statistics
 
-Compute statistics for each reference sequence in the alignment.
+Compute statistics for each reference sequence.
 
 ```bash
 $ ./unicorn refstats
@@ -94,12 +102,12 @@ Options:
 
 **Example with filtering:**
 ```bash
-./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outstat filtered_refs.txt
+./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outstat refstats.txt
 ```
 
 **Example with filtering and filtered bam output:**
 ```bash
-./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outbam filtered.bam > filtered_refs.txt
+./unicorn refstats -b input.bam --minreads 10 --minrefl 1000 --outbam filtered.bam > refstats.txt
 ```
 
 **Output format (28 columns):**
