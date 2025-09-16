@@ -39,7 +39,7 @@ For conda environments:
 Install with conda
 
 ```bash
-conda -c conda-forge -c bioconda enhjoerning
+conda install -c conda-forge -c bioconda enhjoerning
 ```
 
 Or if you installed htslib from conda and want to compile unicorn yourself.

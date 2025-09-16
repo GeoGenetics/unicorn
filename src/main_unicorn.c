@@ -68,7 +68,8 @@ static const char *ERRORS[16] = { 0,
 																	"Failed writing accession map",
 																  "Memory allocation error",
 																  "BAM not query grouped",
-																	"Bad argument"};
+																	"Bad argument",
+                                  "Bad taxonomy"};
 
 typedef struct unicorn_opts {
   int  threads;         // Number of threads to use
@@ -590,7 +591,7 @@ static int unicorn_tidstats(int argc, char **argv)
     kv_init(accq);
   }
 	fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
-	clock_gettime(CLOCK_MONOTONIC, &start);
+  clock_gettime(CLOCK_MONOTONIC, &start);
   utax = unicorn_loadtaxonomy(opts.acc2tax,
                               opts.names,
                               opts.nodes,
