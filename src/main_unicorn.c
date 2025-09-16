@@ -221,6 +221,7 @@ static void alnfilt_usage(FILE *fp)
             "                                ALLTOP  - Select all best alignments\n"\
             "                                PCTTOP  - Select alignments within --pct\n"\
             "                                           percentage of best alignment.\n"\
+            "                                ALL     - Select all alignments.\n"\
             "  --pct <float>                Percentage threshold for PCTTOP mode [0.90]\n"\
             "  --minani <float>             Minimum average nucleotide identity [90.0]\n"\
             "  --maxani <float>             Maximum average nucleotide identity [100.0]\n"\
@@ -337,6 +338,8 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
           opts->alnfiltmode = UNICORN_ALNFILT_RNDTOP;
         } else if (strcmp(o.arg, "PCTTOP") == 0) {
           opts->alnfiltmode = UNICORN_ALNFILT_PCTTOP;
+        } else if (strcmp(o.arg, "ALL") == 0) {
+          opts->alnfiltmode = UNICORN_ALNFILT_ALL;
         } else {
           fprintf(stderr, "[unicorn::%s] Error: Unknown --mode %s\n", __func__, o.arg);
           ret = 6;
@@ -1076,11 +1079,11 @@ static int unicorn_alnfilt(int argc, char **argv)
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
-	if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+  if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
 	ret = 1;
 	if (!opts.ifile) goto exit;
 	ret = 2;
-	fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
+  fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
 																															       opts.ifile);
   fflush(stderr);
   clock_gettime(CLOCK_MONOTONIC, &start); 
@@ -1100,7 +1103,7 @@ static int unicorn_alnfilt(int argc, char **argv)
 	if (opts.alnfiltmode == UNICORN_ALNFILT_PCTTOP)
 		fprintf(stderr, "\tpct          == %f\n", opts.pct);
 	if (opts.strictb)
-		fprintf(stderr, "\tstrictbounds == TRUE%f\n", opts.pct);
+		fprintf(stderr, "\tstrictbounds == TRUE\n");
   fflush(stderr);
   ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minani, opts.maxani, opts.pct, opts.strictb);
   if (ret) goto exit;

@@ -16,6 +16,19 @@ static inline uint32_t mode_alltop(alnscoreq_t q, uint64_t p, float max, float p
 	return f;
 }
 
+static inline uint32_t mode_all(alnscoreq_t q, uint64_t p, float max, float pct)
+{
+	if (!q.n || p >= q.n) return 0;
+	uint32_t f = 0;
+	max = 0.0;
+	for (uint64_t i = p; i < q.n; i++) {
+		if (q.a[i].score == max) {
+			f++;
+		}
+	}
+	return f;
+}
+
 static inline uint32_t mode_rndtop(alnscoreq_t q, uint64_t p, float max, float pct)
 {
  	if (!q.n || p >= q.n) return 0;
@@ -61,7 +74,8 @@ typedef uint32_t (*mode_fn)(alnscoreq_t, uint64_t, float, float);
 static const mode_fn MODE_TBL[] = {
     mode_alltop,     // 0: UNICORN_MODE_ALLTOP
     mode_rndtop,     // 1: UNICORN_MODE_RNDTOP
-    mode_pcttop      // 2: UNICORN_MODE_PCTTOP
+    mode_pcttop,     // 2: UNICORN_MODE_PCTTOP
+    mode_all         // 3: UNICORN_MODE_ALL
 };
 
 static uint64_t unicorn_filter(unicorn_t *u, alnscoreq_t q)
@@ -146,21 +160,15 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, fl
 			continue;
 		}
 		fqueries++;
-		//fprintf(stderr, "\tMax score: %f %d alns left\n", max, n);
 		falns += filter(alnscores, prev, max, pct);
-		//for (uint64_t i = prev; i < alnscores.n; i++) {
-		//	fprintf(stderr, "\t\t%f\n", alnscores.a[i].score);
-		//}
-		//fprintf(stderr, "\tFiltered %d alignments\n", f);
 		prev = alnscores.n;
-		//sleep(1);
 	}
 	clock_gettime(CLOCK_MONOTONIC, &stop);
 	if (VERBOSE) {
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
 		fprintf(stderr, "\t%lu alignments from %"PRIu64" queries\n",
 										alnscores.n, tqueries);
-		fprintf(stderr, "\tFiltered %llu alignments\n", falns);
+		fprintf(stderr, "\tFiltered %"PRIu64" alignments\n", falns);
 		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 		fflush(stderr);
 	}
