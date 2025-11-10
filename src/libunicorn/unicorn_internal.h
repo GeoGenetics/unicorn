@@ -359,7 +359,9 @@ typedef struct _covstats_t {
 									"%f\t%f\t%f\t%f\t"\
 									"%f\t%f\t%f\t%f\t"\
 									"%f\t%f\n"
-/*
+
+uint8_t _ASCHECK(bam1_t *b, int32_t ms);
+                  /*
   Computes median from a count array.
   @param *v - Count array v[n] has the count of the number of instances value
               n was observed.

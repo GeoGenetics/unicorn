@@ -236,9 +236,10 @@ static void alnfilt_usage(FILE *fp)
 
 static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 {
-  int c, ret = 1;
+  int c, ret = 2;
   ketopt_t o = KETOPT_INIT;
   while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
+    ret = 1;
     switch(c) {
       case 'b':
 				opts->ifile = strdup(o.arg);
@@ -275,6 +276,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         break;
       case 304: //acc2tax
         opts->acc2tax = strdup(o.arg);
+        break;
+      case 305: //outbam
+        opts->outbam = strdup(o.arg);
         break;
       case 308: //min_length
         opts->minrefl = strtoul(o.arg, NULL, 10);
@@ -395,7 +399,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         break;
       }
   }
-  if (c <= -1) goto exit;
+  if (2==ret) goto exit;
   ret = 0;
 	exit:
 		return ret;

@@ -128,7 +128,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
 	stats->minrefl   = minrefl;
 	stats->minmani   = minmani;
 	stats->minalnas  = minalnas;
-	memset(stats->_readlc, 0, 256*sizeof(uint32_t));
+  memset(stats->_readlc, 0, 256*sizeof(uint32_t));
 	return stats;
 }
 

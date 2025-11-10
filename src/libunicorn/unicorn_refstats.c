@@ -310,6 +310,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
 	refmap_t *refmap = (refmap_t *)stats->__map;
 	while (sam_read1(u->_FP, _hdr, b) >= 0) {
     if (_unmapped(b)) continue;
+    if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
     int32_t tid = b->core.tid;
     khint_t k = refmap_get(refmap, tid);
     if (k == kh_end(refmap)) continue; //Reference not in map
