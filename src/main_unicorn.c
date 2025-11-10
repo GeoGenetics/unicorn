@@ -45,13 +45,13 @@ static ko_longopt_t unicorn_lopts[] = {
     { "filelist",        ko_required_argument, 310 },
     { "printdists",      ko_no_argument,       311 },
     { "dumpacc2tax",     ko_required_argument, 312 },
-  	{ "verbose",         ko_no_argument,       313 },  
+  	{ "verbose",         ko_no_argument,       313 },
 		{ "onlypresent",     ko_no_argument,       314 },
     { "nodump_bam"  ,    ko_no_argument,       315 },
     { "help",            ko_no_argument,       316 },
     { "version",         ko_no_argument,       317 },
     { "rank",            ko_required_argument, 318 },
-  	{ "minmani",         ko_required_argument, 319 },  
+  	{ "minmani",         ko_required_argument, 319 },
 		{ "alpha",           ko_required_argument, 320 },
     { "niter",           ko_required_argument, 321 },
     { "scale-type",      ko_required_argument, 322 },
@@ -60,6 +60,7 @@ static ko_longopt_t unicorn_lopts[] = {
 		{ "pct",             ko_required_argument, 325 },
     { "maxani",          ko_required_argument, 326 },
     { "strictbounds",    ko_no_argument,       327 },
+    { "minalnas",        ko_required_argument, 328 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -89,10 +90,10 @@ typedef struct unicorn_opts {
   char *nodes;          // Taxonomy nodes file
   char *dumpacc2tax;    // Dump accession to taxid map to this file
   char *rank;           // Rank to use
-  uint8_t  verbose;     // Verbose mode, 
+  uint8_t  verbose;     // Verbose mode,
 	uint8_t  withtid;     // Report taxid of reference sequence
   uint8_t  onlypresent; // Only dump accessions found in the acc2tax map
-  uint32_t minnreads;   // Minimum number of reads to consider  
+  uint32_t minnreads;   // Minimum number of reads to consider
   uint64_t minrefl;     // Minimum reference length to consider
 	float    minmani;  	  // Minimum ANI to consider
   float    alpha;       // Subject weight scaling factor for EM algorithm
@@ -104,6 +105,7 @@ typedef struct unicorn_opts {
 	float pct;            // Percentage threshold for filtering
   float maxani;         // Maximum average nucleotide identity
   uint8_t strictb;      // Remove query if ANI out of bounds at any alignment
+  int32_t minalnas;     // Minimum alignment score
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -148,6 +150,7 @@ static void refstats_usage(FILE *fp)
             "      Available filters:\n"\
             "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
             "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
+            "       - minalnas <int>  Minimum alignment score [0 (bowtie2's max score)]\n"\
             "  --withtid  Report taxid of reference sequence. Requires --acc2tax, --names and --nodes options.\n"\
             "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
@@ -261,6 +264,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
       case 300: //threads
         opts->threads = strtoul(o.arg, NULL, 10);
         break;
+      case 301: //bam
+        opts->ifile = strdup(o.arg);
+        break;
       case 302: //names
         opts->names = strdup(o.arg);
         break;
@@ -373,7 +379,10 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         break;
       case 327: //strictbounds
         opts->strictb = 1;
-        break;			
+        break;
+      case 328: //minalnas
+        opts->minalnas = strtol(o.arg, NULL, 10);
+        break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -386,21 +395,22 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         break;
       }
   }
-	ret = 0;
+  if (c <= -1) goto exit;
+  ret = 0;
 	exit:
 		return ret;
 }
 
 static int unicorn_refstats(int argc, char **argv)
 {
-  int c, ret = 1;
+  int ret = 1;
   struct timespec start, stop;
   uint64_t ns;
-  ketopt_t o = KETOPT_INIT;
   unicorn_opt_t opts = {0};
   opts.threads   = 4;
   opts.minnreads = 1;
   opts.minrefl   = 0;
+  opts.minalnas  = INT32_MIN;
   unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
 	utax_t *utax = NULL;
@@ -409,51 +419,7 @@ static int unicorn_refstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   //Read command line options
-  while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
-    switch(c) {
-      case 't':
-        opts.threads = strtoul(o.arg, NULL, 10);
-        break;
-      case 'b':
-        opts.ifile = strdup(o.arg);
-        break;
-      case 'h':
-        refstats_usage(stdout);
-        ret = 0;
-        goto exit;
-      case 300: //threads
-        opts.threads = strtoul(o.arg, NULL, 10);
-        break;
-      case 302: //names
-        opts.names   = strdup(o.arg);
-        break;
-      case 303: //nodes
-        opts.nodes   = strdup(o.arg);
-        break;
-      case 304: //acc2tax
-        opts.acc2tax = strdup(o.arg);
-        break; 
-      case 305: //outbam
-        opts.outbam  = strdup(o.arg);
-        break;
-      case 306: //outstat
-        opts.outstat = strdup(o.arg);
-        break;
-      case 308: //min_length
-        opts.minrefl = strtoul(o.arg, NULL, 10);
-        break;
-      case 309:   //minreadn
-        opts.minnreads = strtoul(o.arg, NULL, 10);
-        break;
-			case 313: //verbose
-				opts.verbose = 1;
-				unicorn_setverbose();
-				break;
-      case 307: //withtid
-        opts.withtid = 1;
-        break;
-    }
-  }
+  if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
   if (!opts.ifile)  goto exit;
   if (opts.withtid) {
     if (!opts.acc2tax || !opts.names || !opts.nodes) {
@@ -482,9 +448,10 @@ static int unicorn_refstats(int argc, char **argv)
 	stats = unicorn_stat_init(opts.minnreads,
 														opts.minrefl,
 														opts.minmani,
+                            opts.minalnas,
 														0);
   if (!stats) goto exit;
-  ret = -4; 
+  ret = -4;
   //Compute statistics
   clock_gettime(CLOCK_MONOTONIC, &start);
   if ( (ret = unicorn_refstat_compute(u, stats)) ) goto exit;
@@ -497,8 +464,8 @@ static int unicorn_refstats(int argc, char **argv)
   fread = unicorn_stat_getfread(stats);
   fprintf(stderr, "\t%" PRIu64 " alignments, %" PRIu64 " passed filters (%f)\n",
                   taln,
-                  faln, 
-                  (float)faln/taln); 
+                  faln,
+                  (float)faln/taln);
   fprintf(stderr, "\t%" PRIu64 " reads, %" PRIu64 " passed filters (%f)\n",
                   tread,
                   fread,
@@ -607,8 +574,8 @@ static int unicorn_bamstats(int argc, char **argv)
     kv_push(char *, fileq, opts.ifile);
   if (opts.filel)
     unicorn_addfilelist(opts.filel, &fileq);
-  
-  //Loop over files 
+
+  //Loop over files
   for (uint32_t i = 0; i < fileq.n; ++i) {
     //Load bam data via unicorn API
     fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n",
@@ -627,9 +594,9 @@ static int unicorn_bamstats(int argc, char **argv)
     ret = -3;
     //Parse the statistics string and initialize stat object
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(0, 0, 0, 0);
+    stats = unicorn_stat_init(0, 0, 0, 0, 0);
     if (!stats) goto exit;
-    ret = -4; 
+    ret = -4;
     //Compute statistics
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_bamstat_compute(u, stats)) ) {
@@ -646,7 +613,7 @@ static int unicorn_bamstats(int argc, char **argv)
     uint64_t taln, tread;
     taln  = unicorn_stat_gettaln(stats);
     tread = unicorn_stat_gettread(stats);
-    fprintf(stderr, "\t%"PRIu64" alignments\n", taln); 
+    fprintf(stderr, "\t%"PRIu64" alignments\n", taln);
     fprintf(stderr, "\t%"PRIu64" reads\n", tread);
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
     fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
@@ -656,7 +623,7 @@ static int unicorn_bamstats(int argc, char **argv)
     stats = NULL;
     unicorn_destroy(u);
     u = NULL;
-  } 
+  }
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     free(_argv[i]);
   kv_destroy(fileq);
@@ -680,7 +647,7 @@ static int unicorn_tidstats(int argc, char **argv)
 {
   int c, ret = 1;
   struct timespec start, stop, pstart, pstop;
-	clock_gettime(CLOCK_MONOTONIC, &pstart); 
+	clock_gettime(CLOCK_MONOTONIC, &pstart);
 	uint64_t ns;
   ketopt_t o = KETOPT_INIT;
   utax_t *utax = 0;
@@ -688,7 +655,7 @@ static int unicorn_tidstats(int argc, char **argv)
 	opts.minnreads = 1;
 	opts.minrefl   = 0;
 	opts.minmani	  = 0.f;
-	opts.rank = strdup("species"); 
+	opts.rank = strdup("species");
 	unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
   strq_t accq = {0};
@@ -708,7 +675,7 @@ static int unicorn_tidstats(int argc, char **argv)
         opts.acc2tax = strdup(o.arg);
         break;
       case 'n':
-        opts.names = strdup(o.arg);  
+        opts.names = strdup(o.arg);
         break;
       case 'd':
         opts.nodes = strdup(o.arg);
@@ -817,6 +784,7 @@ static int unicorn_tidstats(int argc, char **argv)
     stats = unicorn_stat_init(opts.minnreads,
 															opts.minrefl,
 															opts.minmani,
+                              opts.minalnas,
 															TIDSTATS);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -839,8 +807,8 @@ static int unicorn_tidstats(int argc, char **argv)
 		frefs = unicorn_stats_getfrefn(stats);
     fprintf(stderr, "\t%" PRIu64 " alignments, %" PRIu64 " passed filters (%f)\n",
                   taln,
-                  faln, 
-                  (float)faln/taln); 
+                  faln,
+                  (float)faln/taln);
     fprintf(stderr, "\t%" PRIu64 " reads, %" PRIu64 " passed filters (%f)\n",
                   tread,
                   fread,
@@ -877,8 +845,8 @@ static int unicorn_tidstats(int argc, char **argv)
     if (opts.nodes)   free(opts.nodes);
     if (opts.dumpacc2tax) free(opts.dumpacc2tax);
     if (opts.filel)   free(opts.filel);
-  	clock_gettime(CLOCK_MONOTONIC, &pstop);  
-		ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);	
+  	clock_gettime(CLOCK_MONOTONIC, &pstop);
+		ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
 		fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",
 										__func__,
 										(double)ns/1000000000.f);
@@ -889,7 +857,7 @@ static int unicorn_reassign(int argc, char **argv)
 {
   int c, ret = 1;
   struct timespec start, stop, pstart, pstop;
-	clock_gettime(CLOCK_MONOTONIC, &pstart); 
+	clock_gettime(CLOCK_MONOTONIC, &pstart);
 	uint64_t ns;
   ketopt_t o = KETOPT_INIT;
   unicorn_opt_t opts = {0};
@@ -918,7 +886,7 @@ static int unicorn_reassign(int argc, char **argv)
         opts.acc2tax = strdup(o.arg);
         break;
       case 'n':
-        opts.names = strdup(o.arg);  
+        opts.names = strdup(o.arg);
         break;
       case 'd':
         opts.nodes = strdup(o.arg);
@@ -1017,14 +985,14 @@ static int unicorn_reassign(int argc, char **argv)
 	fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
 																															       opts.ifile);
   fflush(stderr);
-  clock_gettime(CLOCK_MONOTONIC, &start); 
-  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv); 
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv);
   if (!u) goto exit;
   ret = 5;
   if (!unicorn_isqgrouped(u)) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u)); 
+  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
 	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
                   "\talpha      == %f\n"\
@@ -1054,7 +1022,7 @@ static int unicorn_reassign(int argc, char **argv)
   	if (u) unicorn_destroy(u);
   	if (opts.ifile)   free(opts.ifile);
   	if (opts.outbam)  free(opts.outbam);
-    for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);	
+    for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
 		clock_gettime(CLOCK_MONOTONIC, &pstop);
   	ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
   	fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",
@@ -1087,14 +1055,14 @@ static int unicorn_alnfilt(int argc, char **argv)
   fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
 																															       opts.ifile);
   fflush(stderr);
-  clock_gettime(CLOCK_MONOTONIC, &start); 
-  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv); 
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv);
   if (!u) goto exit;
   ret = 5;
 	if (!unicorn_isqgrouped(u)) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u)); 
+  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
 	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 	fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
                   "\tmode           == %s\n"\
@@ -1121,7 +1089,7 @@ static int unicorn_alnfilt(int argc, char **argv)
                   (float)unicorn_getnfref(u)/unicorn_getnref(u));
 	ret = 0;
 	exit:
-		if (ret) { 
+		if (ret) {
 			alnfilt_usage(stderr);
 			if (ret < 0) ret = 0;
 		}

@@ -63,7 +63,7 @@ typedef kvec_t(int32_t)     int32q_t;
 typedef kvec_t(char *)      charq_t;
 typedef kvec_t(char *)      strq_t;
 typedef kvec_t(alnscore_t)  alnscoreq_t;
-typedef kvec_t(alnscoreq_t) dataq_t; 
+typedef kvec_t(alnscoreq_t) dataq_t;
 
 extern uint8_t VERBOSE;
 
@@ -80,7 +80,7 @@ static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
 {
     if (a.pos != b.pos)
         return a.pos < b.pos;
-    return a.e > b.e; 
+    return a.e > b.e;
 }
 typedef kvec_t(_urangeevent) ueventq_t;
 void unicorn_sorturange(uint32_t n, _urangeevent *a);
@@ -124,7 +124,7 @@ uint8_t unicorn_rewind(unicorn_t *u);
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 //Check if reference is too short
 #define _reftooshort(hdr, tid, minref)\
-          ((hdr)->target_len[(tid)] < (minref) ? 1 : 0) 
+          ((hdr)->target_len[(tid)] < (minref) ? 1 : 0)
 
 KHASHL_MAP_INIT(static,
                 int32int64map_t,
@@ -141,7 +141,7 @@ KHASHL_MAP_INIT(static,
 */
 KHASHL_SET_INIT(static,               //Scope
                 u64set_t, u64set, //type and prefix
-                uint64_t,             //key type 
+                uint64_t,             //key type
                 kh_hash_dummy, kh_eq_generic) //hash and equality functions
 
 /******************
@@ -157,7 +157,7 @@ typedef struct refstat_t {
   float        REFREADE;   // Mean read length
   float        REFREADV;   // Read length variance
   uint32_t     REFREADD;   // Read length median
-  uint32_t     REFREADO;   // Read length mode 
+  uint32_t     REFREADO;   // Read length mode
   float        _M;         // Sum of squares of difference from mean
   uint32_t     REFREADMIN;
   uint32_t     REFREADMAX;
@@ -190,8 +190,8 @@ typedef struct refstat_t {
 
 KHASHL_MAP_INIT(static,                        //Scope
                 refmap_t, refmap,           //type and prefix
-                int32_t, refstat_t,           //key and value types 
-                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
+                int32_t, refstat_t,           //key and value types
+                kh_hash_uint32, kh_eq_generic) //hash and equality functions
 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
 
 typedef struct taxstat_t {
@@ -236,13 +236,13 @@ typedef struct taxstat_t {
 
 KHASHL_MAP_INIT(static,                        //Scope
                 taxmap_t, taxmap,           //type and prefix
-                int32_t, taxstat_t,           //key and value types 
-                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
+                int32_t, taxstat_t,           //key and value types
+                kh_hash_uint32, kh_eq_generic) //hash and equality functions
 
 KHASHL_MAP_INIT(static,                        //Scope
                 floatmap_t, floatmap,           //type and prefix
-                uint32_t, uint64_t,           //key and value types 
-                kh_hash_uint32, kh_eq_generic) //hash and equality functions 
+                uint32_t, uint64_t,           //key and value types
+                kh_hash_uint32, kh_eq_generic) //hash and equality functions
 
 typedef struct unicorn_stats_t {
   //Flags
@@ -256,7 +256,7 @@ typedef struct unicorn_stats_t {
 	uint64_t _nfreads;
   uint64_t _nfalns;
 	uint32_t _nfrefs;				//Number of filtered references after computation
-	//bam wide stats 
+	//bam wide stats
 	float    _mrlen;        //Mean read length
   float    _vrlen;        //Variance of read length
   uint32_t _mdrlen;       //Median read length
@@ -271,6 +271,7 @@ typedef struct unicorn_stats_t {
   uint32_t minnreads; // Minimum number of reads to consider
   uint32_t minrefl;   // Minimum reference length to consider
 	float 	 minmani;	  // Minimum mean ANI to consider
+  int32_t  minalnas;  // Minimum alignment score to consider
 } unicorn_stat_t;
 
 typedef struct _covstats_t {
@@ -414,7 +415,7 @@ KHASHL_MAP_INIT(static, chr2int_t, chr2int,
 
 typedef struct emap_chr2int_t {
     chr2int_t **maps;  //Submaps 1<<bits total maps
-    uint8_t   bits;   
+    uint8_t   bits;
     uint64_t  size;    //Number of elements in the map
     //Special flags
     uint8_t   is_ff;   //Was the map loaded from a file?

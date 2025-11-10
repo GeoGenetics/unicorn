@@ -100,16 +100,16 @@ int32_t unicorn_getnfqueries(unicorn_t *u);
  * @param u Pointer to unicorn_t object.
  * @return 1 if query grouped, 0 otherwise.
  *
- * This function checks if the SAM/BAM file is sorted or grouped by query. 
+ * This function checks if the SAM/BAM file is sorted or grouped by query.
  */
 uint8_t unicorn_isqgrouped(unicorn_t *u);
 
-/**************************************************** 
+/****************************************************
 unicorn's BAM statistic computation interface
 
 
 ****************************************************/
-#define REFSTATS 0 
+#define REFSTATS 0
 #define TIDSTATS 1
 
 /**
@@ -129,7 +129,8 @@ typedef struct unicorn_stat_t *unicorn_stat_t;
  */
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
-																	float    minani,
+                                  float    minani,
+                                  int32_t  minalnas,
                                   uint8_t  flg);
 void unicorn_stat_destroy(unicorn_stat_t *stats);
 
@@ -160,7 +161,7 @@ uint8_t unicorn_stats_isfiltered(const unicorn_stat_t *stats);
 uint8_t unicorn_refstats_filterbam(unicorn_t *u,
                                    unicorn_stat_t *stats);
 
-/**************************************************** 
+/****************************************************
 unicorn's taxonomy routines
 
 
@@ -173,7 +174,7 @@ Members and methods are accessed via the unicron_* functions
 */
 typedef struct utax_t *utax_t;
 
-/** 
+/**
     @brief Load taxonomic data.
     @param acc2tax - Accession to taxid mapping file
     @param names   - Taxonomy names file
@@ -185,8 +186,8 @@ typedef struct utax_t *utax_t;
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-														 const char *rank,
-														 int *ret);
+                             const char *rank,
+                             int *ret);
 
 void unicorn_closetaxonomy(utax_t *utax);
 
@@ -231,7 +232,7 @@ void unicorn_bamstat_pdists(const unicorn_stat_t *stats,
  */
 void unicorn_fillaccq(unicorn_t *u, strq_t *accq);
 
-/** 
+/**
  * @brief Print accessions from a strq_t object to a file.
  * @param filename - The name of the output file.
  * @param accq     - The strq_t object containing accessions.
@@ -241,14 +242,14 @@ void unicorn_printstrq(const char *filename, strq_t accq, utax_t *utax);
 void unicorn_strqdestroy(strq_t accq);
 
 
-/**************************************************** 
+/****************************************************
 unicorn's reassign routines
 
 
 ****************************************************/
 int unicorn_computereassign(unicorn_t *u, float alpha, uint32_t niter, uint8_t scale_type);
 
-/**************************************************** 
+/****************************************************
 unicorn's alnfilt routines
 
 

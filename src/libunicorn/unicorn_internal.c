@@ -41,12 +41,22 @@ uint32_t _udCAMODE(uint32_t *v, uint32_t n)
   return mode;
 }
 
+//Check for alignment score
+uint8_t _ASCHECK(bam1_t *b, int32_t ms)
+{
+  uint8_t *as = bam_aux_get(b, "AS");
+  if (!as) return 1; //No AS tag found
+  int32_t _AS = bam_aux2i(as);
+  if (_AS < ms) return 0;
+  return 1;
+}
+
 //Computes ANI of alignment record, stores edit distance (nm) in *NM
 float _ANINM(bam1_t *b, uint32_t *NM)
 {
   uint8_t *nm = bam_aux_get(b, "NM");
-  int _NM = bam_aux2i(nm); 
-  int query_len = b->core.l_qseq; 
+  int _NM = bam_aux2i(nm);
+  int query_len = b->core.l_qseq;
   // ANI = (1 - (NM / query_len)) * 100
   float ani = (1.0 - ((float)_NM / query_len)) * 100;
   *NM = _NM;
@@ -103,6 +113,7 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
                                   float    minmani,
+                                  int32_t  minalnas,
                                   uint8_t  flg)
 {
 	unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
@@ -116,6 +127,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
 	stats->minnreads = minnreads;
 	stats->minrefl   = minrefl;
 	stats->minmani   = minmani;
+	stats->minalnas  = minalnas;
 	memset(stats->_readlc, 0, 256*sizeof(uint32_t));
 	return stats;
 }
@@ -125,7 +137,7 @@ void _echr2intdel(emap_chr2int_t *map)
   for (uint8_t i = 0; i < 1U<<map->bits; i++) {
     chr2int_t *submap = map->maps[i];
     khint_t k;
-    if (!map->is_ff)    
+    if (!map->is_ff)
         kh_foreach(submap, k)
             free((void *)kh_key(submap, k));
     chr2int_destroy(submap);
@@ -146,7 +158,7 @@ void _echr2intdel(emap_chr2int_t *map)
 */
 emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
 {
-	int ret = -1;   
+	int ret = -1;
 	emap_chr2int_t *map = calloc(1, sizeof(emap_chr2int_t));
   if (!map) goto exit;
   map->bits = bits;
@@ -157,7 +169,7 @@ emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
       if (!map->maps[i]) {
           for (uint8_t j = 0; j < i; j++)
               chr2int_destroy(map->maps[j]);
-          goto exit;    
+          goto exit;
       }
   }
   if (is_ff) {
@@ -270,10 +282,10 @@ double _getgini(int32int64map_t *hist,
   khint_t ki, kj;
   kh_foreach(hist, ki) {
     uint32_t di = kh_key(hist, ki);
-    uint64_t li = kh_val(hist, ki);    
+    uint64_t li = kh_val(hist, ki);
     kh_foreach(hist, kj) {
       uint32_t dj = kh_key(hist, kj);
-      uint64_t lj = kh_val(hist, kj);          
+      uint64_t lj = kh_val(hist, kj);
       wsum += li * lj * abs((int)di - (int)dj);
     }
   }

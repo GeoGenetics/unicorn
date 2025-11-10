@@ -31,7 +31,7 @@ static inline uint32_t _udMEDIAN(uint32_t *v, uint32_t n)
 {
   if ( n%2 )
     return v[n/2];
-  return (v[n/2 - 1] + v[n/2]) / 2.0; 
+  return (v[n/2 - 1] + v[n/2]) / 2.0;
 }
 
 static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
@@ -69,7 +69,7 @@ static void _refmapstats(unicorn_stat_t *stats)
   kv_init(rmq);
   //Loop over references and sort arrays
   kh_foreach(refmap, k) {
-    int32_t tid = kh_key(refmap, k);        //tid AKA reference id 
+    int32_t tid = kh_key(refmap, k);        //tid AKA reference id
     refstat_t refstat = kh_val(refmap, k);  //stats data
     uint32_t _n = kh_size(refstat.READSET); //number of reads
     _treads += _n;
@@ -106,7 +106,7 @@ static void _refmapstats(unicorn_stat_t *stats)
     kh_val(refmap, k).REFNGINI   = covstats.ngini;
     kh_val(refmap, k).tad80      = covstats.tad80;
     kv_destroy(aEVENT);
-  } 
+  }
   for (uint32_t i = 0; i < rmq.n; i++) {
     k = refmap_get(refmap, rmq.a[i]);
     refmap_del(refmap, k);
@@ -130,6 +130,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
+    if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
     naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
@@ -211,12 +212,12 @@ uint64_t unicorn_stat_gettread(const unicorn_stat_t *stats)
 
 uint64_t unicorn_stat_getfread(const unicorn_stat_t *stats)
 {
-  return stats->_nfreads;  
+  return stats->_nfreads;
 }
 
 uint64_t unicorn_stat_getfaln(const unicorn_stat_t *stats)
 {
-  return stats->_nfalns;  
+  return stats->_nfalns;
 }
 
 int32_t unicorn_stats_getfrefn(const unicorn_stat_t *stats)
@@ -332,7 +333,7 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
   kh_foreach(refmap, k) {
     refstat_t v = kh_val(refmap, k);
     float breath = v.REFCOVB/(double)v.REFLEN;
-    float expbreath =  1.0f - expf(-breath); 
+    float expbreath =  1.0f - expf(-breath);
     fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                 hdr->target_name[kh_key(refmap, k)],        //1
                 v.REFLEN,                                   //2
@@ -358,9 +359,9 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
                 sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
                 1000.0f * breath,                           //24
                 v.REFENTROPY,                               //25
-                v.REFGINI,                                  //26        
+                v.REFGINI,                                  //26
                 v.REFNENTROP,                               //27
-                v.REFNGINI,                                 //28    
+                v.REFNGINI,                                 //28
                 v.tad80);
     }
 }
@@ -378,10 +379,10 @@ static void _print_withtax(FILE *fp,
     uint32_t taxid = utax_gettaxid(utax, accession, &absent);
     if (absent) taxid = 0;
     float breath = v.REFCOVB/(double)v.REFLEN;
-    float expbreath =  1.0f - expf(-breath); 
+    float expbreath =  1.0f - expf(-breath);
     fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                 accession,                                  //1
-                taxid,                                      //2  
+                taxid,                                      //2
                 v.REFLEN,                                   //3
                 v.REFNALNS,                                 //4
                 kh_size(v.READSET),                         //5
@@ -405,9 +406,9 @@ static void _print_withtax(FILE *fp,
                 sqrtf(v.REFVONCOV)/v.REFMONCOV,             //23
                 1000.0f * breath,                           //24
                 v.REFENTROPY,                               //25
-                v.REFGINI,                                  //26        
+                v.REFGINI,                                  //26
                 v.REFNENTROP,                               //27
-                v.REFNGINI,                                 //28    
+                v.REFNGINI,                                 //28
                 v.tad80                                     //29
            );
     }
