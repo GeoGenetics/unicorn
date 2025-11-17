@@ -253,7 +253,7 @@ float _tad80(int32int64map_t *hist)
   return (float)wmass/ rmass;
 }
 
-double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne)
+double _getentropy(const int32int64map_t *hist, uint64_t t, float *_ne)
 {
   double entropy = 0.0;
   khint_t k;

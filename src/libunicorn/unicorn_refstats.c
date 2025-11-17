@@ -336,34 +336,34 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
     float breath = v.REFCOVB/(double)v.REFLEN;
     float expbreath =  1.0f - expf(-breath);
     fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
-                hdr->target_name[kh_key(refmap, k)],        //1
-                v.REFLEN,                                   //2
-                v.REFNALNS,                                 //3
-                kh_size(v.READSET),                         //4
-                v.REFREADE,                                 //5
-                sqrtf(v.REFREADV),                          //6
-                v.REFREADD,                                 //7
-                v.REFREADO,                                 //8
-                v.REFREADMIN,                               //9
-                v.REFREADMAX,                               //10
-                v.REFALNNM,                                 //11
-                v.REFALNANIE,                               //12
-                sqrtf(v.REFALNANIV),                        //13
-                v.REFALNANID,                               //14
-                v.REFCOVB,                                  //15
-                v.REFMCOV,                                  //16
-                breath,                                     //17
-                expbreath,                                  //18
-                breath/expbreath,                           //19
-                v.REFMONCOV,                                //20
-                sqrtf(v.REFVONCOV),                         //21
-                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
-                1000.0f * breath,                           //24
-                v.REFENTROPY,                               //25
-                v.REFGINI,                                  //26
-                v.REFNENTROP,                               //27
-                v.REFNGINI,                                 //28
-                v.tad80);
+                hdr->target_name[kh_key(refmap, k)],        //0
+                v.REFLEN,                                   //1
+                v.REFNALNS,                                 //2
+                kh_size(v.READSET),                         //3
+                v.REFREADE,                                 //4
+                sqrtf(v.REFREADV),                          //5
+                v.REFREADD,                                 //6
+                v.REFREADO,                                 //7
+                v.REFREADMIN,                               //8
+                v.REFREADMAX,                               //9
+                v.REFALNNM,                                 //10
+                v.REFALNANIE,                               //11
+                sqrtf(v.REFALNANIV),                        //12
+                v.REFALNANID,                               //13
+                v.REFCOVB,                                  //14
+                v.REFMCOV,                                  //15
+                breath,                                     //16
+                expbreath,                                  //17
+                breath/expbreath,                           //18
+                v.REFMONCOV,                                //19
+                sqrtf(v.REFVONCOV),                         //20
+                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //21
+                1000.0f * breath,                           //22
+                v.REFENTROPY,                               //23
+                v.REFGINI,                                  //24
+                v.REFNENTROP,                               //25
+                v.REFNGINI,                                 //26
+                v.tad80);                                   //27
     }
 }
 
