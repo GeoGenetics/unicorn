@@ -424,7 +424,7 @@ uint8_t unicorn_isqgrouped(unicorn_t *u)
 
 KHASHL_MAP_INIT(static,                        //Scope
                 chrmap_t, strmap,           //type and prefix
-                char *, uint64_t,           //key and value types
+                char *, char *,           //key and value types
                 kh_hash_str, kh_eq_str) //hash and equality functions
 
 /*
@@ -453,7 +453,7 @@ void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint3
 			i++;
 		}
 		//fprintf(stderr, "%s\n", tok);
-		kh_val(refmap, k) = strtoul(tok, NULL, 10);
+		kh_val(refmap, k) = strdup(tok);
 	}
 	gzclose(fp);
 	ks_destroy(ks1);
@@ -470,18 +470,19 @@ void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint3
 			fprintf(stderr, "%s\tnot found\n", tok);
 			continue;
 		}
-		fprintf(stderr, "%s\t", tok);
+		fprintf(stdout, "%s\t", tok);
 		uint32_t i = 0;
 		while (i < col2) {
 			tok = strtok(NULL, "\t");
 			i++;
 		}
-		fprintf(stderr, "\t%lu\t%s\n", kh_val(refmap, k), tok);
+		fprintf(stdout, "\t%s\t%s\n", kh_val(refmap, k), tok);
 	}
 
 	for (k = 0; k < kh_end(refmap); k++) {
 		if (!kh_exist(refmap, k)) continue;
 		free(kh_key(refmap, k));
+		free(kh_val(refmap, k));
 	}
 	strmap_destroy(refmap);
 }
