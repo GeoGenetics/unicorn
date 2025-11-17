@@ -1,5 +1,9 @@
 #define _XOPEN_SOURCE 700
+#include <zlib.h>
+#include "klib/kseq.h"
 #include "unicorn_internal.h"
+
+KSTREAM_INIT(gzFile, gzread, 134217728U)
 
 uint8_t VERBOSE = 0;
 
@@ -415,4 +419,70 @@ uint8_t unicorn_isqgrouped(unicorn_t *u)
   ret |= (u->sorted & QUERYSORTED);
   ret |= (u->sorted & QUERYGROUPED);
   return ret;
+}
+
+
+KHASHL_MAP_INIT(static,                        //Scope
+                chrmap_t, strmap,           //type and prefix
+                char *, uint64_t,           //key and value types
+                kh_hash_str, kh_eq_str) //hash and equality functions
+
+/*
+PLaygound for internal functions
+*/
+void unicorn_cmpstat_(const char *stat1, const char *stat2)
+{
+	//map
+	int absent;
+	khint_t k;
+	uint32_t col1 = 2, col2=2;
+	chrmap_t *refmap = strmap_init();
+	gzFile fp = gzopen(stat1, "r");
+	kstream_t *ks1 = ks_init(fp);
+	kstring_t kstr1 = {0};
+	char *tok, *key;
+	ks_getuntil(ks1, '\n', &kstr1, 0);
+	while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
+		if (kstr1.l == 0)
+			break;
+		tok = strtok(kstr1.s, "\t");
+		//fprintf(stderr, "%s\t", tok);
+		k = strmap_put(refmap, strdup(tok), &absent);
+		uint32_t i = 0;
+		while (i < col1) {
+			tok = strtok(NULL, "\t");
+			i++;
+		}
+		//fprintf(stderr, "%s\n", tok);
+		kh_val(refmap, k) = strtoul(tok, NULL, 10);
+	}
+	gzclose(fp);
+	ks_destroy(ks1);
+	//Second file
+	fp = gzopen(stat2, "r");
+	ks1 = ks_init(fp);
+	ks_getuntil(ks1, '\n', &kstr1, 0);
+	while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
+		if (kstr1.l == 0)
+			break;
+		tok = strtok(kstr1.s, "\t");
+		k = strmap_get(refmap, tok);
+		if (k == kh_end(refmap)) {
+			fprintf(stderr, "%s\tnot found\n", tok);
+			continue;
+		}
+		fprintf(stderr, "%s\t", tok);
+		uint32_t i = 0;
+		while (i < col2) {
+			tok = strtok(NULL, "\t");
+			i++;
+		}
+		fprintf(stderr, "\t%lu\t%s\n", kh_val(refmap, k), tok);
+	}
+
+	for (k = 0; k < kh_end(refmap); k++) {
+		if (!kh_exist(refmap, k)) continue;
+		free(kh_key(refmap, k));
+	}
+	strmap_destroy(refmap);
 }

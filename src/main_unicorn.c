@@ -30,7 +30,7 @@ SOFTWARE.
 #include <inttypes.h>
 
 #include "klib/ketopt.h"
-#define OPT_STR "b:o:t:a:n:d:h"
+#define OPT_STR "b:o:t:a:n:d:1:2:h"
 static ko_longopt_t unicorn_lopts[] = {
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
@@ -67,6 +67,8 @@ static ko_longopt_t unicorn_lopts[] = {
 typedef kvec_t(char *)   strq_t;
 #include "version.h"
 #include "unicorn.h"
+
+void unicorn_cmpstat_(const char *stat1, const char *stat2);
 
 static const char *ERRORS[16] = { 0,
 																	"Missing argument(s)",
@@ -106,6 +108,9 @@ typedef struct unicorn_opts {
   float maxani;         // Maximum average nucleotide identity
   uint8_t strictb;      // Remove query if ANI out of bounds at any alignment
   int32_t minalnas;     // Minimum alignment score
+	//statcmp
+	char *stat1;         // First statistics file for comparison
+	char *stat2;         // Second statistics file for comparison
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -259,7 +264,13 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
       case 'd':
         opts->nodes = strdup(o.arg);
         break;
-      case 'h':
+   		case '1':
+	 			opts->stat1 = strdup(o.arg);
+				break;
+			case '2':
+				opts->stat2 = strdup(o.arg);
+				break;
+			case 'h':
 				ret = -2;
         goto exit;
       case 300: //threads
@@ -1035,6 +1046,28 @@ static int unicorn_reassign(int argc, char **argv)
   	return ret;
 }
 
+static int unicorn_cmpstat(int argc, char **argv)
+{
+  int ret = 1;
+  struct timespec start, stop;
+  uint64_t ns;
+  unicorn_opt_t opts = {0};
+  opts.threads   = 4;
+  unicorn_t *u   = NULL;
+  unicorn_stat_t *stats = NULL;
+	utax_t *utax = NULL;
+  FILE *ofp = NULL;
+  char *_argv[64] = {0};
+  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
+    _argv[i] = strdup(argv[i]);
+  //Read command line options
+  if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+	unicorn_cmpstat_(opts.stat1, opts.stat2);
+	ret = 0;
+	exit:
+		return ret;
+}
+
 static int unicorn_alnfilt(int argc, char **argv)
 {
   // Implementation of the alignment filtering functionality
@@ -1124,6 +1157,8 @@ int main(int argc, char **argv)
     return unicorn_reassign(argc, argv);
   } else if (strcmp(argv[1], "alnfilt") == 0) {
 		return unicorn_alnfilt(argc, argv);
+	} else if (strcmp(argv[1], "cmpstat") == 0) {
+		return unicorn_cmpstat(argc, argv);
 	} else {
     unicorn_usage(stderr);
     return 0;
