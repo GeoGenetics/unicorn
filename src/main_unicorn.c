@@ -30,7 +30,7 @@ SOFTWARE.
 #include <inttypes.h>
 
 #include "klib/ketopt.h"
-#define OPT_STR "b:o:t:a:n:d:1:2:h"
+#define OPT_STR "b:o:t:a:n:d:1:2:p:q:h"
 static ko_longopt_t unicorn_lopts[] = {
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
@@ -68,7 +68,7 @@ typedef kvec_t(char *)   strq_t;
 #include "version.h"
 #include "unicorn.h"
 
-void unicorn_cmpstat_(const char *stat1, const char *stat2);
+void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint32_t col2);
 
 static const char *ERRORS[16] = { 0,
 																	"Missing argument(s)",
@@ -111,6 +111,8 @@ typedef struct unicorn_opts {
 	//statcmp
 	char *stat1;         // First statistics file for comparison
 	char *stat2;         // Second statistics file for comparison
+	uint32_t col1;
+	uint32_t col2;
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -269,6 +271,12 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 				break;
 			case '2':
 				opts->stat2 = strdup(o.arg);
+				break;
+			case 'p':
+				opts->col1 = strtoul(o.arg, NULL, 10);
+				break;
+			case 'q':
+				opts->col2 = strtoul(o.arg, NULL, 10);
 				break;
 			case 'h':
 				ret = -2;
@@ -1062,7 +1070,7 @@ static int unicorn_cmpstat(int argc, char **argv)
     _argv[i] = strdup(argv[i]);
   //Read command line options
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-	unicorn_cmpstat_(opts.stat1, opts.stat2);
+	unicorn_cmpstat_(opts.stat1, opts.stat2, opts.col1, opts.col2);
 	ret = 0;
 	exit:
 		return ret;

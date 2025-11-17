@@ -430,12 +430,11 @@ KHASHL_MAP_INIT(static,                        //Scope
 /*
 PLaygound for internal functions
 */
-void unicorn_cmpstat_(const char *stat1, const char *stat2)
+void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint32_t col2)
 {
 	//map
 	int absent;
 	khint_t k;
-	uint32_t col1 = 2, col2=2;
 	chrmap_t *refmap = strmap_init();
 	gzFile fp = gzopen(stat1, "r");
 	kstream_t *ks1 = ks_init(fp);
