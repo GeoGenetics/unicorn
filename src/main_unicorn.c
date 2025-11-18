@@ -160,7 +160,7 @@ static void refstats_usage(FILE *fp)
             "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
             "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
             "       - minalnas <int>  Minimum alignment score [0 (bowtie2's max score)]\n"\
-						"       - maxdust  <int>  Maximum alignment dust score [100]"
+						"       - maxdust  <int>  Maximum alignment dust score [100]\n"\
             "  --withtid  Report taxid of reference sequence. Requires --acc2tax, --names and --nodes options.\n"\
             "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\

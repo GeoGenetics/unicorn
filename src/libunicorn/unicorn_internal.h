@@ -179,7 +179,9 @@ typedef struct refstat_t {
   float        REFNENTROP; // Normalized coverage entropy
   float        REFNGINI;   // Normalized coverage Gini coefficient
   float        tad80;      // Truncated average depth at 80% of the coverage
-  //Data arrays
+  float        mdust;      // Mean dust score
+	float        vdust;			 // Variance dust score
+	//Data arrays
   floatq_t     aANI;
   //uint32q_t    aRLEN;
   uint32_t     aRLEN[256]; //Count array of read lengths
@@ -314,7 +316,9 @@ typedef struct _covstats_t {
                 "gini\t"\
                 "n_entropy\t"\
                 "n_gini\t"\
-                "tad80\n"
+                "tad80\t"\
+								"mdust\t"\
+								"std_dust\n"
 #define STATSTR2 "Id\t"\
                  "taxID\t"\
                  "Length\t"\

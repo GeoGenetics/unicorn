@@ -131,7 +131,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
-		if ( (int)(0.5 + dust(bam_get_seq(b), b->core.l_qseq, 64, NULL)) > stats->maxdust ) continue; //Check for dust score
+		int32_t dusts = (int)(0.5 + dust(bam_get_seq(b), b->core.l_qseq, 64, NULL));
+		if ( dusts > stats->maxdust ) continue; //Check for dust score
 		naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
@@ -185,7 +186,13 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     mean = refstat.REFALNNM;
     delta = NM-mean;
     refstat.REFALNNM += delta/naln;
-    //Don't loose your stats value
+    //Alignment dust
+		mean = refstat.mdust;
+		delta = dusts - mean;
+		refstat.mdust += delta/naln;
+		delta = delta * (dusts - refstat.mdust);
+		refstat.vdust = naln ? (delta / (naln - 1)) : 0.0f;
+		//Don't loose your stats value
     kh_val(refmap, k) = refstat;
   }
   stats->_nalns = naln;
@@ -334,10 +341,11 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
   khint_t k;
   kh_foreach(refmap, k) {
     refstat_t v = kh_val(refmap, k);
-    float breath = v.REFCOVB/(double)v.REFLEN;
+  	char *accession = hdr->target_name[kh_key(refmap, k)];
+		float breath = v.REFCOVB/(double)v.REFLEN;
     float expbreath =  1.0f - expf(-v.REFMCOV);
-    fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
-                hdr->target_name[kh_key(refmap, k)],        //0
+    fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+                accession,                                  //0
                 v.REFLEN,                                   //1
                 v.REFNALNS,                                 //2
                 kh_size(v.READSET),                         //3
@@ -364,7 +372,9 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
                 v.REFGINI,                                  //24
                 v.REFNENTROP,                               //25
                 v.REFNGINI,                                 //26
-                v.tad80);                                   //27
+                v.tad80,                                    //27
+								v.mdust,                                    //28
+							  sqrtf(v.vdust));                            //29
     }
 }
 
@@ -381,37 +391,37 @@ static void _print_withtax(FILE *fp,
     uint32_t taxid = utax_gettaxid(utax, accession, &absent);
     if (absent) taxid = 0;
     float breath = v.REFCOVB/(double)v.REFLEN;
-    float expbreath =  1.0f - expf(-breath);
+    float expbreath =  1.0f - expf(-v.REFMCOV);
     fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
-                accession,                                  //1
-                taxid,                                      //2
-                v.REFLEN,                                   //3
-                v.REFNALNS,                                 //4
-                kh_size(v.READSET),                         //5
-                v.REFREADE,                                 //6
-                sqrtf(v.REFREADV),                          //7
-                v.REFREADD,                                 //8
-                v.REFREADO,                                 //9
-                v.REFREADMIN,                               //10
-                v.REFREADMAX,                               //11
-                v.REFALNNM,                                 //12
-                v.REFALNANIE,                               //13
-                sqrtf(v.REFALNANIV),                        //14
-                v.REFALNANID,                               //15
-                v.REFCOVB,                                  //16
-                v.REFMCOV,                                  //17
-                breath,                                     //18
-                expbreath,                                  //19
-                breath/expbreath,                           //20
-                v.REFMONCOV,                                //21
-                sqrtf(v.REFVONCOV),                         //22
-                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //23
-                1000.0f * breath,                           //24
-                v.REFENTROPY,                               //25
-                v.REFGINI,                                  //26
-                v.REFNENTROP,                               //27
-                v.REFNGINI,                                 //28
-                v.tad80                                     //29
+                accession,                                  //0
+                taxid,                                      //1
+                v.REFLEN,                                   //2
+                v.REFNALNS,                                 //3
+                kh_size(v.READSET),                         //4
+                v.REFREADE,                                 //5
+                sqrtf(v.REFREADV),                          //6
+                v.REFREADD,                                 //7
+                v.REFREADO,                                 //8
+                v.REFREADMIN,                               //9
+                v.REFREADMAX,                               //10
+                v.REFALNNM,                                 //11
+                v.REFALNANIE,                               //12
+                sqrtf(v.REFALNANIV),                        //13
+                v.REFALNANID,                               //14
+                v.REFCOVB,                                  //15
+                v.REFMCOV,                                  //16
+                breath,                                     //17
+                expbreath,                                  //18
+                breath/expbreath,                           //19
+                v.REFMONCOV,                                //20
+                sqrtf(v.REFVONCOV),                         //21
+                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
+                1000.0f * breath,                           //23
+                v.REFENTROPY,                               //24
+                v.REFGINI,                                  //25
+                v.REFNENTROP,                               //26
+                v.REFNGINI,                                 //27
+                v.tad80                                     //28
            );
     }
 }
