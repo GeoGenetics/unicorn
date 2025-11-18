@@ -123,15 +123,19 @@ typedef struct unicorn_stat_t *unicorn_stat_t;
  * @param minnreads - Minimum number of reads per reference
  * @param minrefl   - Minimum length of reference to consider
  * @param minani    - Minimum Average Nucleotide Identity (ANI) to consider
+ * @param minas     - Minimum alignment score to consider
+ * @param maxdust   - Maximum dust score to consider
  * @param flg       - Flag to indicate which map to use:
                        0 - per reference, 1 - per taxid, other - no map
  * @return - unicorn_bamstat_t* on success NULL on error
  */
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
-                                  float    minani,
-                                  int32_t  minalnas,
+                                  float    minmani,
+                                  int32_t  minas,
+																	int32_t  maxdust,
                                   uint8_t  flg);
+
 void unicorn_stat_destroy(unicorn_stat_t *stats);
 
 /**

@@ -61,6 +61,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "maxani",          ko_required_argument, 326 },
     { "strictbounds",    ko_no_argument,       327 },
     { "minalnas",        ko_required_argument, 328 },
+		{ "maxdust",         ko_required_argument, 329 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -108,6 +109,7 @@ typedef struct unicorn_opts {
   float maxani;         // Maximum average nucleotide identity
   uint8_t strictb;      // Remove query if ANI out of bounds at any alignment
   int32_t minalnas;     // Minimum alignment score
+	int32_t maxdust;      // Maximum dust score
 	//statcmp
 	char *stat1;         // First statistics file for comparison
 	char *stat2;         // Second statistics file for comparison
@@ -158,6 +160,7 @@ static void refstats_usage(FILE *fp)
             "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
             "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
             "       - minalnas <int>  Minimum alignment score [0 (bowtie2's max score)]\n"\
+						"       - maxdust  <int>  Maximum alignment dust score [100]"
             "  --withtid  Report taxid of reference sequence. Requires --acc2tax, --names and --nodes options.\n"\
             "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
@@ -406,6 +409,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
       case 328: //minalnas
         opts->minalnas = strtol(o.arg, NULL, 10);
         break;
+      case 329: //maxdust
+				opts->maxdust = strtoul(o.arg, NULL, 10);
+				break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -434,6 +440,7 @@ static int unicorn_refstats(int argc, char **argv)
   opts.minnreads = 1;
   opts.minrefl   = 0;
   opts.minalnas  = INT32_MIN;
+  opts.maxdust   = 100;
   unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
 	utax_t *utax = NULL;
@@ -472,6 +479,7 @@ static int unicorn_refstats(int argc, char **argv)
 														opts.minrefl,
 														opts.minmani,
                             opts.minalnas,
+														opts.maxdust,
 														0);
   if (!stats) goto exit;
   ret = -4;
@@ -617,7 +625,7 @@ static int unicorn_bamstats(int argc, char **argv)
     ret = -3;
     //Parse the statistics string and initialize stat object
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(0, 0, 0, 0, 0);
+    stats = unicorn_stat_init(0, 0, 0, 0, 100, 0);
     if (!stats) goto exit;
     ret = -4;
     //Compute statistics
@@ -677,7 +685,8 @@ static int unicorn_tidstats(int argc, char **argv)
   unicorn_opt_t opts = {0};
 	opts.minnreads = 1;
 	opts.minrefl   = 0;
-	opts.minmani	  = 0.f;
+	opts.minmani	 = 0.f;
+	opts.maxdust	 = 100;
 	opts.rank = strdup("species");
 	unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
@@ -808,6 +817,7 @@ static int unicorn_tidstats(int argc, char **argv)
 															opts.minrefl,
 															opts.minmani,
                               opts.minalnas,
+															opts.maxdust,
 															TIDSTATS);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);

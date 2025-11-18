@@ -40,9 +40,9 @@ SOFTWARE.
 #include "klib/kavl.h"
 #include "klib/kvec.h"
 typedef struct {
-	float  score;
-	uint32_t al; //Alignment length
-	uint32_t tid;
+  float  score;
+  uint32_t al; //Alignment length
+  uint32_t tid;
 } alnscore_t;
 #define kv_pushq(v, x) do {                                         \
         if ((v).n == (v).m) {                                       \
@@ -224,8 +224,8 @@ typedef struct taxstat_t {
   float        covgini;     // Coverage Gini coefficient
   float        covnentropy; // Normalized coverage entropy
   float        covngini;    // Normalized coverage Gini coefficient
-	float        tad80;       // Truncated average depth at 80% of coverage mass
-	//Data arrays
+  float        tad80;       // Truncated average depth at 80% of coverage mass
+  //Data arrays
   floatq_t     a_ani;
   //uint32q_t    aRLEN;
   uint32_t     v_rlen[256]; //Count array of read lengths
@@ -250,14 +250,14 @@ typedef struct unicorn_stats_t {
   //Data
   void *__map; // Stat map to use, either _refmap or _taxmap
   uint8_t mapflg; //Map type, 0 for per reference, 1 for per taxid
-	uint64_t _nalns;
+  uint64_t _nalns;
   uint64_t _nreads;
-	uint32_t _nrefs;				//Number of references in bam
-	uint64_t _nfreads;
+  uint32_t _nrefs;        //Number of references in bam
+  uint64_t _nfreads;
   uint64_t _nfalns;
-	uint32_t _nfrefs;				//Number of filtered references after computation
-	//bam wide stats
-	float    _mrlen;        //Mean read length
+  uint32_t _nfrefs;        //Number of filtered references after computation
+  //bam wide stats
+  float    _mrlen;        //Mean read length
   float    _vrlen;        //Variance of read length
   uint32_t _mdrlen;       //Median read length
   uint32_t _morlen;       //Mode read length
@@ -270,8 +270,9 @@ typedef struct unicorn_stats_t {
   //Filters
   uint32_t minnreads; // Minimum number of reads to consider
   uint32_t minrefl;   // Minimum reference length to consider
-	float 	 minmani;	  // Minimum mean ANI to consider
+  float    minmani;    // Minimum mean ANI to consider
   int32_t  minalnas;  // Minimum alignment score to consider
+  int32_t  maxdust;   // Maximum dust score to consider
 } unicorn_stat_t;
 
 typedef struct _covstats_t {
@@ -344,21 +345,21 @@ typedef struct _covstats_t {
                  "n_gini\t"\
                  "tad80\n"
 #define TIDSTATSTR "#taxid\tname\tnum_accessions\ttotal_length\t"\
-                	 "num_alns\tnum_reads\tmean_readl\tstdev_readl\t"\
-                	 "median_readl\tmode_readl\treadl_min\treadl_max\t"\
-                	 "mean_alnnm\tmean_alnani\tstdev_alnani\tmedian_alnani\t"\
-                	 "num_covbases\tmean_cov\tbreath_cov\texp_breath\t"\
-									 "breath_ratio\tmean_covcovered\tstdev_covoncovered\tevenness_cov\t"\
-                	 "site_density\tentropy\tgini\tnorm_entropy\t"\
-                	 "norm_gini\ttad80\n"
+                   "num_alns\tnum_reads\tmean_readl\tstdev_readl\t"\
+                   "median_readl\tmode_readl\treadl_min\treadl_max\t"\
+                   "mean_alnnm\tmean_alnani\tstdev_alnani\tmedian_alnani\t"\
+                   "num_covbases\tmean_cov\tbreath_cov\texp_breath\t"\
+                   "breath_ratio\tmean_covcovered\tstdev_covoncovered\tevenness_cov\t"\
+                   "site_density\tentropy\tgini\tnorm_entropy\t"\
+                   "norm_gini\ttad80\n"
 #define TIDFMTSTR "%u\t%s\t%u\t%"PRIu64"\t"\
-									"%"PRIu64"\t%u\t%f\t%f\t"\
-									"%u\t%u\t%u\t%u\t"\
-									"%f\t%f\t%f\t%f\t"\
-									"%"PRIu64"\t%f\t%f\t%f\t"\
-									"%f\t%f\t%f\t%f\t"\
-									"%f\t%f\t%f\t%f\t"\
-									"%f\t%f\n"
+                  "%"PRIu64"\t%u\t%f\t%f\t"\
+                  "%u\t%u\t%u\t%u\t"\
+                  "%f\t%f\t%f\t%f\t"\
+                  "%"PRIu64"\t%f\t%f\t%f\t"\
+                  "%f\t%f\t%f\t%f\t"\
+                  "%f\t%f\t%f\t%f\t"\
+                  "%f\t%f\n"
 
 uint8_t _ASCHECK(bam1_t *b, int32_t ms);
                   /*
@@ -385,21 +386,21 @@ uint32_t _udCAMODE(uint32_t *v, uint32_t n);
 float _ANINM(bam1_t *b, uint32_t *NM);
 
 float _tad80(int32int64map_t *hist);
-double _getentropy(int32int64map_t *hist, uint64_t t, float *_ne);
+double _getentropy(const int32int64map_t *hist, uint64_t t, float *_ne);
 double _getgini(int32int64map_t *hist,
                 uint64_t t,
                 float m,
                 float *_ng);
 
 uint64_t cov_hist(ueventq_t events,
-									int32int64map_t *hist,
-									uint64_t *_tdepthsum,
-									uint64_t *_sumsqdepth);
+                  int32int64map_t *hist,
+                  uint64_t *_tdepthsum,
+                  uint64_t *_sumsqdepth);
 void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 
 
 /*
-	khash IO
+  khash IO
 */
 /*
     Ensemble map for string to int key-value pairs
@@ -421,27 +422,27 @@ typedef struct emap_chr2int_t {
     uint64_t  size;    //Number of elements in the map
     //Special flags
     uint8_t   is_ff;   //Was the map loaded from a file?
-    char 	    **keys;    //key array used in file loading
+    char       **keys;    //key array used in file loading
 } emap_chr2int_t;
 
 /*
-	Free ensemble map for chr to int key-value pairs
+  Free ensemble map for chr to int key-value pairs
 */
 void _echr2intdel(emap_chr2int_t *map);
 
 /*
-	Initialize ensemble map for chr to int key-value pairs
+  Initialize ensemble map for chr to int key-value pairs
 */
 emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff);
 
 
 /*
-	Write ensemble map to file stream
+  Write ensemble map to file stream
 */
 int _emapwrite(emap_chr2int_t *map, BGZF *fp);
 
 /*
-	Check if fp is a .khash file
+  Check if fp is a .khash file
 */
 uint8_t _iskhashfp(BGZF *fp);
 
@@ -469,11 +470,11 @@ typedef struct nodes_t {
 } nodes_t;
 
 typedef struct utax_t {
-	uint32_t numnodes; // Number of nodes in the taxonomy
-	uint64_t numaccs;  // Number of accessions in the taxonomy
-	nodes_t  nodes; // Map of taxid to parent taxid
-	int2chr_t  *namemap; // Map of taxid to names
-	emap_chr2int_t *accmap; // Map of accession to taxid
+  uint32_t numnodes; // Number of nodes in the taxonomy
+  uint64_t numaccs;  // Number of accessions in the taxonomy
+  nodes_t  nodes; // Map of taxid to parent taxid
+  int2chr_t  *namemap; // Map of taxid to names
+  emap_chr2int_t *accmap; // Map of accession to taxid
   const char *rank;
 } utax_t;
 
@@ -482,3 +483,5 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);
 const char *utax_getname(utax_t *utax, uint32_t taxid);
 
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank);
+
+double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount);

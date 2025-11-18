@@ -3,6 +3,19 @@
 #include "klib/kseq.h"
 #include "unicorn_internal.h"
 
+//1248 -> 0123
+const uint8_t htslib2ucrn_table[128] = {
+    4, 0, 1, 4,  2, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,
+//^    A  C      G            T                     N
+		4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
+};
+
 KSTREAM_INIT(gzFile, gzread, 134217728U)
 
 uint8_t VERBOSE = 0;
@@ -118,6 +131,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
                                   float    minmani,
                                   int32_t  minalnas,
+																	int32_t  maxdust,
                                   uint8_t  flg)
 {
 	unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
@@ -132,6 +146,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
 	stats->minrefl   = minrefl;
 	stats->minmani   = minmani;
 	stats->minalnas  = minalnas;
+	stats->maxdust   = maxdust;
   memset(stats->_readlc, 0, 256*sizeof(uint32_t));
 	return stats;
 }
@@ -485,4 +500,48 @@ void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint3
 		free(kh_val(refmap, k));
 	}
 	strmap_destroy(refmap);
+}
+
+/*
+Blatanlty stolen from Richard Durbin's onebame
+https://github.com/richarddurbin/onebam/blob/feebb82c3c807e4ccd971434e58db70cac698912/oneread.c#L713
+Reference:
+ALEKSANDR MORGULIS et al A Fast and Symmetric DUST Implementation to Mask Low-Complexity DNA Sequences
+Originally idea from Bianca Desacnctis to use sdust to remove low complexity reads in an aDNA setting
+*/
+#define WLEN 3
+#define WTOT (1<<(WLEN<<1))
+#define WMASK (WTOT - 1)
+double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount)
+{
+  static uint32_t lastWindow = 0 ;
+  static int32_t wCount0[WTOT], *wSeq ;
+  if (window < WLEN) return -1; // window too small
+  if (window != lastWindow) {
+    if (lastWindow) free(wSeq);
+      wSeq = calloc(window, sizeof(int32_t)) ;
+      lastWindow = window ;
+  }
+  if (!wCount) wCount = wCount0 ;
+  memset(wCount, 0, WTOT*sizeof(int32_t)) ;
+  int64_t score = 0, maxScore = 0 ;
+  int32_t i, t, n = -WLEN ;
+  for (i = 0 ; i < l ; ++i) {
+    uint8_t b = bam_seqi(seq, i) < 128 ? htslib2ucrn_table[bam_seqi(seq, i)] : 4;
+     if (b > 3) continue; // ignore Ns
+     t = (t << 2 | b) & WMASK; //Pack the base
+     if (++n >= 0) {
+      int k = n % window;
+      if (n >= window) {
+        int x = wSeq[k] ;
+        if (wCount[x]) score -= --wCount[x] ;
+        score += wCount[t]++ ;
+        if (score > maxScore) maxScore = score ;
+      }
+      else score += wCount[t]++ ;
+    	wSeq[k] = t ;
+    }
+  }
+  if (n >= window) return (200.0 * maxScore) / (window * (window-1)) ;
+  return (200.0 * score) / (n * (n+1)) ;
 }

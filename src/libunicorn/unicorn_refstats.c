@@ -131,7 +131,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
-    naln++;
+		if ( (int)(0.5 + dust(bam_get_seq(b), b->core.l_qseq, 64, NULL)) > stats->maxdust ) continue; //Check for dust score
+		naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
     refstat_t refstat = {0};
@@ -151,7 +152,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     uint32_t naln = ++refstat.REFNALNS;
     //Add read name to read set to count number of reads to ref
     khint_t q = kh_hash_str(bam_get_qname(b));
-    u64set_put(refstat.READSET, q, &absent);
+		u64set_put(refstat.READSET, q, &absent);
     float mean, delta;
     //mean, median, and variance  Welford's online algorithm
     if (absent) { //Only first instance of query, no counting same read twice
@@ -334,7 +335,7 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
   kh_foreach(refmap, k) {
     refstat_t v = kh_val(refmap, k);
     float breath = v.REFCOVB/(double)v.REFLEN;
-    float expbreath =  1.0f - expf(-breath);
+    float expbreath =  1.0f - expf(-v.REFMCOV);
     fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                 hdr->target_name[kh_key(refmap, k)],        //0
                 v.REFLEN,                                   //1
