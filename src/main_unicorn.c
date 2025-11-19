@@ -430,6 +430,28 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 		return ret;
 }
 
+static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp)
+{
+	fprintf(fp, "[unicorn::%s] Options:\n", __func__);
+	fprintf(fp, "\tInput file: %s\n", opts->ifile ? opts->ifile : "N/A");
+	fprintf(fp, "\tThreads: %d\n", opts->threads);
+	fprintf(fp, "\tOutput BAM: %s\n", opts->outbam ? opts->outbam : "N/A");
+	fprintf(fp, "\tOutput statistics: %s\n", opts->outstat ? opts->outstat : "N/A");
+	fprintf(fp, "\tMinimum reference length: %" PRIu64 "\n", opts->minrefl);
+	fprintf(fp, "\tMinimum number of reads: %d\n", opts->minnreads);
+	fprintf(fp, "\tMinimum alignment score: %d\n", opts->minalnas);
+	fprintf(fp, "\tMaximum dust score: %d\n", opts->maxdust);
+	if (opts->withtid) {
+		fprintf(fp, "\tReport taxid of reference sequence: Yes\n");
+		fprintf(fp, "\tAccession to taxid map: %s\n", opts->acc2tax ? opts->acc2tax : "N/A");
+		fprintf(fp, "\tTaxonomy names file: %s\n", opts->names ? opts->names : "N/A");
+		fprintf(fp, "\tTaxonomy nodes file: %s\n", opts->nodes ? opts->nodes : "N/A");
+	}
+	else {
+		fprintf(fp, "\tReport taxid of reference sequence: No\n");
+	}
+}
+
 static int unicorn_refstats(int argc, char **argv)
 {
   int ret = 1;
@@ -450,7 +472,9 @@ static int unicorn_refstats(int argc, char **argv)
     _argv[i] = strdup(argv[i]);
   //Read command line options
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-  if (!opts.ifile)  goto exit;
+	unicorn_printopts(&opts, stderr);
+	//Check required options
+	if (!opts.ifile)  goto exit;
   if (opts.withtid) {
     if (!opts.acc2tax || !opts.names || !opts.nodes) {
       fprintf(stderr, "[unicorn::%s] Error: --withtid requires --acc2tax, --names and --nodes options.\n", __func__);
