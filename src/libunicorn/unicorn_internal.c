@@ -321,12 +321,13 @@ double _getgini(int32int64map_t *hist,
 uint64_t cov_hist(ueventq_t events,
 									int32int64map_t *hist,
 									uint64_t *_tdepthsum,
-									uint64_t *_sumsqdepth)
+									uint64_t *_sumsqdepth,
+									uint32_t *_maxdepth)
 {
   if (!hist || !events.n) return 0;
   // Initialize sweep-line state
   //Total covered bases, Total depth sum
-  uint32_t current_depth = 0;
+  uint32_t current_depth = 0, max_depth = 0;
 	uint64_t tcovbases = 0, tdepthsum = 0, sumsqdepth = 0;
   uint64_t last_pos = events.a[0].pos;
   // Sweep through all events
@@ -348,7 +349,9 @@ uint64_t cov_hist(ueventq_t events,
         kh_val(hist, k) = 0;
       }
       kh_val(hist, k) += seglen; //Increase length value for this depth
-    }
+			if (current_depth > max_depth)
+				max_depth = current_depth;
+		}
     //Increase or decrease the current depth based on the event type
     current_depth += events.a[i].e ? 1 : -1;
     last_pos = current_pos;
@@ -356,6 +359,7 @@ uint64_t cov_hist(ueventq_t events,
 	//this might bite you later in the future
 	*_tdepthsum  += tdepthsum;
 	*_sumsqdepth += sumsqdepth;
+	*_maxdepth = max_depth;
 	return tcovbases;
 }
 
@@ -375,7 +379,14 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   // Cov frequency map for entropy and gini computation
   int32int64map_t *covhist = int32int64map_init();
 	uint64_t tdepthsum = 0, sumsqdepth = 0, tcovbases = 0;
-	tcovbases = cov_hist(events, covhist, &tdepthsum, &sumsqdepth);
+	uint32_t maxdepth = 0;
+	tcovbases = cov_hist(events, covhist, &tdepthsum, &sumsqdepth, &maxdepth);
+	//for (uint32_t d = 0; d <= maxdepth; d++) {
+	//	khint_t k = int32int64map_get(covhist, d);
+	//  if (k != kh_end(covhist)) {
+	//		fprintf(stderr, "%u\t%" PRIu64 "\t%f\n", d, kh_val(covhist, k), kh_val(covhist, k)/(double)tcovbases);
+	//	}
+	//}
   // Store the final calculated values in the output pointers
 	covstats->covbases  = tcovbases;
   covstats->meancov   =  (double)tdepthsum / (double)l;

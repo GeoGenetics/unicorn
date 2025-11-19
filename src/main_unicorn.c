@@ -433,14 +433,15 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp)
 {
 	fprintf(fp, "[unicorn::%s] Options:\n", __func__);
-	fprintf(fp, "\tInput file: %s\n", opts->ifile ? opts->ifile : "N/A");
-	fprintf(fp, "\tThreads: %d\n", opts->threads);
-	fprintf(fp, "\tOutput BAM: %s\n", opts->outbam ? opts->outbam : "N/A");
-	fprintf(fp, "\tOutput statistics: %s\n", opts->outstat ? opts->outstat : "N/A");
-	fprintf(fp, "\tMinimum reference length: %" PRIu64 "\n", opts->minrefl);
-	fprintf(fp, "\tMinimum number of reads: %d\n", opts->minnreads);
-	fprintf(fp, "\tMinimum alignment score: %d\n", opts->minalnas);
-	fprintf(fp, "\tMaximum dust score: %d\n", opts->maxdust);
+	fprintf(fp, "\t-b %s\n", opts->ifile ? opts->ifile : "N/A");
+	fprintf(fp, "\t-t %d\n", opts->threads);
+	fprintf(fp, "\t--outbam %s\n", opts->outbam ? opts->outbam : "NO");
+	fprintf(fp, "\t--stats  %s\n", opts->outstat ? opts->outstat : "/dev/stdout");
+	fprintf(stderr, "\tFilters:\n");
+	fprintf(fp, "\t--minreflen %" PRIu64 "\n", opts->minrefl);
+	fprintf(fp, "\t--minreads  %d\n", opts->minnreads);
+	fprintf(fp, "\t--minalnas  %d\n", opts->minalnas);
+	fprintf(fp, "\t--maxdust   %d\n", opts->maxdust);
 	if (opts->withtid) {
 		fprintf(fp, "\tReport taxid of reference sequence: Yes\n");
 		fprintf(fp, "\tAccession to taxid map: %s\n", opts->acc2tax ? opts->acc2tax : "N/A");

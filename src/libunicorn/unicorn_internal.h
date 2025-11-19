@@ -397,9 +397,10 @@ double _getgini(int32int64map_t *hist,
                 float *_ng);
 
 uint64_t cov_hist(ueventq_t events,
-                  int32int64map_t *hist,
-                  uint64_t *_tdepthsum,
-                  uint64_t *_sumsqdepth);
+									int32int64map_t *hist,
+									uint64_t *_tdepthsum,
+									uint64_t *_sumsqdepth,
+									uint32_t *_maxdepth);
 void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 
 
