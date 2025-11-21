@@ -7,7 +7,7 @@
 const uint8_t htslib2ucrn_table[128] = {
     4, 0, 1, 4,  2, 4, 4, 4,  3, 4, 4, 4,  4, 4, 4, 4,
 //^    A  C      G            T                     N
-		4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
@@ -22,7 +22,7 @@ uint8_t VERBOSE = 0;
 
 void unicorn_setverbose(void)
 {
-	VERBOSE = 1;
+  VERBOSE = 1;
 }
 
 KSORT_INIT(_surange, _urangeevent, _eventlt)
@@ -83,16 +83,16 @@ float _ANINM(bam1_t *b, uint32_t *NM)
 //Check for proper release of resource. Internal vs user
 static void refmap_free(refmap_t *map)
 {
-	if (map) {
-		khint_t k;
-		// Destroy read set for each reference
-		kh_foreach(map, k) {
-			refstat_t v = kh_val(map, k);
-			if (v.READSET)
-				u64set_destroy(v.READSET);
-		}
-		refmap_destroy(map);
-	}
+  if (map) {
+    khint_t k;
+    // Destroy read set for each reference
+    kh_foreach(map, k) {
+      refstat_t v = kh_val(map, k);
+      if (v.READSET)
+        u64set_destroy(v.READSET);
+    }
+    refmap_destroy(map);
+  }
 }
 
 static void taxmap_free(taxmap_t *map)
@@ -111,16 +111,16 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
 {
   if (stats) {
     if (stats->__map) {
-			switch ( stats->mapflg ) {
-				case 0: //per reference
-					refmap_free( (refmap_t *)stats->__map);
-					break;
-				case 1: //per taxid
-					taxmap_free((taxmap_t *)stats->__map);
-					break;
-				default:
-					break;
-			}
+      switch ( stats->mapflg ) {
+        case 0: //per reference
+          refmap_free( (refmap_t *)stats->__map);
+          break;
+        case 1: //per taxid
+          taxmap_free((taxmap_t *)stats->__map);
+          break;
+        default:
+          break;
+      }
     }
     if (stats->_anihist) floatmap_destroy(stats->_anihist);
     free(stats);
@@ -131,24 +131,24 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
                                   float    minmani,
                                   int32_t  minalnas,
-																	int32_t  maxdust,
+                                  int32_t  maxdust,
                                   uint8_t  flg)
 {
-	unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
-	if (!stats) return NULL;
-	stats->mapflg = flg;
-	switch (flg) {
-		case 0:  stats->__map   = refmap_init(); break; //per reference
-		case 1:  stats->__map   = taxmap_init(); break; //per taxid
-		default: stats->__map   = 0; break; //Default to no map;
-	}
-	stats->minnreads = minnreads;
-	stats->minrefl   = minrefl;
-	stats->minmani   = minmani;
-	stats->minalnas  = minalnas;
-	stats->maxdust   = maxdust;
+  unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
+  if (!stats) return NULL;
+  stats->mapflg = flg;
+  switch (flg) {
+    case 0:  stats->__map   = refmap_init(); break; //per reference
+    case 1:  stats->__map   = taxmap_init(); break; //per taxid
+    default: stats->__map   = 0; break; //Default to no map;
+  }
+  stats->minnreads = minnreads;
+  stats->minrefl   = minrefl;
+  stats->minmani   = minmani;
+  stats->minalnas  = minalnas;
+  stats->maxdust   = maxdust;
   memset(stats->_readlc, 0, 256*sizeof(uint32_t));
-	return stats;
+  return stats;
 }
 
 void _echr2intdel(emap_chr2int_t *map)
@@ -173,12 +173,12 @@ void _echr2intdel(emap_chr2int_t *map)
 }
 
 /*
-	Initialize ensemble map for chr to int key-value pairs
+  Initialize ensemble map for chr to int key-value pairs
 */
 emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
 {
-	int ret = -1;
-	emap_chr2int_t *map = calloc(1, sizeof(emap_chr2int_t));
+  int ret = -1;
+  emap_chr2int_t *map = calloc(1, sizeof(emap_chr2int_t));
   if (!map) goto exit;
   map->bits = bits;
   map->maps = (chr2int_t **)calloc(1U<<bits, sizeof(chr2int_t*));
@@ -199,14 +199,14 @@ emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
           chr2int_destroy(map->maps[i]);
       goto exit;
     }
-	}
+  }
   ret = 0;
-	exit:
-		if (ret) {
-			if (map->maps) free(map->maps);
-				free(map);
-				map = NULL;
-		}
+  exit:
+    if (ret) {
+      if (map->maps) free(map->maps);
+        free(map);
+        map = NULL;
+    }
   return map;
 }
 
@@ -319,16 +319,16 @@ double _getgini(int32int64map_t *hist,
 }
 
 uint64_t cov_hist(ueventq_t events,
-									int32int64map_t *hist,
-									uint64_t *_tdepthsum,
-									uint64_t *_sumsqdepth,
-									uint32_t *_maxdepth)
+                  int32int64map_t *hist,
+                  uint64_t *_tdepthsum,
+                  uint64_t *_sumsqdepth,
+                  uint32_t *_maxdepth)
 {
   if (!hist || !events.n) return 0;
   // Initialize sweep-line state
   //Total covered bases, Total depth sum
   uint32_t current_depth = 0, max_depth = 0;
-	uint64_t tcovbases = 0, tdepthsum = 0, sumsqdepth = 0;
+  uint64_t tcovbases = 0, tdepthsum = 0, sumsqdepth = 0;
   uint64_t last_pos = events.a[0].pos;
   // Sweep through all events
   for (uint64_t i = 0; i < events.n; ++i) {
@@ -349,18 +349,145 @@ uint64_t cov_hist(ueventq_t events,
         kh_val(hist, k) = 0;
       }
       kh_val(hist, k) += seglen; //Increase length value for this depth
-			if (current_depth > max_depth)
-				max_depth = current_depth;
-		}
+      if (current_depth > max_depth)
+        max_depth = current_depth;
+    }
     //Increase or decrease the current depth based on the event type
     current_depth += events.a[i].e ? 1 : -1;
     last_pos = current_pos;
   }
-	//this might bite you later in the future
-	*_tdepthsum  += tdepthsum;
-	*_sumsqdepth += sumsqdepth;
-	*_maxdepth = max_depth;
-	return tcovbases;
+  //this might bite you later in the future
+  *_tdepthsum  += tdepthsum;
+  *_sumsqdepth += sumsqdepth;
+  *_maxdepth = max_depth;
+  return tcovbases;
+}
+
+static void _get_spatial_quartiles(ueventq_t events,
+                                   uint64_t tcov,
+                                   uint64_t *q1,
+                                   uint64_t *q3)
+{
+  if (tcov == 0 || events.n == 0) {
+    *q1 = 0; *q3 = 0;
+    return;
+  }
+  uint64_t t_q1 = tcov >> 2;
+  uint64_t t_q3 = (tcov * 3) >> 2;
+  uint64_t current_covered = 0;
+  uint32_t current_depth = 0;
+  uint64_t lastpos = events.a[0].pos;
+  *q1 = 0; *q3 = 0;
+  uint8_t fq1 = 0, fq3 = 0;
+  for (uint64_t i = 0; i < events.n; ++i) {
+    uint64_t current_pos = events.a[i].pos;
+    uint64_t seglen = current_pos - lastpos;
+    if (seglen && (current_depth > 0) ) {
+      uint64_t next_covered = current_covered + seglen;
+      // Check if we crossed Q1 in this segment
+      if (!fq1 && (next_covered >= t_q1) ) {
+        // Interpolate position: last_pos + (remaining to reach target)
+        *q1 = lastpos + (t_q1 - current_covered);
+        fq1 = 1;
+      }
+      // Check if we crossed Q3 in this segment
+      if (!fq3 && (next_covered >= t_q3) ) {
+        *q3 = lastpos + (t_q3 - current_covered);
+        fq3 = 1;
+      }
+      current_covered = next_covered;
+    }
+    if (fq1 && fq3) break; // Optimization: stop early
+    current_depth += events.a[i].e ? 1 : -1;
+    lastpos = current_pos;
+  }
+}
+
+uint64_t _getcovbases(ueventq_t events,
+	                    uint64_t *_depthsum,
+										  uint64_t *_sumsqdepth)
+{
+  if (!events.n) return 0;
+  uint64_t tbases = 0, depth = 0, depthsum = 0, lpos = events.a[0].pos;
+  uint64_t sumsqdepth = 0;
+	for (uint64_t i = 0; i < events.n; ++i) {
+    uint64_t pos = events.a[i].pos;
+    uint64_t seglen = pos - lpos;
+    if ( seglen  && depth ) {
+			tbases += seglen;
+			depthsum += seglen * depth;
+			sumsqdepth += seglen * depth * depth;
+		}
+    depth += events.a[i].e ? 1 : -1;
+    lpos = pos;
+  }
+  *_depthsum = depthsum;
+  *_sumsqdepth = sumsqdepth;
+  return tbases;
+}
+
+void _fill_spatial_bins(ueventq_t events,
+                        uint32_t n_bins,
+                        double width,
+												int32int64map_t *covhist)
+{
+	if (!events.n || n_bins == 0 || width <= 0.0 || !covhist) return;
+  uint32_t depth = 0;
+  uint64_t lpos = events.a[0].pos;
+  uint32_t abinidx = 0, abincov = 0;;
+  //fprintf(stderr, "Filling %u bins of width %.2f\n", n_bins, width);
+	for (uint64_t i = 0; i < events.n; ++i) {
+    uint64_t c_pos = events.a[i].pos;
+    uint64_t seglen = c_pos - lpos;
+    if (seglen && (depth > 0) ) {
+      // We have a covered segment from lpos to c_pos
+      uint64_t p = lpos;
+      while (p < c_pos) {
+        uint32_t bin_idx = (uint32_t)(p / width);
+        if (bin_idx >= n_bins) bin_idx = n_bins - 1; // Safety clamp
+        if (bin_idx > abinidx) { //Commit the active bin
+          int absent;
+          khint_t k = int32int64map_put(covhist, abincov, &absent);
+          if (absent) kh_val(covhist, k) = 0;
+          kh_val(covhist, k)++;
+          //Handle any completely skipped bins (gaps)
+          uint32_t gap_bins = bin_idx - abinidx - 1;
+          if (gap_bins > 0) {
+            k = int32int64map_put(covhist, 0, &absent); // These bins have 0 coverage
+            if (absent) kh_val(covhist, k) = 0;
+            kh_val(covhist, k) += gap_bins;
+          }
+          //Reset for the new bin
+          abinidx = bin_idx;
+          abincov = 0;
+        }
+        // Calculate end of this bin
+        uint64_t bin_end = (uint64_t)((bin_idx + 1) * width);
+        // Fix: Prevent infinite loop caused by floating point truncation
+        if (bin_end <= p) bin_end = p + 1;
+        // Determine how much of the segment falls in this bin
+        uint64_t end = (c_pos < bin_end) ? c_pos : bin_end;
+        uint64_t overlap = end - p;
+        if (overlap == 0) break;
+        abincov += (uint32_t)overlap;
+        p += overlap;
+      }
+    }
+    depth += events.a[i].e ? 1 : -1;
+    lpos = c_pos;
+  }
+  // Commit the final active bin
+  int absent;
+  khint_t k = int32int64map_put(covhist, abincov, &absent);
+  if (absent) kh_val(covhist, k) = 0;
+  kh_val(covhist, k)++;
+  // Handle any remaining bins at the end of the reference
+  if (abinidx < n_bins - 1) {
+      uint32_t gap_bins = n_bins - 1 - abinidx;
+      k = int32int64map_put(covhist, 0, &absent);
+      if (absent) kh_val(covhist, k) = 0;
+      kh_val(covhist, k) += gap_bins;
+  }
 }
 
 /**
@@ -378,31 +505,41 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   }
   // Cov frequency map for entropy and gini computation
   int32int64map_t *covhist = int32int64map_init();
-	uint64_t tdepthsum = 0, sumsqdepth = 0, tcovbases = 0;
-	uint32_t maxdepth = 0;
-	tcovbases = cov_hist(events, covhist, &tdepthsum, &sumsqdepth, &maxdepth);
-	//for (uint32_t d = 0; d <= maxdepth; d++) {
-	//	khint_t k = int32int64map_get(covhist, d);
-	//  if (k != kh_end(covhist)) {
-	//		fprintf(stderr, "%u\t%" PRIu64 "\t%f\n", d, kh_val(covhist, k), kh_val(covhist, k)/(double)tcovbases);
-	//	}
-	//}
+  uint64_t tdepthsum = 0, sumsqdepth = 0, tcovbases = 0, q1, q3;
+  tcovbases = _getcovbases(events, &tdepthsum, &sumsqdepth);
+  _get_spatial_quartiles(events, tcovbases, &q1, &q3);
+  double iqr = (double)(q3 - q1);
+  // 3. Calculate Bin Width (Freedman-Diaconis)
+  // Width = 2 * IQR * n^(-1/3)
+  double bin_width = 0;
+  if (iqr > 0) bin_width = 2.0 * iqr * pow((double)tcovbases, -1.0/3.0);
+  // Fallback if IQR is 0 (e.g., uniform block) or width is too small
+  if (bin_width < 1.0) bin_width = 100.0; // Default fallback, adjust as needed
+  //fprintf(stderr, "ref of len: %lu Bin width: %f iqr: %f\n", l, bin_width, iqr);
+	// 4. Allocate and Fill Bins
+  uint32_t n_bins = (uint32_t)ceil(l / bin_width);
+  _fill_spatial_bins(events, n_bins, bin_width, covhist);
+  //for (khint_t d = 0; d < kh_size(covhist); d++) {
+	//	if ( kh_exist(covhist, d) )
+  //    fprintf(stderr, "%u\t%" PRIu64 "\t%f\n", d, kh_val(covhist, d), kh_val(covhist, d)/(double)n_bins);
+  //}
   // Store the final calculated values in the output pointers
-	covstats->covbases  = tcovbases;
+  covstats->covbases  = tcovbases;
   covstats->meancov   =  (double)tdepthsum / (double)l;
   covstats->meanoncov = (double)tdepthsum / (double)tcovbases;
   double msqcovb      = tcovbases?(double)sumsqdepth / tcovbases:0.0;
   covstats->varoncov  = msqcovb - (covstats->meanoncov * covstats->meanoncov);
   float _normentropy, _normgini;
-  covstats->entropy  = _getentropy(covhist, tcovbases, &_normentropy);
-  covstats->nentropy = _normentropy;
+  covstats->entropy  = _getentropy(covhist, n_bins, &_normentropy);
+  //fprintf(stderr, "Entropy: %f NormEntropy: %f\n", covstats->entropy, _normentropy);
+	covstats->nentropy = _normentropy;
   covstats->gini     = _getgini(covhist,
-																tcovbases,
-																covstats->meanoncov,
-																&_normgini);
+                                n_bins,
+                                covstats->meanoncov,
+                                &_normgini);
   covstats->ngini    = _normgini;
   covstats->tad80    = _tad80(covhist);
-  int32int64map_destroy(covhist);
+	int32int64map_destroy(covhist);
 }
 
 void unicorn_fillaccq(unicorn_t *u, strq_t *accq)
@@ -458,59 +595,59 @@ PLaygound for internal functions
 */
 void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint32_t col2)
 {
-	//map
-	int absent;
-	khint_t k;
-	chrmap_t *refmap = strmap_init();
-	gzFile fp = gzopen(stat1, "r");
-	kstream_t *ks1 = ks_init(fp);
-	kstring_t kstr1 = {0};
-	char *tok, *key;
-	ks_getuntil(ks1, '\n', &kstr1, 0);
-	while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
-		if (kstr1.l == 0)
-			break;
-		tok = strtok(kstr1.s, "\t");
-		//fprintf(stderr, "%s\t", tok);
-		k = strmap_put(refmap, strdup(tok), &absent);
-		uint32_t i = 0;
-		while (i < col1) {
-			tok = strtok(NULL, "\t");
-			i++;
-		}
-		//fprintf(stderr, "%s\n", tok);
-		kh_val(refmap, k) = strdup(tok);
-	}
-	gzclose(fp);
-	ks_destroy(ks1);
-	//Second file
-	fp = gzopen(stat2, "r");
-	ks1 = ks_init(fp);
-	ks_getuntil(ks1, '\n', &kstr1, 0);
-	while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
-		if (kstr1.l == 0)
-			break;
-		tok = strtok(kstr1.s, "\t");
-		k = strmap_get(refmap, tok);
-		if (k == kh_end(refmap)) {
-			fprintf(stderr, "%s\tnot found\n", tok);
-			continue;
-		}
-		fprintf(stdout, "%s\t", tok);
-		uint32_t i = 0;
-		while (i < col2) {
-			tok = strtok(NULL, "\t");
-			i++;
-		}
-		fprintf(stdout, "\t%s\t%s\n", kh_val(refmap, k), tok);
-	}
+  //map
+  int absent;
+  khint_t k;
+  chrmap_t *refmap = strmap_init();
+  gzFile fp = gzopen(stat1, "r");
+  kstream_t *ks1 = ks_init(fp);
+  kstring_t kstr1 = {0};
+  char *tok;
+  ks_getuntil(ks1, '\n', &kstr1, 0);
+  while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
+    if (kstr1.l == 0)
+      break;
+    tok = strtok(kstr1.s, "\t");
+    //fprintf(stderr, "%s\t", tok);
+    k = strmap_put(refmap, strdup(tok), &absent);
+    uint32_t i = 0;
+    while (i < col1) {
+      tok = strtok(NULL, "\t");
+      i++;
+    }
+    //fprintf(stderr, "%s\n", tok);
+    kh_val(refmap, k) = strdup(tok);
+  }
+  gzclose(fp);
+  ks_destroy(ks1);
+  //Second file
+  fp = gzopen(stat2, "r");
+  ks1 = ks_init(fp);
+  ks_getuntil(ks1, '\n', &kstr1, 0);
+  while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
+    if (kstr1.l == 0)
+      break;
+    tok = strtok(kstr1.s, "\t");
+    k = strmap_get(refmap, tok);
+    if (k == kh_end(refmap)) {
+      fprintf(stderr, "%s\tnot found\n", tok);
+      continue;
+    }
+    fprintf(stdout, "%s\t", tok);
+    uint32_t i = 0;
+    while (i < col2) {
+      tok = strtok(NULL, "\t");
+      i++;
+    }
+    fprintf(stdout, "\t%s\t%s\n", kh_val(refmap, k), tok);
+  }
 
-	for (k = 0; k < kh_end(refmap); k++) {
-		if (!kh_exist(refmap, k)) continue;
-		free(kh_key(refmap, k));
-		free(kh_val(refmap, k));
-	}
-	strmap_destroy(refmap);
+  for (k = 0; k < kh_end(refmap); k++) {
+    if (!kh_exist(refmap, k)) continue;
+    free(kh_key(refmap, k));
+    free(kh_val(refmap, k));
+  }
+  strmap_destroy(refmap);
 }
 
 /*
@@ -525,7 +662,7 @@ Originally idea from Bianca Desacnctis to use sdust to remove low complexity rea
 #define WMASK (WTOT - 1)
 double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount)
 {
-  static uint32_t lastWindow = 0 ;
+  static int32_t lastWindow = 0 ;
   static int32_t wCount0[WTOT], *wSeq ;
   if (window < WLEN) return -1; // window too small
   if (window != lastWindow) {
@@ -550,7 +687,7 @@ double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount)
         if (score > maxScore) maxScore = score ;
       }
       else score += wCount[t]++ ;
-    	wSeq[k] = t ;
+      wSeq[k] = t ;
     }
   }
   if (n >= window) return (200.0 * maxScore) / (window * (window-1)) ;
