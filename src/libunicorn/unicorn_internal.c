@@ -519,10 +519,6 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
 	// 4. Allocate and Fill Bins
   uint32_t n_bins = (uint32_t)ceil(l / bin_width);
   _fill_spatial_bins(events, n_bins, bin_width, covhist);
-  //for (khint_t d = 0; d < kh_size(covhist); d++) {
-	//	if ( kh_exist(covhist, d) )
-  //    fprintf(stderr, "%u\t%" PRIu64 "\t%f\n", d, kh_val(covhist, d), kh_val(covhist, d)/(double)n_bins);
-  //}
   // Store the final calculated values in the output pointers
   covstats->covbases  = tcovbases;
   covstats->meancov   =  (double)tdepthsum / (double)l;
@@ -531,7 +527,6 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   covstats->varoncov  = msqcovb - (covstats->meanoncov * covstats->meanoncov);
   float _normentropy, _normgini;
   covstats->entropy  = _getentropy(covhist, n_bins, &_normentropy);
-  //fprintf(stderr, "Entropy: %f NormEntropy: %f\n", covstats->entropy, _normentropy);
 	covstats->nentropy = _normentropy;
   covstats->gini     = _getgini(covhist,
                                 n_bins,
@@ -673,7 +668,7 @@ double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount)
   if (!wCount) wCount = wCount0 ;
   memset(wCount, 0, WTOT*sizeof(int32_t)) ;
   int64_t score = 0, maxScore = 0 ;
-  int32_t i, t, n = -WLEN ;
+  int32_t i, t = 0, n = -WLEN ;
   for (i = 0 ; i < l ; ++i) {
     uint8_t b = bam_seqi(seq, i) < 128 ? htslib2ucrn_table[bam_seqi(seq, i)] : 4;
      if (b > 3) continue; // ignore Ns
