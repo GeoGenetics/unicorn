@@ -514,14 +514,22 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   double bin_width = 0;
   if (iqr > 0) bin_width = 2.0 * iqr * pow((double)tcovbases, -1.0/3.0);
   // Fallback if IQR is 0 (e.g., uniform block) or width is too small
-  if (bin_width < 1.0) bin_width = 100.0; // Default fallback, adjust as needed
-  //fprintf(stderr, "ref of len: %lu Bin width: %f iqr: %f\n", l, bin_width, iqr);
+  // Fallback strategies
+  if (l < 100) {
+      // Sturges rule for short references: k = ceil(log2(n) + 1)
+      double n = (tcovbases > 0) ? (double)tcovbases : 1.0;
+      double num_bins = ceil(log2(n) + 1.0);
+      bin_width = (double)l / (num_bins > 0 ? num_bins : 1.0);
+  } else if (bin_width < 1.0) {
+      // Fallback if IQR is 0 (e.g., uniform block) or width is too small
+      bin_width = 100.0; // Default fallback, adjust as needed
+  }
 	// 4. Allocate and Fill Bins
   uint32_t n_bins = (uint32_t)ceil(l / bin_width);
   _fill_spatial_bins(events, n_bins, bin_width, covhist);
   // Store the final calculated values in the output pointers
   covstats->covbases  = tcovbases;
-  covstats->meancov   =  (double)tdepthsum / (double)l;
+  covstats->meancov   = (double)tdepthsum / (double)l;
   covstats->meanoncov = (double)tdepthsum / (double)tcovbases;
   double msqcovb      = tcovbases?(double)sumsqdepth / tcovbases:0.0;
   covstats->varoncov  = msqcovb - (covstats->meanoncov * covstats->meanoncov);
@@ -642,14 +650,13 @@ void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint3
       continue;
     }
     fprintf(stdout, "%s\t", tok);
-    uint32_t i = 0;
+    i = 0;
     while (i < col2) {
       tok = strtok(NULL, "\t");
       i++;
     }
     fprintf(stdout, "%s\t%s\n", kh_val(refmap, k), tok);
   }
-
   for (k = 0; k < kh_end(refmap); k++) {
     if (!kh_exist(refmap, k)) continue;
     free(kh_key(refmap, k));

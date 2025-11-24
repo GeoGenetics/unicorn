@@ -1105,6 +1105,16 @@ static int unicorn_cmpstat(int argc, char **argv)
     _argv[i] = strdup(argv[i]);
   //Read command line options
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+	fprintf(stderr, "\tComparing statistics:\n"\
+									"\tstat1: %s\n"\
+									"\tstat2: %s\n"\
+									"\tcol1:  %s\n"\
+									"\tcol2:  %s\n",
+									opts.stat1,
+									opts.stat2,
+									opts.col1,
+									opts.col2);
+	fflush(stderr);
 	unicorn_cmpstat_(opts.stat1, opts.stat2, opts.col1, opts.col2);
 	ret = 0;
 	exit:
