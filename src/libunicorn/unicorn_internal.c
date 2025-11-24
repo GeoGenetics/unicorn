@@ -597,20 +597,25 @@ void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint3
   gzFile fp = gzopen(stat1, "r");
   kstream_t *ks1 = ks_init(fp);
   kstring_t kstr1 = {0};
-  char *tok;
+  char *tok, *f1col, *f2col;
   ks_getuntil(ks1, '\n', &kstr1, 0);
-  while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
+  tok = strtok(kstr1.s, "\t");
+	uint32_t i = 0;
+	while (i < col1) {
+    tok = strtok(NULL, "\t");
+    i++;
+  }
+	f1col = strdup(tok);
+	while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
     if (kstr1.l == 0)
       break;
     tok = strtok(kstr1.s, "\t");
-    //fprintf(stderr, "%s\t", tok);
     k = strmap_put(refmap, strdup(tok), &absent);
-    uint32_t i = 0;
+    i = 0;
     while (i < col1) {
       tok = strtok(NULL, "\t");
       i++;
     }
-    //fprintf(stderr, "%s\n", tok);
     kh_val(refmap, k) = strdup(tok);
   }
   gzclose(fp);
@@ -619,7 +624,15 @@ void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint3
   fp = gzopen(stat2, "r");
   ks1 = ks_init(fp);
   ks_getuntil(ks1, '\n', &kstr1, 0);
-  while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
+  tok = strtok(kstr1.s, "\t");
+	i = 0;
+	while (i < col2) {
+    tok = strtok(NULL, "\t");
+    i++;
+  }
+	f2col = strdup(tok);
+	fprintf(stdout, "Id\t%s\t%s\n", f1col, f2col);
+	while ( (ks_getuntil(ks1, '\n', &kstr1, 0)) >= 0 ) {
     if (kstr1.l == 0)
       break;
     tok = strtok(kstr1.s, "\t");
