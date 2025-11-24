@@ -634,7 +634,7 @@ void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint3
       tok = strtok(NULL, "\t");
       i++;
     }
-    fprintf(stdout, "\t%s\t%s\n", kh_val(refmap, k), tok);
+    fprintf(stdout, "%s\t%s\n", kh_val(refmap, k), tok);
   }
 
   for (k = 0; k < kh_end(refmap); k++) {
