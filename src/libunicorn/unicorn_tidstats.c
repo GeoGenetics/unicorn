@@ -5,14 +5,14 @@ static void _taxmapstats(unicorn_stat_t *stats)
 {
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;
 	uint64_t _falns  = 0, _frefs = 0;;
-	u64set_t *freadset = u64set_init();	
+	u64set_t *freadset = u64set_init();
 	int32q_t rmq;
 	kv_init(rmq);
 	khint_t ktax, kref;
 	//Loop over taxids
 	if (VERBOSE) {
 		fprintf(stderr, "[libunicorn::%s] Collecting stats for %u tids\n",
-										__func__, 
+										__func__,
 										kh_size(taxmap));
 	}
 	struct timespec start, stop;
@@ -47,8 +47,9 @@ static void _taxmapstats(unicorn_stat_t *stats)
 		kh_foreach(refmap, kref) {
 			ueventq_t events = kh_val(refmap, kref).aEVENT;
 			unicorn_sorturange(events.n, events.a);
-			tcovbases += cov_hist(events, covhist, &tdepthsum, &sumsqdepth);
-   		kv_destroy(events);
+			//tcovbases += cov_hist(events, covhist, &tdepthsum, &sumsqdepth);
+   		tcovbases = _getcovbases(events, &tdepthsum, &sumsqdepth);
+			kv_destroy(events);
 		}
     taxstat.covbases  = tcovbases;
     taxstat.meanoncov = (double)tdepthsum / (double)tcovbases;
@@ -70,8 +71,8 @@ static void _taxmapstats(unicorn_stat_t *stats)
     ktax = taxmap_get(taxmap, rmq.a[i]);
     taxmap_del(taxmap, ktax);
   }
- 	kv_destroy(rmq); 
- 	clock_gettime(CLOCK_MONOTONIC, &stop); 
+ 	kv_destroy(rmq);
+ 	clock_gettime(CLOCK_MONOTONIC, &stop);
 	if (VERBOSE) {
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
 		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
@@ -93,7 +94,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
 	bam1_t *b = bam_init1();
   uint64_t taln = 0, kaln = 0, ns;
 	uint32_t nabsent = 0;
-	taxmap_t *taxmap = (taxmap_t *)stats->__map;	
+	taxmap_t *taxmap = (taxmap_t *)stats->__map;
 	missing = chrset_init();
 	readset = u64set_init();
 	const char *rank = utax->rank;
@@ -104,7 +105,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		taln++;
 		if (_unmapped(b)) continue;
-    if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;  
+    if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
 		int32_t tid   = b->core.tid;
 		//get taxid for this reference
 		uint32_t taxid = utax_gettaxid(utax,
@@ -215,7 +216,7 @@ void unicorn_taxstat_print(const unicorn_t *u,
 	if (!stats || !fp || !u || !utax) return;
 	if (!stats->fc) return;
   //sam_hdr_t *hdr = u->hdr;
-	fprintf(fp, TIDSTATSTR); 
+	fprintf(fp, TIDSTATSTR);
   khint_t k;
 	taxmap_t *taxmap = (taxmap_t *)stats->__map;
   kh_foreach(taxmap, k) {

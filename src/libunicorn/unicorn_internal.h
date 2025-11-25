@@ -490,3 +490,7 @@ const char *utax_getname(utax_t *utax, uint32_t taxid);
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank);
 
 double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount);
+
+uint64_t _getcovbases(ueventq_t events,
+	                    uint64_t *_depthsum,
+										  uint64_t *_sumsqdepth);

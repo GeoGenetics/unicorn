@@ -421,8 +421,8 @@ uint64_t _getcovbases(ueventq_t events,
     depth += events.a[i].e ? 1 : -1;
     lpos = pos;
   }
-  *_depthsum = depthsum;
-  *_sumsqdepth = sumsqdepth;
+  *_depthsum   += depthsum;
+  *_sumsqdepth += sumsqdepth;
   return tbases;
 }
 
