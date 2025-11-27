@@ -51,7 +51,8 @@ static void _taxmapstats(unicorn_stat_t *stats)
 			kv_destroy(events);
 		}
     taxstat.covbases  = tcovbases;
-    taxstat.meanoncov = (double)tdepthsum / (double)tcovbases;
+		taxstat.covmean   = (double)tcovbases / (double)taxstat.reflen;
+		taxstat.meanoncov = (double)tdepthsum / (double)tcovbases;
 		double msqcovb    = tcovbases ? (double)sumsqdepth / tcovbases : 0.0;
   	taxstat.varoncov  = msqcovb - (taxstat.meanoncov * taxstat.meanoncov);
 		float _normentropy, _normgini;
@@ -231,12 +232,24 @@ void unicorn_taxstat_print(const unicorn_t *u,
 		taxstat_t taxstat = kh_val(taxmap, k);
     float breath = taxstat.covbases/(double)taxstat.reflen;
     float expbreath =  1.0f - expf(-breath);
-		fprintf(fp, TIDFMTSTR,
-								kh_key(taxmap, k), utax_getname(utax, kh_key(taxmap, k)), taxstat.nrefs, taxstat.reflen,
-								taxstat.nalns, kh_size(taxstat.readset), taxstat.readl_mean, sqrtf(taxstat.readl_var),
-								taxstat.readl_median, taxstat.readl_mode, taxstat.readl_min, taxstat.readl_max,
-								taxstat.alnnm_mean, taxstat.alnani_mean, sqrtf(taxstat.alnani_var),
-								taxstat.covbases, taxstat.covmean, breath, expbreath,
+		fprintf(fp, TIDFMTSTR, kh_key(taxmap, k),
+													 utax_getname(utax, kh_key(taxmap, k)),
+													 taxstat.nrefs,
+													 taxstat.reflen,
+													 taxstat.nalns,
+													 kh_size(taxstat.readset),
+													 taxstat.readl_mean,
+													 sqrtf(taxstat.readl_var),
+													 taxstat.readl_median,
+													 taxstat.readl_mode,
+													 taxstat.readl_min,
+													 taxstat.readl_max,
+													 taxstat.alnnm_mean,
+													 taxstat.alnani_mean,
+													 sqrtf(taxstat.alnani_var),
+													 taxstat.covbases,
+													 taxstat.covmean,
+													 breath, expbreath,
 								breath/expbreath, taxstat.meanoncov, sqrtf(taxstat.varoncov), sqrtf(taxstat.varoncov)/taxstat.meanoncov,
 								1000.0f * breath, taxstat.coventropy, taxstat.covgini, taxstat.covnentropy,
 								taxstat.covngini, taxstat.tad80
