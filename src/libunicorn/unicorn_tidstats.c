@@ -255,10 +255,10 @@ void unicorn_taxstat_print(const unicorn_t *u,
 													 breath,
 													 expbreath,
 													 breath/expbreath,
-													 taxstat.meanoncov
+													 taxstat.meanoncov,
 													 //sqrtf(taxstat.varoncov),
 													 //sqrtf(taxstat.varoncov)/taxstat.meanoncov,
-													 //1000.0f * breath,
+													 1000.0f * breath
 													 //taxstat.coventropy,
 													 //taxstat.covgini,
 													 //taxstat.covnentropy,

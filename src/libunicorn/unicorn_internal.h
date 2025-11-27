@@ -180,8 +180,8 @@ typedef struct refstat_t {
   float        REFNGINI;   // Normalized coverage Gini coefficient
   float        tad80;      // Truncated average depth at 80% of the coverage
   float        mdust;      // Mean dust score
-	float        vdust;			 // Variance dust score
-	//Data arrays
+ float        vdust;    // Variance dust score
+ //Data arrays
   floatq_t     aANI;
   //uint32q_t    aRLEN;
   uint32_t     aRLEN[256]; //Count array of read lengths
@@ -218,8 +218,8 @@ typedef struct taxstat_t {
   float        alnani_mode; // Mode ANI
   float        _MANI;      // See _M
   float        mdust;      // Mean dust score
-	float        vdust;			 // Variance dust score 
-	//Coverage
+ float        vdust;    // Variance dust score 
+ //Coverage
   uint64_t     covbases;    // number of covered bases
   float        covmean;     // mean cov
   float        meanoncov;   // Mean coverage of covered bases
@@ -319,8 +319,8 @@ typedef struct _covstats_t {
                 "n_entropy\t"\
                 "n_gini\t"\
                 "tad80\t"\
-								"mdust\t"\
-								"std_dust\n"
+        "mdust\t"\
+        "std_dust\n"
 #define STATSTR2 "Id\t"\
                  "taxID\t"\
                  "Length\t"\
@@ -350,43 +350,52 @@ typedef struct _covstats_t {
                  "n_entropy\t"\
                  "n_gini\t"\
                  "tad80\n"
-#define TIDSTATSTR "#taxid\tname\tnum_accessions\ttotal_length\t"\
-                   "num_alns\tnum_reads\tmean_readl\tstdev_readl\t"\
-                   "median_readl\tmode_readl\treadl_min\treadl_max\t"\
-                   "mean_alnnm\tmean_alnani\tstdev_alnani\t"\
-                   "num_covbases\tmean_cov\tbreath_cov\texp_breath\t"\
-                   "breath_ratio\tmean_covcovered\tstdev_covoncovered\tevenness_cov\t"\
-                   "site_density\tentropy\tgini\tnorm_entropy\t"\
-                   "norm_gini\ttad80\n"
+#define TIDSTATSTR "#taxid\t"\
+          "name\t"\
+          "num_accessions\t"\
+          "total_length\t"\
+                   "num_alns\t"\
+          "num_reads\t"\
+          "mean_readl\t"\
+          "stdev_readl\t"\
+                   "median_readl\t"\
+          "mode_readl\t"\
+          "readl_min\t"\
+          "readl_max\t"\
+                   "mean_alnnm\t"\
+          "mean_alnani\t"\
+          "stdev_alnani\t"\
+                   "num_covbases\t"\
+          "mean_cov\t"\
+          "breath_cov\t"\
+          "exp_breath\t"\
+                   "breath_ratio\t"\
+          "mean_covcovered\t"\
+          "site_density\n"
+
 #define TIDFMTSTR "%u\t"\
-									"%s\t"\
-									"%u\t"\
-									"%"PRIu64"\t"\
+         "%s\t"\
+         "%u\t"\
+         "%"PRIu64"\t"\
                   "%"PRIu64"\t"\
-									"%u\t"\
-									"%f\t"\
-									"%f\t"\
+         "%u\t"\
+         "%f\t"\
+         "%f\t"\
                   "%u\t"\
-									"%u\t"\
-									"%u\t"\
-									"%u\t"\
+         "%u\t"\
+         "%u\t"\
+         "%u\t"\
                   "%f\t"\
-									"%f\t"\
-									"%f\t"\
+         "%f\t"\
+         "%f\t"\
                   "%"PRIu64"\t"\
-									"%f\t"\
-									"%f\t"\
-									"%f\t"\
+         "%f\t"\
+         "%f\t"\
+         "%f\t"\
                   "%f\t"\
-									"%f\n"
-									//"%f\t"\
-									//"%f\t"\
-                  //"%f\t"\
-									//"%f\t"\
-									//"%f\t"\
-									//"%f\t"\
-                  //"%f\t"\
-									//"%f\n"
+         "%f\t"\
+         "%f\n"
+
 
 uint8_t _ASCHECK(bam1_t *b, int32_t ms);
                   /*
@@ -420,10 +429,10 @@ double _getgini(int32int64map_t *hist,
                 float *_ng);
 
 uint64_t cov_hist(ueventq_t events,
-									int32int64map_t *hist,
-									uint64_t *_tdepthsum,
-									uint64_t *_sumsqdepth,
-									uint32_t *_maxdepth);
+         int32int64map_t *hist,
+         uint64_t *_tdepthsum,
+         uint64_t *_sumsqdepth,
+         uint32_t *_maxdepth);
 uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 
 /*
@@ -514,5 +523,5 @@ uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank);
 double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount);
 
 uint64_t _getcovbases(ueventq_t events,
-	                    uint64_t *_depthsum,
-										  uint64_t *_sumsqdepth);
+                     uint64_t *_depthsum,
+            uint64_t *_sumsqdepth);
