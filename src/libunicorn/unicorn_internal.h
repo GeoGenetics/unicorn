@@ -358,14 +358,35 @@ typedef struct _covstats_t {
                    "breath_ratio\tmean_covcovered\tstdev_covoncovered\tevenness_cov\t"\
                    "site_density\tentropy\tgini\tnorm_entropy\t"\
                    "norm_gini\ttad80\n"
-#define TIDFMTSTR "%u\t%s\t%u\t%"PRIu64"\t"\
-                  "%"PRIu64"\t%u\t%f\t%f\t"\
-                  "%u\t%u\t%u\t%u\t"\
-                  "%f\t%f\t%f\t"\
-                  "%"PRIu64"\t%f\t%f\t%f\t"\
-                  "%f\t%f\t%f\t%f\t"\
-                  "%f\t%f\t%f\t%f\t"\
-                  "%f\t%f\n"
+#define TIDFMTSTR "%u\t"\
+									"%s\t"\
+									"%u\t"\
+									"%"PRIu64"\t"\
+                  "%"PRIu64"\t"\
+									"%u\t"\
+									"%f\t"\
+									"%f\t"\
+                  "%u\t"\
+									"%u\t"\
+									"%u\t"\
+									"%u\t"\
+                  "%f\t"\
+									"%f\t"\
+									"%f\t"\
+                  "%"PRIu64"\t"\
+									"%f\t"\
+									"%f\t"\
+									"%f\t"\
+                  "%f\t"\
+									"%f\n"
+									//"%f\t"\
+									//"%f\t"\
+                  //"%f\t"\
+									//"%f\t"\
+									//"%f\t"\
+									//"%f\t"\
+                  //"%f\t"\
+									//"%f\n"
 
 uint8_t _ASCHECK(bam1_t *b, int32_t ms);
                   /*
@@ -403,8 +424,7 @@ uint64_t cov_hist(ueventq_t events,
 									uint64_t *_tdepthsum,
 									uint64_t *_sumsqdepth,
 									uint32_t *_maxdepth);
-void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
-
+uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 
 /*
   khash IO

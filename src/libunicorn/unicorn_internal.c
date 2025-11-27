@@ -496,12 +496,12 @@ void _fill_spatial_bins(ueventq_t events,
 * @param events - Event kvec queue
 * @param l      - Reference sequence length
 */
-void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
+uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
 {
   // Handle the edge case of no events
   if ( !events.n || !l) {
     memset(covstats, 0, sizeof(_covstats_t));
-    return;
+    return 0;
   }
   // Cov frequency map for entropy and gini computation
   int32int64map_t *covhist = int32int64map_init();
@@ -543,6 +543,7 @@ void _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   covstats->ngini    = _normgini;
   covstats->tad80    = _tad80(covhist);
 	int32int64map_destroy(covhist);
+	return tdepthsum;		
 }
 
 void unicorn_fillaccq(unicorn_t *u, strq_t *accq)

@@ -43,28 +43,30 @@ static void _taxmapstats(unicorn_stat_t *stats)
 		_frefs  += kh_size(refmap);
 		//Add coverage histograms for all references
 		int32int64map_t *covhist = int32int64map_init();
-		uint64_t tdepthsum = 0, sumsqdepth = 0, tcovbases = 0;
+		uint64_t _tcov = 0, _tdepth = 0;
 		kh_foreach(refmap, kref) {
 			ueventq_t events = kh_val(refmap, kref).aEVENT;
 			unicorn_sorturange(events.n, events.a);
-   		tcovbases += _getcovbases(events, &tdepthsum, &sumsqdepth);
+			_covstats_t covstats = {0};
+    	_tdepth += _refcoverage(events, kh_val(refmap, kref).REFLEN, &covstats);
+			_tcov += covstats.covbases;
 			kv_destroy(events);
 		}
-    taxstat.covbases  = tcovbases;
-		taxstat.covmean   = (double)tcovbases / (double)taxstat.reflen;
-		taxstat.meanoncov = (double)tdepthsum / (double)tcovbases;
-		double msqcovb    = tcovbases ? (double)sumsqdepth / tcovbases : 0.0;
-  	taxstat.varoncov  = msqcovb - (taxstat.meanoncov * taxstat.meanoncov);
-		float _normentropy, _normgini;
-		taxstat.coventropy  = _getentropy(covhist, tcovbases, &_normentropy);
-		taxstat.covgini     = _getgini(covhist,
-																	 tcovbases,
-																	 taxstat.meanoncov,
-																	 &_normgini);
-		taxstat.covnentropy = _normentropy;
-		taxstat.covngini    = _normgini;
-		taxstat.tad80       = _tad80(covhist);
-		int32int64map_destroy(covhist);
+    taxstat.covbases  = _tcov;
+		taxstat.covmean   = (double)_tdepth / (double)taxstat.reflen;
+		taxstat.meanoncov = (double)_tdepth / (double)_tcov;
+		//double msqcovb    = _tcov ? (double)sumsqdepth / tcovbases : 0.0;
+  	//taxstat.varoncov  = msqcovb - (taxstat.meanoncov * taxstat.meanoncov);
+		//float _normentropy, _normgini;
+		//taxstat.coventropy  = _getentropy(covhist, tcovbases, &_normentropy);
+		//taxstat.covgini     = _getgini(covhist,
+		//															 tcovbases,
+		//															 taxstat.meanoncov,
+		//															 &_normgini);
+		//taxstat.covnentropy = _normentropy;
+		//taxstat.covngini    = _normgini;
+		//taxstat.tad80       = _tad80(covhist);
+		//int32int64map_destroy(covhist);
 		kh_val(taxmap, ktax) = taxstat;
 	}
 	for (uint32_t i = 0; i < rmq.n; i++) {
@@ -166,7 +168,8 @@ int unicorn_tidstat_compute(unicorn_t *u,
 		}
 		//Add alignment event to corresponding reference
 		refstat = kh_val(taxstat.refmap, kref); //Get reference
-    _urangeevent s = {b->core.pos,   1};
+    refstat.REFLEN = u->hdr->target_len[tid];  
+		_urangeevent s = {b->core.pos,   1};
     _urangeevent e = {bam_endpos(b), 0};
     kv_push(_urangeevent, refstat.aEVENT, s);
     kv_push(_urangeevent, refstat.aEVENT, e);
@@ -249,10 +252,18 @@ void unicorn_taxstat_print(const unicorn_t *u,
 													 sqrtf(taxstat.alnani_var),
 													 taxstat.covbases,
 													 taxstat.covmean,
-													 breath, expbreath,
-								breath/expbreath, taxstat.meanoncov, sqrtf(taxstat.varoncov), sqrtf(taxstat.varoncov)/taxstat.meanoncov,
-								1000.0f * breath, taxstat.coventropy, taxstat.covgini, taxstat.covnentropy,
-								taxstat.covngini, taxstat.tad80
+													 breath,
+													 expbreath,
+													 breath/expbreath,
+													 taxstat.meanoncov
+													 //sqrtf(taxstat.varoncov),
+													 //sqrtf(taxstat.varoncov)/taxstat.meanoncov,
+													 //1000.0f * breath,
+													 //taxstat.coventropy,
+													 //taxstat.covgini,
+													 //taxstat.covnentropy,
+													 //taxstat.covngini,
+													 //taxstat.tad80
 					);
 	}
 }
