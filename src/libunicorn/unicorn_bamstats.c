@@ -44,6 +44,7 @@ typedef struct _ktpooldata {
 
 static void worker_for(void *data, long i, int tid)
 {
+	(void)tid;
 	_ktpooldata_t *d = (_ktpooldata_t *)data;
 	covmap_t *covmap = d->covmap;
 	sam_hdr_t *hdr   = d->hdr;

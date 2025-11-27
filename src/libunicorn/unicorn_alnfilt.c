@@ -5,6 +5,7 @@ sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap);
 
 static inline uint32_t mode_alltop(alnscoreq_t q, uint64_t p, float max, float pct)
 {
+	(void)pct;
 	if (!q.n || p >= q.n) return 0;
 	uint32_t f = 0;
 	for (uint64_t i = p; i < q.n; i++) {
@@ -18,6 +19,7 @@ static inline uint32_t mode_alltop(alnscoreq_t q, uint64_t p, float max, float p
 
 static inline uint32_t mode_all(alnscoreq_t q, uint64_t p, float max, float pct)
 {
+	(void)pct;
 	if (!q.n || p >= q.n) return 0;
 	uint32_t f = 0;
 	max = 0.0;
@@ -31,6 +33,7 @@ static inline uint32_t mode_all(alnscoreq_t q, uint64_t p, float max, float pct)
 
 static inline uint32_t mode_rndtop(alnscoreq_t q, uint64_t p, float max, float pct)
 {
+	(void)pct;
  	if (!q.n || p >= q.n) return 0;
 	uint32_t f = 0, count = 0, flg = 0;
 	uint64_t selected = 0;

@@ -186,6 +186,7 @@ static int8_t tloadnames(const char *names, utax_t *utax, int *_ret)
 
 static void _forINSERT(void *data, long i, int tid)
 {
+	(void)tid;
   accmapstep_t *step = (accmapstep_t *)data;
   const emap_chr2int_t *map = step->map;
   tdataq_t   q         = step->dataq[i];
