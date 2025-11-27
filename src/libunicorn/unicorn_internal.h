@@ -217,7 +217,9 @@ typedef struct taxstat_t {
   float        alnani_median; // median ANI
   float        alnani_mode; // Mode ANI
   float        _MANI;      // See _M
-  //Coverage
+  float        mdust;      // Mean dust score
+	float        vdust;			 // Variance dust score 
+	//Coverage
   uint64_t     covbases;    // number of covered bases
   float        covmean;     // mean cov
   float        meanoncov;   // Mean coverage of covered bases
@@ -351,7 +353,7 @@ typedef struct _covstats_t {
 #define TIDSTATSTR "#taxid\tname\tnum_accessions\ttotal_length\t"\
                    "num_alns\tnum_reads\tmean_readl\tstdev_readl\t"\
                    "median_readl\tmode_readl\treadl_min\treadl_max\t"\
-                   "mean_alnnm\tmean_alnani\tstdev_alnani\tmedian_alnani\t"\
+                   "mean_alnnm\tmean_alnani\tstdev_alnani\t"\
                    "num_covbases\tmean_cov\tbreath_cov\texp_breath\t"\
                    "breath_ratio\tmean_covcovered\tstdev_covoncovered\tevenness_cov\t"\
                    "site_density\tentropy\tgini\tnorm_entropy\t"\
@@ -359,7 +361,7 @@ typedef struct _covstats_t {
 #define TIDFMTSTR "%u\t%s\t%u\t%"PRIu64"\t"\
                   "%"PRIu64"\t%u\t%f\t%f\t"\
                   "%u\t%u\t%u\t%u\t"\
-                  "%f\t%f\t%f\t%f\t"\
+                  "%f\t%f\t%f\t"\
                   "%"PRIu64"\t%f\t%f\t%f\t"\
                   "%f\t%f\t%f\t%f\t"\
                   "%f\t%f\t%f\t%f\t"\

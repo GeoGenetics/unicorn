@@ -47,8 +47,7 @@ static void _taxmapstats(unicorn_stat_t *stats)
 		kh_foreach(refmap, kref) {
 			ueventq_t events = kh_val(refmap, kref).aEVENT;
 			unicorn_sorturange(events.n, events.a);
-			//tcovbases += cov_hist(events, covhist, &tdepthsum, &sumsqdepth);
-   		tcovbases = _getcovbases(events, &tdepthsum, &sumsqdepth);
+   		tcovbases += _getcovbases(events, &tdepthsum, &sumsqdepth);
 			kv_destroy(events);
 		}
     taxstat.covbases  = tcovbases;
@@ -106,6 +105,9 @@ int unicorn_tidstat_compute(unicorn_t *u,
 		taln++;
 		if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
+		if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
+		int32_t dusts = (int)(0.5 + dust(bam_get_seq(b), b->core.l_qseq, 64, NULL));
+		if ( dusts > stats->maxdust ) continue; //Check for dust score
 		int32_t tid   = b->core.tid;
 		//get taxid for this reference
 		uint32_t taxid = utax_gettaxid(utax,
@@ -132,15 +134,15 @@ int unicorn_tidstat_compute(unicorn_t *u,
 			kh_val(taxmap, ktax) = taxstat;
     }
     // update stats
-    taxstat = kh_val(taxmap, ktax);
+		float mean, delta;
+		taxstat = kh_val(taxmap, ktax);
     uint32_t naln = ++taxstat.nalns;
     //Add read name to read set to count number of reads to tid
     khint_t q = kh_hash_str(bam_get_qname(b));
-		float mean, delta;
 		u64set_put(readset, q, &absent);
 		u64set_put(taxstat.readset, q, &absent);
     //mean, median, and variance  Welford's online algorithm
-    if (absent) { //Only first instance of query, no counting same read twice
+		if (absent) { //Only first instance of query, no counting same read twice
       //Read length mean, variance, median, mode, min, max
       taxstat.v_rlen[qlen < 256 ? qlen : 255]++; //Count read length
       uint32_t n = kh_size(taxstat.readset);
@@ -162,7 +164,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
 			kh_val(taxstat.refmap, kref) = refstat;
 		}
 		//Add alignment event to corresponding reference
-		refstat = kh_val(taxstat.refmap, kref); //Gets reference
+		refstat = kh_val(taxstat.refmap, kref); //Get reference
     _urangeevent s = {b->core.pos,   1};
     _urangeevent e = {bam_endpos(b), 0};
     kv_push(_urangeevent, refstat.aEVENT, s);
@@ -181,7 +183,13 @@ int unicorn_tidstat_compute(unicorn_t *u,
     mean = taxstat.alnnm_mean;
     delta = NM-mean;
     taxstat.alnnm_mean += delta/naln;
-    //Don't loose your stats value
+    //Alignment dust
+		mean = taxstat.mdust;
+		delta = dusts - mean;
+		taxstat.mdust += delta/naln;
+		delta = delta * (dusts - taxstat.mdust);
+		taxstat.vdust = naln ? (delta / (naln - 1)) : 0.0f; 
+		//Don't loose your stats value
     kh_val(taxmap, ktax) = taxstat;
 	}
 	clock_gettime(CLOCK_MONOTONIC, &stop);
@@ -227,7 +235,7 @@ void unicorn_taxstat_print(const unicorn_t *u,
 								kh_key(taxmap, k), utax_getname(utax, kh_key(taxmap, k)), taxstat.nrefs, taxstat.reflen,
 								taxstat.nalns, kh_size(taxstat.readset), taxstat.readl_mean, sqrtf(taxstat.readl_var),
 								taxstat.readl_median, taxstat.readl_mode, taxstat.readl_min, taxstat.readl_max,
-								taxstat.alnnm_mean, taxstat.alnani_mean, sqrtf(taxstat.alnani_var), taxstat.alnani_median,
+								taxstat.alnnm_mean, taxstat.alnani_mean, sqrtf(taxstat.alnani_var),
 								taxstat.covbases, taxstat.covmean, breath, expbreath,
 								breath/expbreath, taxstat.meanoncov, sqrtf(taxstat.varoncov), sqrtf(taxstat.varoncov)/taxstat.meanoncov,
 								1000.0f * breath, taxstat.coventropy, taxstat.covgini, taxstat.covnentropy,
