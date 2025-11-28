@@ -11,7 +11,7 @@ static uint32_t _getreadnum(unicorn_stat_t *stats)
   uint32_t nread = 0;
   khint_t k;
   refmap_t *refmap = (refmap_t *)stats->__map;
-	kh_foreach(refmap, k) {
+  kh_foreach(refmap, k) {
     u64set_t *readset = kh_val(refmap, k).READSET;
     nread += kh_size(readset);
   }
@@ -115,12 +115,12 @@ static void _refmapstats(unicorn_stat_t *stats)
   stats->_nreads  = _treads;
   stats->_nfreads = _freads;
   stats->_nfalns  = _falns;
-	stats->_nfrefs  = kh_size(refmap);
+  stats->_nfrefs  = kh_size(refmap);
 }
 
 int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 {
-	int ret = -1, absent;
+  int ret = -1, absent;
   if (!u || !stats) goto exit;
   ret = -2;
   bam1_t *b = bam_init1();
@@ -131,9 +131,9 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
-		int32_t dusts = (int)(0.5 + dust(bam_get_seq(b), b->core.l_qseq, 64, NULL));
-		if ( dusts > stats->maxdust ) continue; //Check for dust score
-		naln++;
+    int32_t dusts = (int)(0.5 + dust(bam_get_seq(b), b->core.l_qseq, 64, NULL));
+    if ( dusts > stats->maxdust ) continue; //Check for dust score
+    naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
     refstat_t refstat = {0};
@@ -153,7 +153,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     uint32_t naln = ++refstat.REFNALNS;
     //Add read name to read set to count number of reads to ref
     khint_t q = kh_hash_str(bam_get_qname(b));
-		u64set_put(refstat.READSET, q, &absent);
+    u64set_put(refstat.READSET, q, &absent);
     float mean, delta;
     //mean, median, and variance  Welford's online algorithm
     if (absent) { //Only first instance of query, no counting same read twice
@@ -187,19 +187,19 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     delta = NM-mean;
     refstat.REFALNNM += delta/naln;
     //Alignment dust
-		mean = refstat.mdust;
-		delta = dusts - mean;
-		refstat.mdust += delta/naln;
-		delta = delta * (dusts - refstat.mdust);
-		refstat.vdust = naln ? (delta / (naln - 1)) : 0.0f;
-		//Don't loose your stats value
+    mean = refstat.mdust;
+    delta = dusts - mean;
+    refstat.mdust += delta/naln;
+    delta = delta * (dusts - refstat.mdust);
+    refstat.vdust = naln ? (delta / (naln - 1)) : 0.0f;
+    //Don't loose your stats value
     kh_val(refmap, k) = refstat;
   }
   stats->_nalns = naln;
-	if (VERBOSE)
-		fprintf(stderr, "[libunicorn::%s] Finished parsing alignment file\n", __func__);
-	if (naln)
-		_refmapstats(stats);
+  if (VERBOSE)
+    fprintf(stderr, "[libunicorn::%s] Finished parsing alignment file\n", __func__);
+  if (naln)
+    _refmapstats(stats);
   bam_destroy1(b);
   stats->fc = 1;
   ret = 0;
@@ -315,8 +315,8 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   if (u->_FP) sam_close(u->_FP);
   u->_FP = hts_open(u->ifile, "r");
   _hdr = sam_hdr_read(u->_FP);
-	refmap_t *refmap = (refmap_t *)stats->__map;
-	while (sam_read1(u->_FP, _hdr, b) >= 0) {
+  refmap_t *refmap = (refmap_t *)stats->__map;
+  while (sam_read1(u->_FP, _hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
     int32_t tid = b->core.tid;
@@ -341,8 +341,8 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
   khint_t k;
   kh_foreach(refmap, k) {
     refstat_t v = kh_val(refmap, k);
-  	char *accession = hdr->target_name[kh_key(refmap, k)];
-		float breath = v.REFCOVB/(double)v.REFLEN;
+    char *accession = hdr->target_name[kh_key(refmap, k)];
+    float breath = v.REFCOVB/(double)v.REFLEN;
     float expbreath =  1.0f - expf(-v.REFMCOV);
     fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                 accession,                                  //0
@@ -373,8 +373,8 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
                 v.REFNENTROP,                               //25
                 v.REFNGINI,                                 //26
                 v.tad80,                                    //27
-								v.mdust,                                    //28
-							  sqrtf(v.vdust));                            //29
+                v.mdust,                                    //28
+                sqrtf(v.vdust));                            //29
     }
 }
 
@@ -433,8 +433,8 @@ void unicorn_refstat_print(const unicorn_t *u,
 {
     if (!stats || !fp || !u) return;
     if (!stats->fc) return;
-		refmap_t *refmap = (refmap_t *)stats->__map;
-		sam_hdr_t *hdr = u->hdr;
+    refmap_t *refmap = (refmap_t *)stats->__map;
+    sam_hdr_t *hdr = u->hdr;
     if (utax) {
       fprintf(fp, STATSTR2);
       _print_withtax(fp, hdr, refmap, utax);

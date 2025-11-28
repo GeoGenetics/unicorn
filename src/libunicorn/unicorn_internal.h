@@ -218,7 +218,7 @@ typedef struct taxstat_t {
   float        alnani_mode; // Mode ANI
   float        _MANI;      // See _M
   float        mdust;      // Mean dust score
- float        vdust;    // Variance dust score 
+ float        vdust;    // Variance dust score
  //Coverage
   uint64_t     covbases;    // number of covered bases
   float        covmean;     // mean cov
@@ -256,10 +256,10 @@ typedef struct unicorn_stats_t {
   uint8_t mapflg; //Map type, 0 for per reference, 1 for per taxid
   uint64_t _nalns;
   uint64_t _nreads;
-  uint32_t _nrefs;        //Number of references in bam
   uint64_t _nfreads;
   uint64_t _nfalns;
-  uint32_t _nfrefs;        //Number of filtered references after computation
+  uint32_t _nrefs;        //Number of references in bam
+	uint32_t _nfrefs;        //Number of filtered references after computation
   //bam wide stats
   float    _mrlen;        //Mean read length
   float    _vrlen;        //Variance of read length

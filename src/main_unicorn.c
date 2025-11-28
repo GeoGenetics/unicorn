@@ -140,7 +140,7 @@ static void unicorn_usage(FILE *fp)
   fprintf(fp, "Commands:\n"\
           "  refstats    Compute per reference statistics.\n"\
           "  bamstats    Compute per bam statistics.\n"\
-          "  tidstats    Compute per taxid statistics.\n"\
+          "  taxstats    Compute per taxid statistics.\n"\
           "  reassign    Filter alignments via EM algorithm.\n"\
           "  alnfilt     Filter alignments based on user-defined criteria.\n");
 }
@@ -180,9 +180,9 @@ static void bamstats_usage(FILE *fp)
             "                   This will create a files <inputname>.dists.txt\n");
 }
 
-static void tidstats_usage(FILE *fp)
+static void taxstats_usage(FILE *fp)
 {
-    fprintf(fp, "./unicorn tidstats [options] -b <in.bam>|<in.sam>\n");
+    fprintf(fp, "./unicorn taxstats [options] -b <in.bam>|<in.sam>\n");
     fprintf(fp, "Options:\n"\
             "  -b <str>                     Input bam|sam\n"\
             "  -o <str> | --outbam <str>    Output BAM file with filtered alignments.\n"\
@@ -200,7 +200,7 @@ static void tidstats_usage(FILE *fp)
             "       - minrefl  <int>   Minimum reference length. [0]\n"\
             "       - minreads <int>   Minimum number of reads per taxid. [1]\n"\
             "       - minmani  <float> Minimum mean ANI per taxid. [0]\n"\
-            "       - minalnas <int>  Minimum alignment score [-Inf]\n"\
+            "       - minalnas <int>   Minimum alignment score [-Inf]\n"\
             "       - maxdust  <int>   Maximum alignment dust score [100]\n"\
             "  --filelist <str>             File containing input file paths. One per line.\n"\
             "  --rank <str>                 Taxonomic rank to summarize by. [species]\n"\
@@ -252,7 +252,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
   int c, ret = 2;
   ketopt_t o = KETOPT_INIT;
   while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
-    ret = 1;
+		ret = 1;
     switch(c) {
       case 'b':
         opts->ifile = strdup(o.arg);
@@ -430,7 +430,8 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         fprintf(stderr, "[unicorn::%s] Unknown option %s\n",
                         __func__,
                         argv[ o.ind - 1 ]);
-        break;
+				ret = 6;
+				goto exit;
       }
   }
   if (2==ret) goto exit;
@@ -439,7 +440,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
     return ret;
 }
 
-static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp)
+static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
 {
   fprintf(fp, "[unicorn::%s] Options:\n", __func__);
   fprintf(fp, "\t-b %s\n", opts->ifile ? opts->ifile : "N/A");
@@ -452,7 +453,8 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp)
   fprintf(fp, "\t--minalnas  %d\n", opts->minalnas);
   fprintf(fp, "\t--maxdust   %d\n", opts->maxdust);
   if (opts->withtid) {
-    fprintf(fp, "\tReport taxid of reference sequence: Yes\n");
+		if (_f == REFSTATS)
+			fprintf(fp, "\tReport taxid of reference sequence: Yes\n");
     fprintf(fp, "\tAccession to taxid map: %s\n", opts->acc2tax ? opts->acc2tax : "N/A");
     fprintf(fp, "\tTaxonomy names file: %s\n", opts->names ? opts->names : "N/A");
     fprintf(fp, "\tTaxonomy nodes file: %s\n", opts->nodes ? opts->nodes : "N/A");
@@ -482,7 +484,7 @@ static int unicorn_refstats(int argc, char **argv)
     _argv[i] = strdup(argv[i]);
   //Read command line options
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-  unicorn_printopts(&opts, stderr);
+  unicorn_printopts(&opts, stderr, REFSTATS);
   //Check required options
   if (!opts.ifile)  goto exit;
   if (opts.withtid) {
@@ -708,7 +710,7 @@ static int unicorn_bamstats(int argc, char **argv)
     return ret;
 }
 
-static int unicorn_tidstats(int argc, char **argv)
+static int unicorn_taxstats(int argc, char **argv)
 {
   int ret = 1;
   struct timespec start, stop, pstart, pstop;
@@ -720,7 +722,7 @@ static int unicorn_tidstats(int argc, char **argv)
   opts.minnreads = 1;
   opts.minrefl   = 0;
   opts.minalnas  = INT32_MIN;
-  opts.maxdust   = 100; 
+  opts.maxdust   = 100;
   opts.rank = strdup("species");
   unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
@@ -730,7 +732,7 @@ static int unicorn_tidstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-  unicorn_printopts(&opts, stderr); 
+  unicorn_printopts(&opts, stderr, 0);
   if (!opts.ifile && !opts.filel) goto exit;
   if (opts.outstat) {
     ret = 2;
@@ -771,13 +773,13 @@ static int unicorn_tidstats(int argc, char **argv)
 			snprintf(obamstr, len, "%s.%s.%u.bam", opts.outbam, fileq.a[i], i);
 		}
 		else
-			obamstr = opts.outbam;  
+			obamstr = opts.outbam;
 		u = unicorn_init(opts.threads,
                      fileq.a[i],
                      obamstr,
                      argc,
-                     _argv);  
-    if (obamstr && obamstr != opts.outbam) free(obamstr); 
+                     _argv);
+    if (obamstr && obamstr != opts.outbam) free(obamstr);
 		if (!u) {
       fprintf(stderr, "[unicorn::%s] Error: Cannot initialize unicorn with file %s\n",
                        __func__, fileq.a[i]);
@@ -840,7 +842,7 @@ static int unicorn_tidstats(int argc, char **argv)
   exit:
     if (ret) {
       fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
-      tidstats_usage(stderr);
+      taxstats_usage(stderr);
     }
     if (utax) unicorn_closetaxonomy(utax);
     if (opts.ifile)   free(opts.ifile);
@@ -1041,10 +1043,7 @@ static int unicorn_cmpstat(int argc, char **argv)
   int ret = 1;
   unicorn_opt_t opts = {0};
   opts.threads   = 4;
-  char *_argv[64] = {0};
-  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
-    _argv[i] = strdup(argv[i]);
-  //Read command line options
+	//Read command line options
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
   fprintf(stderr, "\tComparing statistics:\n"\
                   "\tstat1: %s\n"\
@@ -1145,8 +1144,8 @@ int main(int argc, char **argv)
     return unicorn_bamstats(argc, argv);
   } else if (strcmp(argv[1], "refstats") == 0) {
     return unicorn_refstats(argc, argv);
-  } else if (strcmp(argv[1], "tidstats") == 0) {
-    return unicorn_tidstats(argc, argv);
+  } else if (strcmp(argv[1], "taxstats") == 0) {
+    return unicorn_taxstats(argc, argv);
   } else if (strcmp(argv[1], "reassign") == 0) {
     return unicorn_reassign(argc, argv);
   } else if (strcmp(argv[1], "alnfilt") == 0) {

@@ -13,7 +13,14 @@ else
   HTSLIB = -L$(HTSSRC)
 endif
 
-CFLAGS+=-Wall -Wextra -Wsign-compare -Wno-unused-function -pedantic -std=c11 -g3 -Isrc $(HTSINC)/include -fPIC #-fsanitize=address
+CFLAGS+=-Wall -Wextra -Wsign-compare -Wno-unused-function -pedantic -std=c11 -Isrc $(HTSINC)/include -fPIC #-fsanitize=address
+ifeq ($(DEBUG),1)
+CFLAGS += -g
+else
+CFLAGS += -O3
+endif
+
+
 KFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -g3 #-fsanitize=address
 SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)
@@ -45,7 +52,7 @@ src/version.h: src/version.h.in
 test:
 	cksum=$$(./unicorn refstats -b data/test.bam 2> /dev/null | cksum | awk '{print $$1}' ); \
 	[ $$cksum -eq 3193906749 ] || (exit 1)
-	
+
 clean:
 	rm -f $(OBJ) src/version.h libunicorn.a unicorn unicorn.h $(KOBJ) data/out.bam data/out.stats.txt
 

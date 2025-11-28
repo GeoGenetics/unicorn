@@ -42,7 +42,6 @@ static void _taxmapstats(unicorn_stat_t *stats)
 		refmap_t *refmap = taxstat.refmap;
 		_frefs  += kh_size(refmap);
 		//Add coverage histograms for all references
-		int32int64map_t *covhist = int32int64map_init();
 		uint64_t _tcov = 0, _tdepth = 0;
 		kh_foreach(refmap, kref) {
 			ueventq_t events = kh_val(refmap, kref).aEVENT;
@@ -168,7 +167,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
 		}
 		//Add alignment event to corresponding reference
 		refstat = kh_val(taxstat.refmap, kref); //Get reference
-    refstat.REFLEN = u->hdr->target_len[tid];  
+    refstat.REFLEN = u->hdr->target_len[tid];
 		_urangeevent s = {b->core.pos,   1};
     _urangeevent e = {bam_endpos(b), 0};
     kv_push(_urangeevent, refstat.aEVENT, s);
@@ -192,7 +191,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
 		delta = dusts - mean;
 		taxstat.mdust += delta/naln;
 		delta = delta * (dusts - taxstat.mdust);
-		taxstat.vdust = naln ? (delta / (naln - 1)) : 0.0f; 
+		taxstat.vdust = naln ? (delta / (naln - 1)) : 0.0f;
 		//Don't loose your stats value
     kh_val(taxmap, ktax) = taxstat;
 	}

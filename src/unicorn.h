@@ -109,8 +109,8 @@ unicorn's BAM statistic computation interface
 
 
 ****************************************************/
-#define REFSTATS 0
-#define TIDSTATS 1
+#define REFSTATS 1
+#define TIDSTATS 2
 
 /**
  * @brief unicorn's reference based statistics
