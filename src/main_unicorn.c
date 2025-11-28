@@ -516,7 +516,7 @@ static int unicorn_refstats(int argc, char **argv)
                             opts.minmani,
                             opts.minalnas,
                             opts.maxdust,
-                            0);
+                            REFSTATS);
   if (!stats) goto exit;
   ret = -4;
   //Compute statistics

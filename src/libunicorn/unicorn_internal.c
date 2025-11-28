@@ -112,10 +112,10 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
   if (stats) {
     if (stats->__map) {
       switch ( stats->mapflg ) {
-        case 0: //per reference
+        case 1: //per reference
           refmap_free( (refmap_t *)stats->__map);
           break;
-        case 1: //per taxid
+        case 2: //per taxid
           taxmap_free((taxmap_t *)stats->__map);
           break;
         default:
