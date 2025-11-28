@@ -21,6 +21,7 @@ CFLAGS += -O3
 endif
 
 
+
 KFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -g3 #-fsanitize=address
 SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)
