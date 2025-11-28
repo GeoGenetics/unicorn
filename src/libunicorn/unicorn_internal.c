@@ -138,8 +138,8 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
   if (!stats) return NULL;
   stats->mapflg = flg;
   switch (flg) {
-    case 0:  stats->__map   = refmap_init(); break; //per reference
-    case 1:  stats->__map   = taxmap_init(); break; //per taxid
+    case 1:  stats->__map   = refmap_init(); break; //per reference
+    case 2:  stats->__map   = taxmap_init(); break; //per taxid
     default: stats->__map   = 0; break; //Default to no map;
   }
   stats->minnreads = minnreads;
@@ -543,7 +543,7 @@ uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   covstats->ngini    = _normgini;
   covstats->tad80    = _tad80(covhist);
 	int32int64map_destroy(covhist);
-	return tdepthsum;		
+	return tdepthsum;
 }
 
 void unicorn_fillaccq(unicorn_t *u, strq_t *accq)
