@@ -70,12 +70,17 @@ static inline void strip(char *line)
     line[at] = '\0';
 }
 
+const char *unicornranks[8] = {
+                                 "species", "genus", "family", "order",
+                                 "class",  "phylum",  "kingdom",  "domain"
+                              };
+
 static nodes_t _loadnodemap(const char *fname, int *_ret)
 {
 	*_ret = -1;
 	int absent;
 	nodes_t nodes = {0,0};
-	uint2tup_t *map = uint2tup_init();	
+	uint2tup_t *map = uint2tup_init();
 	chr2int_t *levels = chr2int_init();
 	if (!map || !levels) { *_ret = 4; goto exit; }
 	gzFile fp = gzopen(fname, "r");
@@ -85,13 +90,10 @@ static nodes_t _loadnodemap(const char *fname, int *_ret)
 			fprintf(stderr, "[libunicorn::%s] Error opening taxonomy nodes file %s\n", __func__, fname);
 		goto exit;
 	}
-	const char *ranks[8] = {
-													 "species", "genus", "family", "order",
-													 "class",  "phylum",  "kingdom",  "domain"
-													};
+
 	khint_t j, k;
 	for (uint8_t i = 0; i < 8; i++) {
-		j = chr2int_put(levels, strdup(ranks[i]), &absent);
+		j = chr2int_put(levels, unicornranks[i], &absent);
 		kh_val(levels, j) = i;
 	}
 	char buf[4096];
@@ -283,9 +285,9 @@ static void *_accmapP(void *shared, int step, void *in)
 static emap_chr2int_t *_csvload(BGZF *fp, uint8_t nthreads)
 {
 	if (!fp) return NULL;
-	emap_chr2int_t *map = _echr2intinit(EBITS, 0); // Initialize with 6 bits	
+	emap_chr2int_t *map = _echr2intinit(EBITS, 0); // Initialize with 6 bits
 	if (!map) return NULL;
-	// Load the map from data 
+	// Load the map from data
   accmappipe_t p = {0};
   void *forpool  = kt_forpool_init(nthreads);
   p.map      = map;
@@ -310,7 +312,7 @@ static emap_chr2int_t *_csv2_chr2intmap(const char *in,
   *ret = 1;
   emap_chr2int_t *map =  NULL;
   BGZF *fp = bgzf_open(in, "r");
-  if (!fp) goto exit; 
+  if (!fp) goto exit;
 	map = _csvload(fp, nthreads);
 	*ret = 2;
 	if (!map) goto exit;
@@ -439,7 +441,7 @@ uint32_t unicorn_tax_getnumnodes(const utax_t *utax)
 
 uint64_t unicorn_tax_getnumaccs(const utax_t *utax)
 {
-	return utax ? utax->numaccs : 0;		
+	return utax ? utax->numaccs : 0;
 }
 
 uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
@@ -457,7 +459,7 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
 	*absent = 0; // Found
 	ret = kh_val(submap, k);
 	exit:
-		return ret; 
+		return ret;
 }
 
 const char *utax_getname(utax_t *utax, uint32_t taxid)
@@ -470,7 +472,7 @@ const char *utax_getname(utax_t *utax, uint32_t taxid)
 	return kh_val(map, k); // Return name
 }
 
-uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank)
+uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret)
 {
 	if (!utax || !rank) return -1;
 	uint2tup_t *nodemap = utax->nodes.map;
@@ -480,6 +482,10 @@ uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank)
 	uint32_t trank_val = kh_val(levels, k);
 	//Get node info: parent and rank level
 	k  = uint2tup_get(nodemap, taxid);
+	if (k==kh_end(nodemap)) {
+		*ret = 1;
+		return 0;
+	}
 	uint32_t parent   = kh_val(nodemap, k).taxid;
 	uint32_t rank_val = kh_val(nodemap, k).rank_val;
 	uint32_t _taxid = taxid;

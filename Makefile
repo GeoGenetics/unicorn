@@ -29,13 +29,13 @@ KSRC=src/klib/kthread.c
 KOBJ=src/klib/klib.o
 LDFLAGS += $(HTSLIB)/lib
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
-
+GENESIS ?= ../genesis
 .PHONY: clean all
 
 %.o:%.c src/version.h
 	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
 
-all: klib libunicorn unicorn
+all: genesis klib libunicorn unicorn
 
 libunicorn: $(OBJ)
 	ar rcs $(@).a $(OBJ) $(KOBJ)
@@ -44,8 +44,11 @@ libunicorn: $(OBJ)
 klib:
 	$(CC) $(KFLAGS) -c -o $(KOBJ) $(KSRC) -fPIC
 
-unicorn:src/main_unicorn.c $(OBJ) src/version.h
-	$(CC) -o $@ $< libunicorn.a -Isrc $(CFLAGS) -fPIE $(LDFLAGS) -lhts -lz -lm -lpthread
+genesis:
+	$(MAKE) -C src/genesisC GENESIS=$(GENESIS) genesisC
+
+unicorn: src/main_unicorn.c $(OBJ) src/version.h
+	$(CC) -o $@ $< libunicorn.a src/genesisC/genesisC.o -Isrc $(CFLAGS) -fPIE $(LDFLAGS) -lhts -lz -lm -lpthread -lstdc++
 
 src/version.h: src/version.h.in
 	sed 's/@GIT_COMMIT@/$(GIT_COMMIT)/' $< > $@

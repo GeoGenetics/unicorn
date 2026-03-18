@@ -792,7 +792,7 @@ static int unicorn_taxstats(int argc, char **argv)
                               opts.minmani,
                               opts.minalnas,
                               opts.maxdust,
-                              TIDSTATS);
+                              TAXSTATS);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_tidstat_compute(u, stats, utax)) ) {
@@ -838,7 +838,8 @@ static int unicorn_taxstats(int argc, char **argv)
     unicorn_printstrq(opts.dumpacc2tax ,accq, utax);
     unicorn_strqdestroy(accq);
   }
-  ret = 0;
+ 	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
+	ret = 0;
   exit:
     if (ret) {
       fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
@@ -852,7 +853,8 @@ static int unicorn_taxstats(int argc, char **argv)
     if (opts.nodes)   free(opts.nodes);
     if (opts.dumpacc2tax) free(opts.dumpacc2tax);
     if (opts.filel)   free(opts.filel);
-    clock_gettime(CLOCK_MONOTONIC, &pstop);
+		if (opts.rank)		free(opts.rank);
+		clock_gettime(CLOCK_MONOTONIC, &pstop);
     ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
     fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",
                     __func__,

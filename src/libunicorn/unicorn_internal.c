@@ -103,6 +103,7 @@ static void taxmap_free(taxmap_t *map)
     refmap_free(v.refmap);
     if (v.readset)
       u64set_destroy(v.readset);
+		lint2int_destroy(v.camex);
   }
   taxmap_destroy(map);
 }

@@ -133,7 +133,9 @@ KHASHL_MAP_INIT(static,
                 uint64_t,
                 kh_hash_uint32,
                 kh_eq_generic)
-
+KHASHL_MAP_INIT(static, lint2int_t, lint2int,
+                uint64_t, uint32_t,
+                kh_hash_uint64, kh_eq_generic)
 
 /******************
  * unsigned 64bit int set
@@ -218,8 +220,11 @@ typedef struct taxstat_t {
   float        alnani_mode; // Mode ANI
   float        _MANI;      // See _M
   float        mdust;      // Mean dust score
- float        vdust;    // Variance dust score
- //Coverage
+  float        vdust;      // Variance dust score
+	float        duplicity;  // Fraction of unique kmers in the taxon, as a proxy for genome complexity
+	//uint32_t     *camex;
+	lint2int_t		 *camex;    // Count array for camex kmer counts, using a hash map to save memory
+	//Coverage
   uint64_t     covbases;    // number of covered bases
   float        covmean;     // mean cov
   float        meanoncov;   // Mean coverage of covered bases
@@ -351,50 +356,52 @@ typedef struct _covstats_t {
                  "n_gini\t"\
                  "tad80\n"
 #define TIDSTATSTR "#taxid\t"\
-          "name\t"\
-          "num_accessions\t"\
-          "total_length\t"\
+                   "name\t"\
+                   "num_accessions\t"\
+                   "total_length\t"\
                    "num_alns\t"\
-          "num_reads\t"\
-          "mean_readl\t"\
-          "stdev_readl\t"\
+                   "num_reads\t"\
+                   "mean_readl\t"\
+                   "stdev_readl\t"\
                    "median_readl\t"\
-          "mode_readl\t"\
-          "readl_min\t"\
-          "readl_max\t"\
+                   "mode_readl\t"\
+                   "readl_min\t"\
+                   "readl_max\t"\
                    "mean_alnnm\t"\
-          "mean_alnani\t"\
-          "stdev_alnani\t"\
+                   "mean_alnani\t"\
+                   "stdev_alnani\t"\
                    "num_covbases\t"\
-          "mean_cov\t"\
-          "breath_cov\t"\
-          "exp_breath\t"\
+                   "mean_cov\t"\
+                   "breath_cov\t"\
+                   "exp_breath\t"\
                    "breath_ratio\t"\
-          "mean_covcovered\t"\
-          "site_density\n"
+                   "mean_covcovered\t"\
+                   "site_density\t"\
+									 "duplicity\n"
 
 #define TIDFMTSTR "%u\t"\
-         "%s\t"\
-         "%u\t"\
-         "%"PRIu64"\t"\
-                  "%"PRIu64"\t"\
-         "%u\t"\
-         "%f\t"\
-         "%f\t"\
+                  "%s\t"\
                   "%u\t"\
-         "%u\t"\
-         "%u\t"\
-         "%u\t"\
-                  "%f\t"\
-         "%f\t"\
-         "%f\t"\
                   "%"PRIu64"\t"\
-         "%f\t"\
-         "%f\t"\
-         "%f\t"\
+                  "%"PRIu64"\t"\
+                  "%u\t"\
                   "%f\t"\
-         "%f\t"\
-         "%f\n"
+                  "%f\t"\
+                  "%u\t"\
+                  "%u\t"\
+                  "%u\t"\
+                  "%u\t"\
+                  "%f\t"\
+                  "%f\t"\
+                  "%f\t"\
+                  "%"PRIu64"\t"\
+                  "%f\t"\
+                  "%f\t"\
+                  "%f\t"\
+                  "%f\t"\
+                  "%f\t"\
+                  "%f\t"\
+									"%f\n"
 
 
 uint8_t _ASCHECK(bam1_t *b, int32_t ms);
@@ -518,7 +525,7 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);
 
 const char *utax_getname(utax_t *utax, uint32_t taxid);
 
-uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank);
+uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret);
 
 double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount);
 
