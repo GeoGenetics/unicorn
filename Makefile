@@ -13,7 +13,7 @@ else
   HTSLIB = -L$(HTSSRC)
 endif
 
-CFLAGS+=-Wall -Wextra -Wsign-compare -Wno-unused-function -pedantic -std=c11 -Isrc $(HTSINC)/include -fPIC #-fsanitize=address
+CFLAGS+=-Wall -Wextra -Wsign-compare -Wno-unused-function -pedantic -std=c11 -Isrc $(HTSINC)/include -Isrc/genesisC -fPIC
 ifeq ($(DEBUG),1)
 CFLAGS += -g
 else
@@ -35,7 +35,7 @@ GENESIS ?= ../genesis
 %.o:%.c src/version.h
 	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
 
-all: genesis klib libunicorn unicorn
+all: genesis genesisC klib libunicorn unicorn
 
 libunicorn: $(OBJ)
 	ar rcs $(@).a $(OBJ) $(KOBJ)
@@ -45,6 +45,9 @@ klib:
 	$(CC) $(KFLAGS) -c -o $(KOBJ) $(KSRC) -fPIC
 
 genesis:
+	$(MAKE) -C src/genesis
+
+genesisC: genesis
 	$(MAKE) -C src/genesisC GENESIS=$(GENESIS) genesisC
 
 unicorn: src/main_unicorn.c $(OBJ) src/version.h
