@@ -282,6 +282,7 @@ typedef struct unicorn_stats_t {
   float    minmani;    // Minimum mean ANI to consider
   int32_t  minalnas;  // Minimum alignment score to consider
   int32_t  maxdust;   // Maximum dust score to consider
+	uint8_t	 ksize;     // kmer size for complexity estimation
 } unicorn_stat_t;
 
 typedef struct _covstats_t {

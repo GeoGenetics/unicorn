@@ -132,8 +132,9 @@ typedef struct unicorn_stat_t *unicorn_stat_t;
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
                                   float    minmani,
-                                  int32_t  minas,
-																	int32_t  maxdust,
+                                  int32_t  minalnas,
+                                  int32_t  maxdust,
+                                  uint8_t  ksize,
                                   uint8_t  flg);
 
 void unicorn_stat_destroy(unicorn_stat_t *stats);

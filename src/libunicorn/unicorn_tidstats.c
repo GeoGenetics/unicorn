@@ -3,8 +3,6 @@
 
 #include "genesisC.h"
 
-#define KSIZE 7
-
 static void _taxmapstats(unicorn_stat_t *stats)
 {
   taxmap_t *taxmap = (taxmap_t *)stats->__map;
@@ -88,7 +86,8 @@ int unicorn_tidstat_compute(unicorn_t *u,
                             utax_t *utax)
 {
   int ret = -1, absent;
-	genesis_encoder_t enc = genesis_encoderinit(KSIZE);
+	uint8_t ksize = stats->ksize;
+	genesis_encoder_t enc = genesis_encoderinit(ksize);
 	chrset_t *missing = NULL;
   u64set_t *readset = NULL;
   if (!u || !stats || !utax) goto exit;;
@@ -163,8 +162,8 @@ int unicorn_tidstat_compute(unicorn_t *u,
 				seq[i] = seq_nt16_str[bam_seqi(bam_get_seq(b), i)];
 			}
 			uint8_t ret;
-			for (uint32_t i = 0; ( i < (qlen-KSIZE+1) ) && (i < 255-KSIZE); i++) {
-        uint64_t kmeridx = genesis_getcamexidx(enc, seq+i, KSIZE, &ret);
+			for (uint32_t i = 0; ( i < (qlen-ksize+1) ) && (i < 255-ksize); i++) {
+        uint64_t kmeridx = genesis_getcamexidx(enc, seq+i, ksize, &ret);
 				khint_t k = lint2int_put(taxstat.camex, kmeridx, &absent);
 				if (absent) {
 					kh_val(taxstat.camex, k) = 1;
