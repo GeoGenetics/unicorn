@@ -453,7 +453,7 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
 	if (!map) goto exit;
 	uint8_t low = kh_hash_str(acc) & ((1U<<map->bits) - 1);
 	chr2int_t *submap = map->maps[low];
-	if (!submap) return -1;
+	if (!submap) goto exit;
 	khint_t k = chr2int_get(submap, acc);
 	if (k == kh_end(submap)) goto exit; // Not found
 	*absent = 0; // Found
@@ -474,6 +474,7 @@ const char *utax_getname(utax_t *utax, uint32_t taxid)
 
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret)
 {
+	*ret = 1;
 	if (!utax || !rank) return -1;
 	uint2tup_t *nodemap = utax->nodes.map;
 	chr2int_t  *levels = utax->nodes.levelmap;
@@ -482,10 +483,7 @@ uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_
 	uint32_t trank_val = kh_val(levels, k);
 	//Get node info: parent and rank level
 	k  = uint2tup_get(nodemap, taxid);
-	if (k==kh_end(nodemap)) {
-		*ret = 1;
-		return 0;
-	}
+	if (k==kh_end(nodemap)) return 0;
 	uint32_t parent   = kh_val(nodemap, k).taxid;
 	uint32_t rank_val = kh_val(nodemap, k).rank_val;
 	uint32_t _taxid = taxid;
@@ -500,5 +498,6 @@ uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_
 		}
 		rank_val = kh_val(nodemap, k).rank_val;
 	}
+	*ret = 0;
 	return _taxid;
 }

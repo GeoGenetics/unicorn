@@ -117,10 +117,10 @@ int unicorn_tidstat_compute(unicorn_t *u,
     //If rank is set, get taxid for parent node at that rank
   	uint8_t ret;
 		if (rank) taxid = utax_getidatrank(utax, taxid, rank, &ret);
-		if (absent || !ret) {
+    if (absent || ret) {
       chrset_put(missing, u->hdr->target_name[tid], &absent);
       nabsent++;
-      continue;
+			continue;
     }
     kaln++;
 		uint32_t qlen = b->core.l_qseq;
@@ -135,6 +135,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
       taxstat.readl_min = 0xffffffffU;
       ktax = taxmap_put(taxmap, taxid, &absent);
       kh_val(taxmap, ktax) = taxstat;
+      kh_key(taxmap, ktax) = taxid;
     }
     taxstat = kh_val(taxmap, ktax);
     // update stats
