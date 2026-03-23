@@ -193,6 +193,7 @@ static void taxstats_usage(FILE *fp)
             "                               Providing a .khash file is much faster.\n"\
             "  -n <str> | --names <str>     Taxonomy names file.\n"\
             "  -d <str> | --nodes <str>     Taxonomy nodes file\n"\
+						"  -k <int>                     kmer size for duplicity computation [17]\n"\
             "  --outstat <str>              Output statistics file [/dev/stdout]\n"\
             "                               <str> is used as a prefix when --filelist is provided.\n"\
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
@@ -733,7 +734,7 @@ static int unicorn_taxstats(int argc, char **argv)
   opts.minalnas  = INT32_MIN;
   opts.maxdust   = 100;
   opts.rank  = strdup("species");
-  opts.ksize = 11;
+  opts.ksize = 17;
   unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
   strq_t accq = {0};
