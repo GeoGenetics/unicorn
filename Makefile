@@ -34,7 +34,7 @@ GENESIS ?= src/genesis
 # Use genesis submodule if present, otherwise fall back to conda installation
 GENESIS_SUBMODULE_PRESENT := $(shell [ -f $(GENESIS)/CMakeLists.txt ] && echo yes || echo no)
 ifeq ($(GENESIS_SUBMODULE_PRESENT),yes)
-  GENESIS_PREFIX_FOR_BUILD := $(GENESIS)
+  GENESIS_PREFIX_FOR_BUILD := $(CURDIR)/$(GENESIS)
   USE_CONDA_GENESIS := no
 else
   GENESIS_PREFIX_FOR_BUILD := $(CONDA_PREFIX)
