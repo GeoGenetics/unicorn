@@ -6,28 +6,28 @@ else
 endif
 
 ifeq ($(origin HTSSRC), undefined)
-  HTSINC = -I$(PREFIX)
-  HTSLIB = -L$(PREFIX)
+	HTS_PREFIX = $(PREFIX)
 else
-  HTSINC = -I$(HTSSRC)
-  HTSLIB = -L$(HTSSRC)
+	HTS_PREFIX = $(HTSSRC)
 endif
 
-CFLAGS+=-Wall -Wextra -Wsign-compare -Wno-unused-function -pedantic -std=c11 -Isrc $(HTSINC)/include -Isrc/genesisC -fPIC
+# Directories for htslib headers and libraries
+HTSINCDIR = $(HTS_PREFIX)/include
+HTSLIBDIR = $(HTS_PREFIX)/lib
+
+CFLAGS+=-Wall -Wextra -Wsign-compare -Wno-unused-function -pedantic -std=c11 -Isrc -I$(HTSINCDIR) -Isrc/genesisC -fPIC
 ifeq ($(DEBUG),1)
 CFLAGS += -g
 else
 CFLAGS += -O3
 endif
 
-
-
 KFLAGS=-Wall -Wextra -Wno-unused-function -pedantic -g3 #-fsanitize=address
 SRC=$(wildcard src/libunicorn/*.c)
 OBJ=$(SRC:.c=.o)
 KSRC=src/klib/kthread.c
 KOBJ=src/klib/klib.o
-LDFLAGS += $(HTSLIB)/lib
+LDFLAGS += -L$(HTSLIBDIR) -Wl,-rpath,$(HTSLIBDIR)
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
 GENESIS ?= src/genesis
 
