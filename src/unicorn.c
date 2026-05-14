@@ -39,7 +39,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "acc2tax",         ko_required_argument, 304 },
     { "outbam",          ko_required_argument, 305 },
     { "outstat",         ko_required_argument, 306 },
-    { "withtid",         ko_no_argument,       307 },
+    { "withtaxid",       ko_no_argument,       307 },
     { "minrefl",         ko_required_argument, 308 },
     { "minreads",        ko_required_argument, 309 },
     { "filelist",        ko_required_argument, 310 },
@@ -73,6 +73,7 @@ typedef kvec_t(char *)   strq_t;
 void unicorn_cmpstat_(const char *stat1, const char *stat2, uint32_t col1, uint32_t col2);
 
 static const char *ERRORS[16] = { 0,
+																	"Help message",
                                   "Missing argument(s)",
                                   "File error",
                                   "Failed writing accession map",
@@ -152,20 +153,23 @@ static void refstats_usage(FILE *fp)
     fprintf(fp, "Options:\n"\
             "  -b <str>   Input bam|sam [Required]\n"\
             "  -t <int>, --threads <int> Number of threads [4]\n"
-            "  -o <str> | --outbam  <str> Output BAM file with filtered alignments.\n"\
+            "  -o <str>, --outbam  <str> Output BAM file with filtered references\n"\
             "  --outstat <str> Output statistics file\n"\
-            "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
+            "  --[FILTER] <PARAM>  Apply reference filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      For example \"--minreads 100\" to filter out references with\n"\
             "      less than 100 reads.\n"\
             "      Available filters:\n"\
-            "       - minrefl  <int>  Minimum reference length to consider [0]\n"\
-            "       - minreads <int>  Minimum number of reads to consider  [1]\n"\
+            "       - minrefl  <int>  Minimum reference length to consider [1]\n"\
+            "       - minreads <int>  Minimum number of reads per reference  [1]\n"\
             "       - minalnas <int>  Minimum alignment score [-Inf]\n"\
             "       - maxdust  <int>  Maximum alignment dust score [100]\n"\
-            "  --withtid  Report taxid of reference sequence. Requires --acc2tax, --names and --nodes options.\n"\
+            "  --withtaxid  Report taxid of reference sequence. Requires --acc2tax, --names and --nodes options.\n"\
+						"               taxid is reported in custom XT:i:<taxid> tag and\n"\
+						"               XR:<taxid> tag in bam records and as column 2 in the output statistics file.\n"\
             "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
             "  --acc2tax <str> Accession to taxid mapping file or .khash file.\n"\
+						"  --rank <str>    Taxonomic rank for XR tag. [species]\n"\
             "  --verbose  Print libunicorn's messages.\n"\
             "  -h         print this help message\n");
 }
@@ -233,10 +237,9 @@ static void alnfilt_usage(FILE *fp)
 
 static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 {
-  int c, ret = 2;
+  int c, ret = 0;
   ketopt_t o = KETOPT_INIT;
   while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
-    ret = 1;
     switch(c) {
       case 'b':
         opts->ifile = strdup(o.arg);
@@ -272,8 +275,8 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         opts->ksize = strtoul(o.arg, NULL, 10);
         break;
       case 'h':
-        ret = -2;
-        goto exit;
+				ret = 1;
+				goto exit;
       case 300: //threads
         opts->threads = strtoul(o.arg, NULL, 10);
         break;
@@ -295,7 +298,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
       case 306: //outstat
         opts->outstat = strdup(o.arg);
         break;
-      case 307: //withtid
+      case 307: //withtaxid
         opts->withtid = 1;
         break;
       case 308: //min_length
@@ -424,8 +427,8 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         goto exit;
       }
   }
-  if (2==ret) goto exit;
-  ret = 0;
+	fprintf(stderr, "RET %u!!!\n", ret);
+  if (ret) goto exit;
   exit:
     return ret;
 }
@@ -472,10 +475,8 @@ static int unicorn_refstats(int argc, char **argv)
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
-  //Read command line options
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-  unicorn_printopts(&opts, stderr, REFSTATS);
-  //Check required options
+	unicorn_printopts(&opts, stderr, REFSTATS);
   if (!opts.ifile)  goto exit;
   if (opts.withtid) {
     if (!opts.acc2tax || !opts.names || !opts.nodes) {
@@ -551,11 +552,11 @@ static int unicorn_refstats(int argc, char **argv)
   fflush(stderr);
   unicorn_refstat_print(u, stats, ofp, utax);
   if (opts.outbam) {
-    fprintf(stderr, "[unicorn::%s] Filtering bamfile\n", __func__);
+    fprintf(stderr, "[unicorn::%s] Writing bamfile\n", __func__);
     fprintf(stderr, "\twriting to %s\n", opts.outbam);
     fflush(stderr);
     clock_gettime(CLOCK_MONOTONIC, &start);
-    if ( (ret = unicorn_refstats_filterbam(u, stats)) ) goto exit;
+    if ( (ret = unicorn_refstats_filterbam(u, stats, utax)) ) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &stop);
     ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
@@ -564,8 +565,9 @@ static int unicorn_refstats(int argc, char **argv)
   ret = 0;
   exit:
     if (ret) {
-      fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
-      refstats_usage(stderr);
+			refstats_usage(stderr);
+			if (1==ret) ret = 0;
+			else fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
     }
     if (opts.ifile)      free(opts.ifile);
     if (opts.statstr)    free(opts.statstr);

@@ -65,7 +65,7 @@ endif
 genesisC: genesis
 	$(MAKE) -C src/genesisC GENESIS_PREFIX=$(GENESIS_PREFIX_FOR_BUILD) genesisC
 
-unicorn: src/main_unicorn.c $(OBJ) src/version.h
+unicorn: src/unicorn.c $(OBJ) src/version.h
 	$(CC) -o $@ $< libunicorn.a src/genesisC/genesisC.o -Isrc $(CFLAGS) -fPIE $(LDFLAGS) -lhts -lz -lm -lpthread -lstdc++
 
 src/version.h: src/version.h.in

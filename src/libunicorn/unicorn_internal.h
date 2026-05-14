@@ -182,8 +182,9 @@ typedef struct refstat_t {
   float        REFNGINI;   // Normalized coverage Gini coefficient
   float        tad80;      // Truncated average depth at 80% of the coverage
   float        mdust;      // Mean dust score
- float        vdust;    // Variance dust score
- //Data arrays
+  float        vdust;      // Variance dust score
+  float        _MDUST;     // See _M
+	//Data arrays
   floatq_t     aANI;
   //uint32q_t    aRLEN;
   uint32_t     aRLEN[256]; //Count array of read lengths

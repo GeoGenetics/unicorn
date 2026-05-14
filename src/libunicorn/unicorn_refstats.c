@@ -175,9 +175,9 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     mean = refstat.REFALNANIE;
     delta = ani-mean;
     refstat.REFALNANIE += delta/naln;
-    refstat._MANI = delta * (ani - refstat.REFALNANIE);
-    refstat.REFALNANIV = naln ? (refstat._MANI / ( naln - 1 ) ) : 0.0f;
-    //Add alignment event, for coverage comp via sweep line algorith
+    refstat._MANI += delta * (ani - refstat.REFALNANIE);
+    refstat.REFALNANIV = naln > 1 ? refstat._MANI / (naln - 1) : 0.0f;
+		//Add alignment event, for coverage comp via sweep line algorith
     _urangeevent s = {b->core.pos,   1};
     _urangeevent e = {bam_endpos(b), 0};
     kv_push(_urangeevent, refstat.aEVENT, s);
@@ -190,8 +190,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
     mean = refstat.mdust;
     delta = dusts - mean;
     refstat.mdust += delta/naln;
-    delta = delta * (dusts - refstat.mdust);
-    refstat.vdust = naln ? (delta / (naln - 1)) : 0.0f;
+    refstat._MDUST += delta * (dusts - refstat.mdust);
+    refstat.vdust = naln > 1 ? refstat._MDUST / (naln - 1) : 0.0f;
     //Don't loose your stats value
     kh_val(refmap, k) = refstat;
   }
@@ -290,8 +290,37 @@ static sam_hdr_t *_stats2samhdr(unicorn_stat_t *stats, sam_hdr_t *hdr)
     return ohdr;
 }
 
+static uint8_t _append_refstats_tax_tags(bam1_t *b,
+                                         const char *accession,
+                                         utax_t *utax)
+{
+  if (!b || !accession || !utax) return 0;
+  int absent;
+  uint8_t rret = 0;
+  uint32_t taxid = utax_gettaxid(utax, accession, &absent);
+  uint32_t rankid = 0;
+  if (absent) {
+    taxid = 0;
+  } else if (utax->rank) {
+    rankid = utax_getidatrank(utax, taxid, utax->rank, &rret);
+    if (rret) rankid = 0;
+  } else {
+    rankid = taxid;
+  }
+  uint8_t *tag = bam_aux_get(b, "XT");
+  if (tag) bam_aux_del(b, tag);
+  tag = bam_aux_get(b, "XR");
+  if (tag) bam_aux_del(b, tag);
+  int32_t xt = taxid;
+  int32_t xr = rankid;
+  if (bam_aux_append(b, "XT", 'i', sizeof(int32_t), (uint8_t *)&xt) < 0) return 1;
+  if (bam_aux_append(b, "XR", 'i', sizeof(int32_t), (uint8_t *)&xr) < 0) return 1;
+  return 0;
+}
+
 uint8_t unicorn_refstats_filterbam(unicorn_t *u,
-                                   unicorn_stat_t *stats)
+                                   unicorn_stat_t *stats,
+                                   utax_t *utax)
 {
   uint8_t ret = 1;
   if (!u || !stats) return ret;
@@ -322,6 +351,10 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
     int32_t tid = b->core.tid;
     khint_t k = refmap_get(refmap, tid);
     if (k == kh_end(refmap)) continue; //Reference not in map
+    if (utax) {
+      const char *accession = _hdr->target_name[tid];
+      if (_append_refstats_tax_tags(b, accession, utax)) goto exit;
+    }
     int32_t ntid = kh_val(refmap, k)._ntid; //Get new tid
     b->core.tid = ntid; //Set new tid
     //Write alignment to output file

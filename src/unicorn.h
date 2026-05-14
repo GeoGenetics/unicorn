@@ -162,10 +162,6 @@ uint64_t unicorn_stats_getfrefn( const unicorn_stat_t *stats);
 //Check if a filter has been run through a unicorn object
 uint8_t unicorn_stats_isfiltered(const unicorn_stat_t *stats);
 
-/* B|Sam manipulation routines */
-uint8_t unicorn_refstats_filterbam(unicorn_t *u,
-                                   unicorn_stat_t *stats);
-
 /****************************************************
 unicorn's taxonomy routines
 
@@ -178,6 +174,11 @@ This is an opaque structure.
 Members and methods are accessed via the unicron_* functions
 */
 typedef struct utax_t *utax_t;
+
+/* B|Sam manipulation routines */
+uint8_t unicorn_refstats_filterbam(unicorn_t *u,
+                                   unicorn_stat_t *stats,
+                                   utax_t *utax);
 
 /**
     @brief Load taxonomic data.
