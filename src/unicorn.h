@@ -247,6 +247,14 @@ void unicorn_fillaccq(unicorn_t *u, strq_t *accq);
 void unicorn_printstrq(const char *filename, strq_t accq, utax_t *utax);
 void unicorn_strqdestroy(strq_t accq);
 
+/**
+ * @brief Get the number of reference sequences with missing taxonomic IDs.
+ * @param u     - The unicorn_t object.
+ * @param utax  - The utax_t object.
+ * @returns    - The number of reference sequences with missing taxonomic IDs.
+ */
+uint32_t unicorn_refstat_missing_taxids(const unicorn_t *u,
+                                        utax_t *utax);
 
 /****************************************************
 unicorn's reassign routines

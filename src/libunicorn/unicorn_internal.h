@@ -515,12 +515,13 @@ typedef struct nodes_t {
 } nodes_t;
 
 typedef struct utax_t {
-  uint32_t numnodes; // Number of nodes in the taxonomy
-  uint64_t numaccs;  // Number of accessions in the taxonomy
-  nodes_t  nodes; // Map of taxid to parent taxid
-  int2chr_t  *namemap; // Map of taxid to names
+  uint32_t numnodes;      // Number of nodes in the taxonomy
+  uint64_t numaccs;       // Number of accessions in the taxonomy
+  nodes_t  nodes;         // Map of taxid to parent taxid
+  int2chr_t  *namemap;    // Map of taxid to names
   emap_chr2int_t *accmap; // Map of accession to taxid
   const char *rank;
+	uint32_t nmissing;     // Number of references with missing taxids, for reporting purposes
 } utax_t;
 
 uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);

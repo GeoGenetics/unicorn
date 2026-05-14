@@ -477,3 +477,25 @@ void unicorn_refstat_print(const unicorn_t *u,
     _print_notax(fp, hdr, refmap);
     return;
 }
+
+static void _count_missing_ref_taxids(sam_hdr_t *hdr,
+                                      utax_t *utax)
+{
+  if (!hdr || !utax) return;
+  uint32_t missing = 0;
+	for (int32_t i = 0; i < sam_hdr_nref(hdr); i++) {
+		const char *accession = hdr->target_name[i];
+		int absent;
+		utax_gettaxid(utax, accession, &absent);
+		if (absent) missing++;
+	}
+  utax->nmissing = missing;
+}
+
+uint32_t unicorn_refstat_missing_taxids(const unicorn_t *u,
+                                        utax_t *utax)
+{
+  if (!u || !utax ) return 0;
+  _count_missing_ref_taxids(u->hdr, utax);
+	return utax->nmissing;
+}

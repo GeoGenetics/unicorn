@@ -490,7 +490,6 @@ static int unicorn_refstats(int argc, char **argv)
     if (!ofp) goto exit;
   }
   else ofp = stdout;
-  //Load bam data via unicorn API
   fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__,
                                                               opts.ifile);
   u = unicorn_init(opts.threads,
@@ -535,7 +534,8 @@ static int unicorn_refstats(int argc, char **argv)
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   //Load taxonomy if needed
-  if (opts.withtid) {
+	uint32_t missingref = 0;
+	if (opts.withtid) {
     fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
     fflush(stderr);
     int ret = 0;
@@ -548,6 +548,7 @@ static int unicorn_refstats(int argc, char **argv)
       fprintf(stderr, "[unicorn::%s] Error: Failed to load taxonomy data\n", __func__);
       goto exit;
     }
+		missingref = unicorn_refstat_missing_taxids(u, utax);
   }
   fflush(stderr);
   unicorn_refstat_print(u, stats, ofp, utax);
@@ -561,6 +562,16 @@ static int unicorn_refstats(int argc, char **argv)
     ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   }
+	if (opts.withtid && utax) {
+  	uint32_t total = unicorn_getnref(u);
+		fprintf(stderr,
+            "[unicorn::%s] Warning: %u of %u references (%f) "
+            "were not found in the accession-to-taxid map.\n",
+            __func__,
+            missingref,
+            total,
+            total ? (float)missingref / total : 0.0f);
+	}
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
   ret = 0;
   exit:
