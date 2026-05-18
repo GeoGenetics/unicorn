@@ -427,7 +427,6 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         goto exit;
       }
   }
-	fprintf(stderr, "RET %u!!!\n", ret);
   if (ret) goto exit;
   exit:
     return ret;
@@ -575,6 +574,7 @@ static int unicorn_refstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
   ret = 0;
   exit:
+		fprintf(stderr, "DELETING STUFF\n");
     if (ret) {
 			refstats_usage(stderr);
 			if (1==ret) ret = 0;

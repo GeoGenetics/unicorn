@@ -130,9 +130,9 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
-    if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
+    if ( !_ASCHECK(b, stats->minalnas) ) continue;
     int32_t dusts = (int)(0.5 + dust(bam_get_seq(b), b->core.l_qseq, 64, NULL));
-    if ( dusts > stats->maxdust ) continue; //Check for dust score
+    if ( dusts > stats->maxdust ) continue;
     naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;

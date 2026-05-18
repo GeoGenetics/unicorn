@@ -194,8 +194,8 @@ typedef struct refstat_t {
 } refstat_t;
 
 KHASHL_MAP_INIT(static,                        //Scope
-                refmap_t, refmap,           //type and prefix
-                int32_t, refstat_t,           //key and value types
+                refmap_t, refmap,              //type and prefix
+                int32_t, refstat_t,            //key and value types
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions
 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
 
