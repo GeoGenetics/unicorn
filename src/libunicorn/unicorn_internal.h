@@ -435,8 +435,6 @@ float _ANINM(bam1_t *b, uint32_t *NM);
 float _tad80(int32int64map_t *hist);
 double _getentropy(const int32int64map_t *hist, uint64_t t, float *_ne);
 double _getgini(int32int64map_t *hist,
-                uint64_t t,
-                float m,
                 float *_ng);
 
 uint64_t cov_hist(ueventq_t events,

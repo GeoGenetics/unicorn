@@ -57,8 +57,6 @@ static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
   return _val;
 }
 
-
-
 static void _refmapstats(unicorn_stat_t *stats)
 {
   //TODO parallelize

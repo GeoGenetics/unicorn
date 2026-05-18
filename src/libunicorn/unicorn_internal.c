@@ -292,28 +292,40 @@ double _getentropy(const int32int64map_t *hist, uint64_t t, float *_ne)
 }
 
 double _getgini(int32int64map_t *hist,
-                uint64_t t,
-                float m,
                 float *_ng)
 {
-  if (!t || !m) {
+  if (!hist || !kh_size(hist)) {
     *_ng = 0.0f;
     return 0.0f;
   }
-  uint64_t wsum = 0;
-  khint_t ki, kj;
+  uint64_t n = 0;
+  long double wmean = 0.0L;
+  khint_t k, ki, kj;
+  kh_foreach(hist, k) {
+    uint32_t d = kh_key(hist, k);
+    uint64_t l = kh_val(hist, k);
+    n += l;
+    wmean += (long double)d * l;
+  }
+  if (!n || wmean == 0.0L) {
+    *_ng = 0.0f;
+    return 0.0f;
+  }
+  long double mean = wmean / n;
+  long double wsum = 0.0L;
   kh_foreach(hist, ki) {
     uint32_t di = kh_key(hist, ki);
     uint64_t li = kh_val(hist, ki);
     kh_foreach(hist, kj) {
       uint32_t dj = kh_key(hist, kj);
       uint64_t lj = kh_val(hist, kj);
-      wsum += li * lj * abs((int)di - (int)dj);
+      long double diff = di > dj ? (long double)(di - dj) : (long double)(dj - di);
+      wsum += (long double)li * lj * diff;
     }
   }
-  float gini = (float)(wsum / (2.0 * t * t * m));
-  //Max gini is (t-1)/t meaning maximum inequality
-  float mgini = ((double)t-1)/t;
+  float gini = (float)(wsum / (2.0L * n * n * mean));
+  // Max Gini for n observations is (n - 1) / n.
+  float mgini = ((double)n-1)/n;
   if (mgini > 0.0f)
     *_ng = gini / mgini;
   else
@@ -539,10 +551,7 @@ uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   float _normentropy, _normgini;
   covstats->entropy  = _getentropy(covhist, n_bins, &_normentropy);
 	covstats->nentropy = _normentropy;
-  covstats->gini     = _getgini(covhist,
-                                n_bins,
-                                covstats->meanoncov,
-                                &_normgini);
+  covstats->gini     = _getgini(covhist, &_normgini);
   covstats->ngini    = _normgini;
   covstats->tad80    = _tad80(covhist);
 	int32int64map_destroy(covhist);
