@@ -467,7 +467,8 @@ static int unicorn_refstats(int argc, char **argv)
   opts.minrefl   = 0;
   opts.minalnas  = INT32_MIN;
   opts.maxdust   = 100;
-  unicorn_t *u   = NULL;
+ 	opts.rank  = strdup("genus");
+	unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
   utax_t *utax = NULL;
   FILE *ofp = NULL;
