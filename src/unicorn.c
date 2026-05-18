@@ -575,7 +575,6 @@ static int unicorn_refstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
   ret = 0;
   exit:
-		fprintf(stderr, "DELETING STUFF 1\n");
     if (ret) {
 			refstats_usage(stderr);
 			if (1==ret) ret = 0;
