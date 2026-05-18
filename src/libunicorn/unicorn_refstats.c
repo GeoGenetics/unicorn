@@ -307,8 +307,6 @@ static uint8_t _append_refstats_tax_tags(bam1_t *b,
   } else {
     rankid = taxid;
   }
-	fprintf(stderr, "%s --- %s\n", __func__, accession);
-	fprintf(stderr, "rid: %u\ttid: %u\n", rankid, taxid);
 	uint8_t *tag = bam_aux_get(b, "XT");
   if (tag) bam_aux_del(b, tag);
   tag = bam_aux_get(b, "XR");
