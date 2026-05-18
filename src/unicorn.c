@@ -575,7 +575,7 @@ static int unicorn_refstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
   ret = 0;
   exit:
-		fprintf(stderr, "DELETING STUFF\n");
+		fprintf(stderr, "DELETING STUFF 1\n");
     if (ret) {
 			refstats_usage(stderr);
 			if (1==ret) ret = 0;
@@ -585,11 +585,11 @@ static int unicorn_refstats(int argc, char **argv)
     if (opts.statstr)    free(opts.statstr);
     if (opts.outbam)     free(opts.outbam);
     if (opts.outstat)    free(opts.outstat);
-    if (u)     unicorn_destroy(u);
-    if (stats) unicorn_stat_destroy(stats);
+		if (u)     unicorn_destroy(u);
+		if (stats) unicorn_stat_destroy(stats);
     if (ofp)   fclose(ofp);
     if (utax)  unicorn_closetaxonomy(utax);
-    return ret;
+		return ret;
 }
 
 static int unicorn_bamstats(int argc, char **argv)

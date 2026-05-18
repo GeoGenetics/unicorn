@@ -331,24 +331,24 @@ typedef struct _covstats_t {
 #define STATSTR2 "Id\t"\
                  "taxID\t"\
                  "Length\t"\
-                 "n_alns\t"\
-                 "n_reads\t"\
-                 "m_readl\t"\
-                 "std_readl\t"\
-                 "md_readl\t"\
-                 "mo_readl\t"\
+                 "num_alns\t"\
+                 "num_reads\t"\
+                 "mean_readl\t"\
+                 "stdev_readl\t"\
+                 "median_readl\t"\
+                 "mode_readl\t"\
                  "readl_min\t"\
                  "readl_max\t"\
-                 "m_alnnm\t"\
-                 "m_alnani\t"\
-                 "std_alnani\t"\
-                 "md_alnani\t"\
-                 "n_covbases\t"\
-                 "m_cov\t"\
+                 "mean_alnnm\t"\
+                 "mean_alnani\t"\
+                 "stdev_alnani\t"\
+                 "median_alnani\t"\
+                 "num_covbases\t"\
+                 "mean_cov\t"\
                  "breath_cov\t"\
                  "exp_breath\t"\
                  "breath_ratio\t"\
-                 "m_covcovered\t"\
+                 "mean_covcovered\t"\
                  "std_covcovered\t"\
                  "evenness_cov\t"\
                  "site_density\t"\

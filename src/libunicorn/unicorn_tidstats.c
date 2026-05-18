@@ -244,7 +244,6 @@ void unicorn_taxstat_print(const unicorn_t *u,
 {
   if (!stats || !fp || !u || !utax) return;
   if (!stats->fc) return;
-  //sam_hdr_t *hdr = u->hdr;
   fprintf(fp, TIDSTATSTR);
   khint_t k;
   taxmap_t *taxmap = (taxmap_t *)stats->__map;
