@@ -378,56 +378,7 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
     float breath = v.REFCOVB/(double)v.REFLEN;
     float expbreath =  1.0f - expf(-v.REFMCOV);
     fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
-                accession,                                  //0
-                v.REFLEN,                                   //1
-                v.REFNALNS,                                 //2
-                kh_size(v.READSET),                         //3
-                v.REFREADE,                                 //4
-                sqrtf(v.REFREADV),                          //5
-                v.REFREADD,                                 //6
-                v.REFREADO,                                 //7
-                v.REFREADMIN,                               //8
-                v.REFREADMAX,                               //9
-                v.REFALNNM,                                 //10
-                v.REFALNANIE,                               //11
-                sqrtf(v.REFALNANIV),                        //12
-                v.REFALNANID,                               //13
-                v.REFCOVB,                                  //14
-                v.REFMCOV,                                  //15
-                breath,                                     //16
-                expbreath,                                  //17
-                breath/expbreath,                           //18
-                v.REFMONCOV,                                //19
-                sqrtf(v.REFVONCOV),                         //20
-                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //21
-                1000.0f * breath,                           //22
-                v.REFENTROPY,                               //23
-                v.REFGINI,                                  //24
-                v.REFNENTROP,                               //25
-                v.REFNGINI,                                 //26
-                v.tad80,                                    //27
-                v.mdust,                                    //28
-                sqrtf(v.vdust));                            //29
-    }
-}
-
-static void _print_withtax(FILE *fp,
-                           sam_hdr_t *hdr,
-                           refmap_t *refmap,
-                           utax_t *utax)
-{
-  int absent;
-  khint_t k;
-  kh_foreach(refmap, k) {
-    refstat_t v = kh_val(refmap, k);
-    char *accession = hdr->target_name[kh_key(refmap, k)];
-    uint32_t taxid = utax_gettaxid(utax, accession, &absent);
-    if (absent) taxid = 0;
-    float breath = v.REFCOVB/(double)v.REFLEN;
-    float expbreath =  1.0f - expf(-v.REFMCOV);
-    fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
-                accession,                                  //0
-                taxid,                                      //1
+                accession,                                  //1
                 v.REFLEN,                                   //2
                 v.REFNALNS,                                 //3
                 kh_size(v.READSET),                         //4
@@ -454,7 +405,58 @@ static void _print_withtax(FILE *fp,
                 v.REFGINI,                                  //25
                 v.REFNENTROP,                               //26
                 v.REFNGINI,                                 //27
-                v.tad80                                     //28
+                v.tad80,                                    //28
+                v.mdust,                                    //29
+                sqrtf(v.vdust));                            //30
+    }
+}
+
+static void _print_withtax(FILE *fp,
+                           sam_hdr_t *hdr,
+                           refmap_t *refmap,
+                           utax_t *utax)
+{
+  int absent;
+  khint_t k;
+  kh_foreach(refmap, k) {
+    refstat_t v = kh_val(refmap, k);
+    char *accession = hdr->target_name[kh_key(refmap, k)];
+    uint32_t taxid = utax_gettaxid(utax, accession, &absent);
+    if (absent) taxid = 0;
+    float breath = v.REFCOVB/(double)v.REFLEN;
+    float expbreath =  1.0f - expf(-v.REFMCOV);
+    fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+                accession,                                  //1
+                taxid,                                      //2
+                v.REFLEN,                                   //3
+                v.REFNALNS,                                 //4
+                kh_size(v.READSET),                         //5
+                v.REFREADE,                                 //6
+                sqrtf(v.REFREADV),                          //7
+                v.REFREADD,                                 //8
+                v.REFREADO,                                 //9
+                v.REFREADMIN,                               //10
+                v.REFREADMAX,                               //11
+                v.REFALNNM,                                 //12
+                v.REFALNANIE,                               //13
+                sqrtf(v.REFALNANIV),                        //14
+                v.REFALNANID,                               //15
+                v.REFCOVB,                                  //16
+                v.REFMCOV,                                  //17
+                breath,                                     //18
+                expbreath,                                  //19
+                breath/expbreath,                           //20
+                v.REFMONCOV,                                //21
+                sqrtf(v.REFVONCOV),                         //22
+                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //23
+                1000.0f * breath,                           //24
+                v.REFENTROPY,                               //25
+                v.REFGINI,                                  //26
+                v.REFNENTROP,                               //27
+                v.REFNGINI,                                 //28
+                v.tad80,                                    //29
+                v.mdust,                                    //30
+                sqrtf(v.vdust)                              //31
            );
     }
 }
@@ -469,11 +471,11 @@ void unicorn_refstat_print(const unicorn_t *u,
     refmap_t *refmap = (refmap_t *)stats->__map;
     sam_hdr_t *hdr = u->hdr;
     if (utax) {
-      fprintf(fp, STATSTR2);
+      fprintf(fp, REFSTATSTR2);
       _print_withtax(fp, hdr, refmap, utax);
       return;
     }
-    fprintf(fp, STATSTR);
+    fprintf(fp, REFSTATSTR);
     _print_notax(fp, hdr, refmap);
     return;
 }
