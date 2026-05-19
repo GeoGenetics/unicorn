@@ -184,6 +184,8 @@ typedef struct refstat_t {
   float        mdust;      // Mean dust score
   float        vdust;      // Variance dust score
   float        _MDUST;     // See _M
+  float        duplicity;  // Fraction of unique kmers in the reference
+  lint2int_t   *camex;     // Count array for camex kmer counts
 	//Data arrays
   floatq_t     aANI;
   //uint32q_t    aRLEN;
@@ -222,6 +224,7 @@ typedef struct taxstat_t {
   float        _MANI;      // See _M
   float        mdust;      // Mean dust score
   float        vdust;      // Variance dust score
+  float        _MDUST;     // See _M
 	float        duplicity;  // Fraction of unique kmers in the taxon, as a proxy for genome complexity
 	//uint32_t     *camex;
 	lint2int_t		 *camex;    // Count array for camex kmer counts, using a hash map to save memory
@@ -321,13 +324,14 @@ typedef struct _covstats_t {
                 "21:stdev_covcovered\t"\
                 "22:evenness_cov\t"\
                 "23:site_density\t"\
-                "24:entropy\t"\
-                "25:gini\t"\
-                "26:norm_entropy\t"\
-                "27:norm_gini\t"\
-                "28:tad80\t"\
-        				"29:mdust\t"\
-        				"30:stdev_dust\n"
+                "24:duplicity\t"\
+                "25:entropy\t"\
+                "26:gini\t"\
+                "27:norm_entropy\t"\
+                "28:norm_gini\t"\
+                "29:tad80\t"\
+                "30:mdust\t"\
+                "31:stdev_dust\n"
 #define REFSTATSTR2 "#1:Id\t"\
                  "2:taxID\t"\
                  "3:Length\t"\
@@ -352,36 +356,42 @@ typedef struct _covstats_t {
                  "22:stdev_covcovered\t"\
                  "23:evenness_cov\t"\
                  "24:site_density\t"\
-                 "25:entropy\t"\
-                 "26:gini\t"\
-                 "27:norm_entropy\t"\
-                 "28:norm_gini\t"\
-                 "29:tad80\t"\
-								 "30:mdust\t"\
-								 "31:stdev_dust\n"
-#define TIDSTATSTR "#taxid\t"\
-                   "name\t"\
-                   "num_accessions\t"\
-                   "total_length\t"\
-                   "num_alns\t"\
-                   "num_reads\t"\
-                   "mean_readl\t"\
-                   "stdev_readl\t"\
-                   "median_readl\t"\
-                   "mode_readl\t"\
-                   "readl_min\t"\
-                   "readl_max\t"\
-                   "mean_alnnm\t"\
-                   "mean_alnani\t"\
-                   "stdev_alnani\t"\
-                   "num_covbases\t"\
-                   "mean_cov\t"\
-                   "breath_cov\t"\
-                   "exp_breath\t"\
-                   "breath_ratio\t"\
-                   "mean_covcovered\t"\
-                   "site_density\t"\
-									 "duplicity\n"
+                 "25:duplicity\t"\
+                 "26:entropy\t"\
+                 "27:gini\t"\
+                 "28:norm_entropy\t"\
+                 "29:norm_gini\t"\
+                 "30:tad80\t"\
+								 "31:mdust\t"\
+								 "32:stdev_dust\n"
+#define TIDSTATSTR "#1:taxid\t"\
+                   "2:name\t"\
+                   "3:num_accessions\t"\
+                   "4:total_length\t"\
+                   "5:num_alns\t"\
+                   "6:num_reads\t"\
+                   "7:mean_readl\t"\
+                   "8:stdev_readl\t"\
+                   "9:median_readl\t"\
+                   "10:mode_readl\t"\
+                   "11:readl_min\t"\
+                   "12:readl_max\t"\
+                   "13:mean_alnnm\t"\
+                   "14:mean_alnani\t"\
+                   "15:stdev_alnani\t"\
+                   "16:median_alnani\t"\
+                   "17:num_covbases\t"\
+                   "18:mean_cov\t"\
+                   "19:breath_cov\t"\
+                   "20:exp_breath\t"\
+                   "21:breath_ratio\t"\
+                   "22:mean_covcovered\t"\
+                   "23:stdev_covcovered\t"\
+                   "24:evenness_cov\t"\
+                   "25:site_density\t"\
+                   "26:duplicity\t"\
+                   "27:mdust\t"\
+                   "28:stdev_dust\n"
 
 #define TIDFMTSTR "%u\t"\
                   "%s\t"\
@@ -398,6 +408,7 @@ typedef struct _covstats_t {
                   "%f\t"\
                   "%f\t"\
                   "%f\t"\
+                  "%f\t"\
                   "%"PRIu64"\t"\
                   "%f\t"\
                   "%f\t"\
@@ -405,7 +416,11 @@ typedef struct _covstats_t {
                   "%f\t"\
                   "%f\t"\
                   "%f\t"\
-									"%f\n"
+                  "%f\t"\
+                  "%f\t"\
+                  "%f\t"\
+                  "%f\t"\
+                  "%f\n"
 
 
 uint8_t _ASCHECK(bam1_t *b, int32_t ms);

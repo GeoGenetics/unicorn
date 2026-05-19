@@ -1,6 +1,8 @@
 #define _XOPEN_SOURCE 700
 #include "unicorn_internal.h"
 
+#include "genesisC.h"
+
 // ksort
 KSORT_INIT(_sfloat, float, ks_lt_generic)
 
@@ -57,6 +59,31 @@ static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
   return _val;
 }
 
+static void _camex_add_read(lint2int_t *camex,
+                            genesis_encoder_t enc,
+                            bam1_t *b,
+                            uint8_t ksize)
+{
+  if (!camex || !enc || !b || !ksize) return;
+  uint32_t qlen = b->core.l_qseq;
+  uint32_t slen = qlen < 255 ? qlen : 255;
+  if (slen < ksize) return;
+  char seq[256] = {0};
+  uint8_t *s = bam_get_seq(b);
+  for (uint32_t i = 0; i < slen; i++)
+    seq[i] = seq_nt16_str[bam_seqi(s, i)];
+  for (uint32_t i = 0; i <= slen - ksize; i++) {
+    int absent;
+    uint8_t ret = 0;
+    uint64_t kmeridx = genesis_getcamexidx(enc, seq+i, ksize, &ret);
+    khint_t k = lint2int_put(camex, kmeridx, &absent);
+    if (absent)
+      kh_val(camex, k) = 1;
+    else
+      kh_val(camex, k)++;
+  }
+}
+
 static void _refmapstats(unicorn_stat_t *stats)
 {
   //TODO parallelize
@@ -75,6 +102,7 @@ static void _refmapstats(unicorn_stat_t *stats)
         u64set_destroy(refstat.READSET);
         kv_destroy(refstat.aANI);
         kv_destroy(refstat.aEVENT);
+        if (refstat.camex) lint2int_destroy(refstat.camex);
         kv_push(int32_t, rmq, tid); //tid is added to a removal queue
         continue;
     }
@@ -86,6 +114,16 @@ static void _refmapstats(unicorn_stat_t *stats)
     //Sort arrays
     ks_introsort(_sfloat,  aANI.n,  aANI.a);
     kh_val(refmap, k).REFALNANID = _fMEDIAN(aANI.a, aANI.n);
+    uint64_t nkmers = 0;
+    if (refstat.camex) {
+      khint_t kc;
+      kh_foreach(refstat.camex, kc) {
+        nkmers += kh_val(refstat.camex, kc);
+      }
+    }
+    kh_val(refmap, k).duplicity = nkmers ?
+                                  (float)kh_size(refstat.camex)/(float)nkmers :
+                                  0.0f;
     //read length median and mode are computed from a count array
     kh_val(refmap, k).REFREADD = _udCAMEDIAN(aRLEN, 256, _n);
     kh_val(refmap, k).REFREADO = _udCAMODE(aRLEN, 256);
@@ -124,6 +162,8 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
   bam1_t *b = bam_init1();
   uint64_t naln = 0;
   refmap_t *refmap = stats->__map;
+  uint8_t ksize = stats->ksize ? stats->ksize : 17;
+  genesis_encoder_t enc = genesis_encoderinit(ksize);
   //Loop over alignments //TODO refector //parallelize
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     if (_unmapped(b)) continue;
@@ -141,6 +181,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
       refstat.READSET = u64set_init(); //Unique queryIDs
       kv_init(refstat.aANI);
       kv_init(refstat.aEVENT);
+      refstat.camex = lint2int_init();
       refstat.REFLEN = u->hdr->target_len[tid];
       refstat.REFREADMIN = 0xffffffffU;
       k = refmap_put(refmap, tid, &absent);
@@ -165,6 +206,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
       refstat.REFREADV = n - 1 ? (refstat._M / (n-1)) : 0.0f; //Running variance
       refstat.REFREADMIN = qlen<refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
       refstat.REFREADMAX = qlen>refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
+      _camex_add_read(refstat.camex, enc, b, ksize);
     }
     //Alignment ANI
     uint32_t NM;
@@ -199,6 +241,7 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats)
   if (naln)
     _refmapstats(stats);
   bam_destroy1(b);
+  genesis_encoderfree(enc);
   stats->fc = 1;
   ret = 0;
   exit:
@@ -375,7 +418,7 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
     char *accession = hdr->target_name[kh_key(refmap, k)];
     float breath = v.REFCOVB/(double)v.REFLEN;
     float expbreath =  1.0f - expf(-v.REFMCOV);
-    fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+    fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                 accession,                                  //1
                 v.REFLEN,                                   //2
                 v.REFNALNS,                                 //3
@@ -399,13 +442,14 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
                 sqrtf(v.REFVONCOV),                         //21
                 sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
                 1000.0f * breath,                           //23
-                v.REFENTROPY,                               //24
-                v.REFGINI,                                  //25
-                v.REFNENTROP,                               //26
-                v.REFNGINI,                                 //27
-                v.tad80,                                    //28
-                v.mdust,                                    //29
-                sqrtf(v.vdust));                            //30
+                v.duplicity,                                //24
+                v.REFENTROPY,                               //25
+                v.REFGINI,                                  //26
+                v.REFNENTROP,                               //27
+                v.REFNGINI,                                 //28
+                v.tad80,                                    //29
+                v.mdust,                                    //30
+                sqrtf(v.vdust));                            //31
     }
 }
 
@@ -423,7 +467,7 @@ static void _print_withtax(FILE *fp,
     if (absent) taxid = 0;
     float breath = v.REFCOVB/(double)v.REFLEN;
     float expbreath =  1.0f - expf(-v.REFMCOV);
-    fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+    fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                 accession,                                  //1
                 taxid,                                      //2
                 v.REFLEN,                                   //3
@@ -448,13 +492,14 @@ static void _print_withtax(FILE *fp,
                 sqrtf(v.REFVONCOV),                         //22
                 sqrtf(v.REFVONCOV)/v.REFMONCOV,             //23
                 1000.0f * breath,                           //24
-                v.REFENTROPY,                               //25
-                v.REFGINI,                                  //26
-                v.REFNENTROP,                               //27
-                v.REFNGINI,                                 //28
-                v.tad80,                                    //29
-                v.mdust,                                    //30
-                sqrtf(v.vdust)                              //31
+                v.duplicity,                                //25
+                v.REFENTROPY,                               //26
+                v.REFGINI,                                  //27
+                v.REFNENTROP,                               //28
+                v.REFNGINI,                                 //29
+                v.tad80,                                    //30
+                v.mdust,                                    //31
+                sqrtf(v.vdust)                              //32
            );
     }
 }

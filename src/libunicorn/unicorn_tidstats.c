@@ -3,6 +3,15 @@
 
 #include "genesisC.h"
 
+KSORT_INIT(_tid_sfloat, float, ks_lt_generic)
+
+static inline float _fMEDIAN(float *v, uint32_t n)
+{
+  if ( n%2 )
+    return v[n/2];
+  return (v[n/2 - 1] + v[n/2]) / 2.0;
+}
+
 static void _taxmapstats(unicorn_stat_t *stats)
 {
   taxmap_t *taxmap = (taxmap_t *)stats->__map;
@@ -27,6 +36,7 @@ static void _taxmapstats(unicorn_stat_t *stats)
           (taxstat.alnani_mean < stats->minmani) ) { //filter out
         u64set_destroy(taxstat.readset);
         refmap_destroy(taxstat.refmap);
+        kv_destroy(taxstat.a_ani);
         kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
         continue;
     }
@@ -48,21 +58,35 @@ static void _taxmapstats(unicorn_stat_t *stats)
     uint32_t *v_rlen     = taxstat.v_rlen;
     taxstat.readl_median = _udCAMEDIAN(v_rlen, 256, kh_size(taxstat.readset));
     taxstat.readl_mode   = _udCAMODE(v_rlen, 256);
+    if (taxstat.a_ani.n) {
+      ks_introsort(_tid_sfloat, taxstat.a_ani.n, taxstat.a_ani.a);
+      taxstat.alnani_median = _fMEDIAN(taxstat.a_ani.a, taxstat.a_ani.n);
+    }
+    kv_destroy(taxstat.a_ani);
+    taxstat.a_ani.n = taxstat.a_ani.m = 0;
+    taxstat.a_ani.a = NULL;
     refmap_t *refmap = taxstat.refmap;
     _frefs  += kh_size(refmap);
     //Add coverage histograms for all references
     uint64_t _tcov = 0, _tdepth = 0;
+    long double _tsumsq = 0.0L;
     kh_foreach(refmap, kref) {
       ueventq_t events = kh_val(refmap, kref).aEVENT;
       unicorn_sorturange(events.n, events.a);
       _covstats_t covstats = {0};
       _tdepth += _refcoverage(events, kh_val(refmap, kref).REFLEN, &covstats);
       _tcov += covstats.covbases;
+      _tsumsq += (long double)covstats.covbases *
+                 (covstats.varoncov +
+                  (covstats.meanoncov * covstats.meanoncov));
       kv_destroy(events);
     }
     taxstat.covbases  = _tcov;
     taxstat.covmean   = (double)_tdepth / (double)taxstat.reflen;
-    taxstat.meanoncov = (double)_tdepth / (double)_tcov;
+    taxstat.meanoncov = _tcov ? (double)_tdepth / (double)_tcov : 0.0;
+    taxstat.varoncov  = _tcov ? _tsumsq / _tcov -
+                         (taxstat.meanoncov * taxstat.meanoncov) : 0.0;
+    if (taxstat.varoncov < 0.0f) taxstat.varoncov = 0.0f;
     kh_val(taxmap, ktax) = taxstat;
   }
   for (uint32_t i = 0; i < rmq.n; i++) {
@@ -131,6 +155,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
       taxstat.readset = u64set_init();   //queryid set
       taxstat.refmap  = refmap_init();  //refid set
 			taxstat.camex = lint2int_init();
+      kv_init(taxstat.a_ani);
 			taxstat.reflen  += u->hdr->target_len[tid];
       taxstat.readl_min = 0xffffffffU;
       ktax = taxmap_put(taxmap, taxid, &absent);
@@ -194,6 +219,7 @@ int unicorn_tidstat_compute(unicorn_t *u,
     //Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
+    kv_push(float, taxstat.a_ani, ani);
     mean = taxstat.alnani_mean;
     delta = ani-mean;
     taxstat.alnani_mean += delta/naln;
@@ -207,8 +233,8 @@ int unicorn_tidstat_compute(unicorn_t *u,
     mean = taxstat.mdust;
     delta = dusts - mean;
     taxstat.mdust += delta/naln;
-    delta = delta * (dusts - taxstat.mdust);
-    taxstat.vdust = naln ? (delta / (naln - 1)) : 0.0f;
+    taxstat._MDUST += delta * (dusts - taxstat.mdust);
+    taxstat.vdust = naln > 1 ? (taxstat._MDUST / (naln - 1)) : 0.0f;
     //Don't loose your stats value
     kh_val(taxmap, ktax) = taxstat;
   }
@@ -251,6 +277,8 @@ void unicorn_taxstat_print(const unicorn_t *u,
     taxstat_t taxstat = kh_val(taxmap, k);
     float breath = taxstat.covbases/(double)taxstat.reflen;
     float expbreath =  1.0f - expf(-breath);
+    float stdevoncov = sqrtf(taxstat.varoncov);
+    float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
     fprintf(fp, TIDFMTSTR, kh_key(taxmap, k),
                            utax_getname(utax, kh_key(taxmap, k)),
                            taxstat.nrefs,
@@ -266,14 +294,19 @@ void unicorn_taxstat_print(const unicorn_t *u,
                            taxstat.alnnm_mean,
                            taxstat.alnani_mean,
                            sqrtf(taxstat.alnani_var),
+                           taxstat.alnani_median,
                            taxstat.covbases,
                            taxstat.covmean,
                            breath,
                            expbreath,
                            breath/expbreath,
                            taxstat.meanoncov,
+                           stdevoncov,
+                           evenness,
                            1000.0f * breath,
-                           taxstat.duplicity
+                           taxstat.duplicity,
+                           taxstat.mdust,
+                           sqrtf(taxstat.vdust)
           );
   }
 }

@@ -163,12 +163,16 @@ static void refstats_usage(FILE *fp)
             "       - minreads <int>  Minimum number of reads per reference  [1]\n"\
             "       - minalnas <int>  Minimum alignment score [-Inf]\n"\
             "       - maxdust  <int>  Maximum alignment dust score [100]\n"\
-            "  --withtaxid  Report taxid of reference sequence. Requires --acc2tax, --names and --nodes options.\n"\
-						"               taxid is reported in custom XT:i:<taxid> tag and\n"\
-						"               XR:<taxid> tag in bam records and as column 2 in the output statistics file.\n"\
             "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
             "  --acc2tax <str> Accession to taxid mapping file or .khash file.\n"\
+						"  -k <int> kmer size for duplicity computation [17]\n"\
+						"  Report taxid of reference sequence. Enabled automatically when\n"\
+						"  --acc2tax, --names and --nodes are provided.\n"\
+						"  taxid is reported in bam records in custom:\n"\
+						"  XT:i:<taxid> tag and\n"\
+						"  XR:i:<taxid> tag in.\n"\
+						"  taxid column 2 in the output statistics file.\n"\
 						"  --rank <str>    Taxonomic rank for XR tag. [species]\n"\
             "  --verbose  Print libunicorn's messages.\n"\
             "  -h         print this help message\n");
@@ -467,6 +471,7 @@ static int unicorn_refstats(int argc, char **argv)
   opts.minrefl   = 0;
   opts.minalnas  = INT32_MIN;
   opts.maxdust   = 100;
+  opts.ksize     = 17;
  	opts.rank  = strdup("genus");
 	unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
@@ -476,14 +481,20 @@ static int unicorn_refstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-	unicorn_printopts(&opts, stderr, REFSTATS);
-  if (!opts.ifile)  goto exit;
-  if (opts.withtid) {
+  if (opts.withtid || opts.acc2tax || opts.names || opts.nodes) {
     if (!opts.acc2tax || !opts.names || !opts.nodes) {
-      fprintf(stderr, "[unicorn::%s] Error: --withtid requires --acc2tax, --names and --nodes options.\n", __func__);
+      ret = 7;
+      fprintf(stderr, "[unicorn::%s] Error: taxonomy reporting requires --acc2tax, --names and --nodes options.\n", __func__);
       goto exit;
     }
+    opts.withtid = 1;
   }
+  if (opts.outbam) {
+    if (opts.minrefl < 1) opts.minrefl = 1;
+    if (opts.minnreads < 1) opts.minnreads = 1;
+  }
+	unicorn_printopts(&opts, stderr, REFSTATS);
+  if (!opts.ifile)  goto exit;
   if (opts.outstat) {
     ret = 2;
     ofp = fopen(opts.outstat, "w");
@@ -506,7 +517,7 @@ static int unicorn_refstats(int argc, char **argv)
                             opts.minmani,
                             opts.minalnas,
                             opts.maxdust,
-                            0,
+                            opts.ksize,
                             REFSTATS);
   if (!stats) goto exit;
   ret = -4;

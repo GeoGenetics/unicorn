@@ -90,6 +90,8 @@ static void refmap_free(refmap_t *map)
       refstat_t v = kh_val(map, k);
       if (v.READSET)
         u64set_destroy(v.READSET);
+      if (v.camex)
+        lint2int_destroy(v.camex);
     }
     refmap_destroy(map);
   }
@@ -103,6 +105,7 @@ static void taxmap_free(taxmap_t *map)
     refmap_free(v.refmap);
     if (v.readset)
       u64set_destroy(v.readset);
+    kv_destroy(v.a_ani);
 		lint2int_destroy(v.camex);
   }
   taxmap_destroy(map);
