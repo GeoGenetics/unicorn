@@ -11,7 +11,7 @@ typedef struct  pipeline {
 	utax_t *utax;
 } pipeline_t;
 
-typedef kvec_t(bam1_t *) bamq_t;
+//typedef kvec_t(bam1_t *) bamq_t;
 
 typedef struct step {
 	bamq_t *queue;
@@ -333,7 +333,7 @@ static int _compute(unicorn_t *u,
     return ret;
 }
 
-static step_t *s = _loadtaxa(unicorn_t *u, utax_t *utax)
+static step_t *_loadtaxa(unicorn_t *u, utax_t *utax)
 {
 	step_t *s = malloc(sizeof(step_t));
 	if (!s) return NULL;
@@ -347,7 +347,7 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
 {
 	pipeline_t *p = (pipeline_t *)data;
 	if      ( 0 == step ) {
-		step_t *s = _loadtaxa(p->u, p->utax)
+		step_t *s = _loadtaxa(p->u, p->utax);
 		if (!s) return 0;
 		return s;
 	} //Load queries
