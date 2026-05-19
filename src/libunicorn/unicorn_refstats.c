@@ -375,6 +375,14 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   //Create new header
   ohdr = _stats2samhdr(stats, u->hdr);
   if ( !ofp || !ohdr ) goto exit;
+  //Add CO line for taxonomy tags if taxonomy is provided
+  if (utax) {
+    const char *rank = utax->rank ? utax->rank : "unknown";
+    char cotag[256];
+    int colen = snprintf(cotag, sizeof(cotag),
+                         "@CO\tunicorn:tax-tags\tXR=rank_taxid\trank=%s\n", rank);
+    sam_hdr_add_lines(ohdr, cotag, colen);
+  }
   //Add PG line for this program
   char *pgstr = stringify_argv(u->argc, u->argv);
   sam_hdr_add_pg(ohdr, "unicorn", "CL", pgstr, NULL);

@@ -14,7 +14,7 @@ uint8_t unicorn_rewind(unicorn_t *u)
 	uint8_t ret = 1;
 	if (u) {
 		hts_close(u->_FP);
-		if ( !( u->_FP = hts_open(u->ifile, "r") ) ) goto exit;	
+		if ( !( u->_FP = hts_open(u->ifile, "r") ) ) goto exit;
 		bam_hdr_destroy(u->hdr);
 		if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
 		if (u->threads > 1)
@@ -28,7 +28,7 @@ uint8_t unicorn_rewind(unicorn_t *u)
 void unicorn_destroy(unicorn_t *u)
 {
   if (u) {
-    if (u->ifile) free(u->ifile); 
+    if (u->ifile) free(u->ifile);
     if (u->hdr)   bam_hdr_destroy(u->hdr);
     if (u->_FP)   hts_close(u->_FP);
     if (u->p)     hts_tpool_destroy(u->p);
@@ -61,6 +61,20 @@ static uint8_t isqgrouped(sam_hdr_t *h) {
 	return res;
 }
 
+static uint8_t isXsorted(sam_hdr_t *h)
+{
+  int nco = sam_hdr_count_lines(h, "CO");
+  for (int i = 0; i < nco; i++) {
+    kstring_t ks = {0, 0, NULL};
+    if (sam_hdr_find_line_pos(h, "CO", i, &ks) == 0) {
+      uint8_t match = (strncmp(ks.s, "unicorn:tax-tags", 16) == 0);
+      free(ks.s);
+      if (match) return 1;
+    }
+  }
+  return 0;
+}
+
 unicorn_t *unicorn_init( int threads,
                          const char *ifile,
                          char *outbam,
@@ -86,6 +100,7 @@ unicorn_t *unicorn_init( int threads,
 		if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
 		if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
 		if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;
+		if (isXsorted(u->hdr))  u->sorted  = XRSORTED;
 		u->values.nref = u->hdr->n_targets;
 		ret = 0;
     exit:
@@ -264,7 +279,7 @@ static const uint64_t _zero = 0U;
 static const uint64_t _ff   = 0xffU;
 typedef kvec_t(long) longq_t;
 /* default load factor: 87.5% */
-#define __jt_maxload(CAP) (((CAP)>>1) + ((CAP)>>2) + ((CAP>>3))) 
+#define __jt_maxload(CAP) (((CAP)>>1) + ((CAP)>>2) + ((CAP>>3)))
 #define __jt_load 8UL*1024UL*1024UL
 
 static uint8_t _savekhchr2int(chr2int_t *map, BGZF *ofp)
@@ -272,7 +287,7 @@ static uint8_t _savekhchr2int(chr2int_t *map, BGZF *ofp)
   static const uint64_t zero = 0U;
   ssize_t bwrites = 0, ewrites = 0;;
 	const char *khmagicb = KHMAGICB;
-	const char *khmagic  = KHMAGIC;	
+	const char *khmagic  = KHMAGIC;
 	const char *khmagice = KHMAGICE;
 	khint_t n_buckets = (khint_t)1U << map->bits;
   //Zero out the first 8 bytes
@@ -283,7 +298,7 @@ static uint8_t _savekhchr2int(chr2int_t *map, BGZF *ofp)
 	ewrites += strlen(KHMAGICB);
 	//Write the number of bits AKA number of buckets
 	bwrites += bgzf_write(ofp, &map->bits, sizeof(khint_t));
-	ewrites += sizeof(khint_t); 
+	ewrites += sizeof(khint_t);
 	//Write the number of elements in the map
 	bwrites += bgzf_write(ofp, &map->count, sizeof(khint_t));
 	ewrites += sizeof(khint_t);
@@ -292,12 +307,12 @@ static uint8_t _savekhchr2int(chr2int_t *map, BGZF *ofp)
 	ewrites += 8* sizeof(uint8_t);
 	//Write the used array between the magic numbers
 	bwrites += bgzf_write(ofp, khmagic, strlen(KHMAGIC));
-	ewrites += strlen(KHMAGIC); 
+	ewrites += strlen(KHMAGIC);
 	bwrites += bgzf_write(ofp, map->used, sizeof(khint32_t)*__kh_fsize(n_buckets));
  	ewrites += sizeof(khint32_t)*__kh_fsize(n_buckets);
 	bwrites += bgzf_write(ofp, khmagic, strlen(KHMAGIC));
 	ewrites += strlen(KHMAGIC);
-	bwrites += bgzf_write(ofp, &zero, 8 * sizeof(uint8_t)); 
+	bwrites += bgzf_write(ofp, &zero, 8 * sizeof(uint8_t));
 	ewrites += 8*sizeof(uint8_t);
 	//Allocate key and value buffers
   uint8_t *keybuff = malloc(__jt_load);
@@ -318,7 +333,7 @@ static uint8_t _savekhchr2int(chr2int_t *map, BGZF *ofp)
           memcpy(valbuff + valpos, &val, sizeof(uint32_t));
           valpos += sizeof(uint32_t);
           //Dump data if the buffers are full
-          if (keypos > __jt_maxload(__jt_load) || 
+          if (keypos > __jt_maxload(__jt_load) ||
             valpos > __jt_maxload(__jt_load)) {
 						bwrites += bgzf_write(ofp, &keypos, sizeof(uint64_t));
       			ewrites += sizeof(uint64_t);
@@ -347,9 +362,9 @@ static uint8_t _savekhchr2int(chr2int_t *map, BGZF *ofp)
 		bwrites += bgzf_write(ofp, valbuff, valpos);
 		ewrites += valpos;
 		bwrites += bgzf_write(ofp, &zero, 8 * sizeof(uint8_t));
-		ewrites += 8*sizeof(uint8_t);	
+		ewrites += 8*sizeof(uint8_t);
   }
- 	bwrites += bgzf_write(ofp, khmagice, strlen(KHMAGICE)); 
+ 	bwrites += bgzf_write(ofp, khmagice, strlen(KHMAGICE));
 	ewrites += strlen(KHMAGICE);
 	free(keybuff);
   free(valbuff);
@@ -386,9 +401,9 @@ static uint8_t _ekhashlwrite(emap_chr2int_t *map, BGZF *fp)
   for (uint32_t i = 0; i < q.n; i++) {
     long pos = q.a[i];
   	if ( bgzf_write(fp, &pos, sizeof(long)) < 0 )
-			goto exit;  
+			goto exit;
   	if ( bgzf_write(fp, &_ff, sizeof(uint8_t)) < 0 )
-			goto exit;  
+			goto exit;
   }
 	if ( bgzf_write(fp, khaccmagic, strlen(KHACCMAGIC)) < 0 )
 		goto exit;
@@ -420,7 +435,7 @@ uint8_t _iskhashfp(BGZF *fp)
 }
 
 static uint8_t _khreadheader(BGZF *fp, chr2int_t *map)
-{   
+{
 	uint8_t ret = 1;
 	char magic[9] = {0};
 	off_t fpos = bgzf_utell(fp) + 8; // Skip the first 8 zero bytes
@@ -444,7 +459,7 @@ static uint8_t _khreadheader(BGZF *fp, chr2int_t *map)
 static uint8_t _khreaduseda(BGZF *fp, chr2int_t *map)
 {
 	int ret = 1;
-	char magic[9] = {0};  
+	char magic[9] = {0};
 	off_t fpos;
 	khint_t n_buckets = (khint_t)1U << map->bits;
 	if (bgzf_read(fp,
@@ -518,7 +533,7 @@ static char *_khreadkeyval(BGZF *fp, chr2int_t *map)
   	}
 	}
   if (map->count != _t) goto exit;
-	char magic[9] = {0};  
+	char magic[9] = {0};
   if (bgzf_read(fp, magic, 8) < 0)   goto exit;
 	if ( !kh_eq_str(magic, KHMAGICE) ) goto exit;
 	ret = 0;
@@ -572,7 +587,7 @@ emap_chr2int_t *_io_loadkhash(BGZF *fp, int *ret)
 		map->keys[i] = _loadkh(map->maps[i], fp, ret);
   	if ( !map->keys[i] ) goto exit;
 		fpos = bgzf_utell(fp) + 8; // Skip the zero bytes
-		if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit; 
+		if ( bgzf_useek(fp, fpos, SEEK_SET) < 0 ) goto exit;
 	}
 	*ret = 0;
 	exit:

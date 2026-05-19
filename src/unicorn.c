@@ -462,7 +462,8 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
 
 static int unicorn_refstats(int argc, char **argv)
 {
-  int ret = 1;
+	fprintf(stderr, "argc: %d\n", argc);
+  int ret = 2;
   struct timespec start, stop;
   uint64_t ns;
   unicorn_opt_t opts = {0};
@@ -478,7 +479,8 @@ static int unicorn_refstats(int argc, char **argv)
   utax_t *utax = NULL;
   FILE *ofp = NULL;
   char *_argv[64] = {0};
-  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
+	if (2 >= argc) goto exit;
+	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
   if (opts.withtid || opts.acc2tax || opts.names || opts.nodes) {

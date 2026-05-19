@@ -90,6 +90,7 @@ void unicorn_sorturange(uint32_t n, _urangeevent *a);
 #define QUERYSORTED  0x01
 #define QUERYGROUPED 0x02
 #define COORDSORTED  0x04
+#define XRSORTED     0x08
 
 typedef struct values_t {
   uint64_t naln;   //Number of alignments

@@ -1,7 +1,22 @@
 #define _XOPEN_SOURCE 700
 #include "unicorn_internal.h"
+#include "klib/kthread.h"
+#include "klib/kvec.h"
 
 #include "genesisC.h"
+
+typedef struct  pipeline {
+	unicorn_t *u;
+	unicorn_stat_t *stats;
+	utax_t *utax;
+} pipeline_t;
+
+typedef kvec_t(bam1_t *) bamq_t;
+
+typedef struct step {
+	bamq_t *queue;
+	uint8_t nqueue;
+} step_t;
 
 KSORT_INIT(_tid_sfloat, float, ks_lt_generic)
 
@@ -105,9 +120,64 @@ static void _taxmapstats(unicorn_stat_t *stats)
   u64set_destroy(freadset);
 }
 
-int unicorn_tidstat_compute(unicorn_t *u,
-                            unicorn_stat_t *stats,
-                            utax_t *utax)
+#define LOADALNS_BATCH 1000
+
+static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t)
+{
+  uint8_t nq = *n;
+  *n = 0;
+  bam1_t *b = bam_init1();
+  if (!b) return;
+  for (uint8_t i = 0; i < nq; i++) {
+    kv_init(q[i]);
+    // Seed this queue with the first alignment (from cache or file)
+    bam1_t *first = bam_init1();
+    if (!first) break;
+    if (u->dcache) {
+      bam_copy1(first, u->daln);
+      u->dcache = 0;
+    } else {
+      if (sam_read1(u->_FP, u->hdr, b) < 0) {
+        bam_destroy1(first);
+        break; // EOF
+      }
+      bam_copy1(first, b);
+    }
+    kv_push(bam1_t *, q[i], first);
+    // Taxid of the current group comes from the XR tag
+    uint8_t *xtag = bam_aux_get(first, "XR");
+    int32_t cur_xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
+
+    // Keep loading until >= LOADALNS_BATCH *and* the taxid changes
+    while (1) {
+      if (sam_read1(u->_FP, u->hdr, b) < 0) {
+        // EOF: commit this queue and stop
+        *n = i + 1;
+        goto done;
+      }
+      uint8_t *ntag  = bam_aux_get(b, "XR");
+      int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
+
+      if (q[i].n >= LOADALNS_BATCH && next_xr != cur_xr) {
+        // Batch limit reached and taxid boundary crossed: cache for next call
+        bam_copy1(u->daln, b);
+        u->dcache = 1;
+        break;
+      }
+      bam1_t *cp = bam_init1();
+      if (!cp) break;
+      bam_copy1(cp, b);
+      kv_push(bam1_t *, q[i], cp);
+    }
+    *n = i + 1;
+  }
+done:
+  bam_destroy1(b);
+}
+
+static int _compute(unicorn_t *u,
+                    unicorn_stat_t *stats,
+                    utax_t *utax)
 {
   int ret = -1, absent;
 	uint8_t ksize = stats->ksize;
@@ -261,6 +331,50 @@ int unicorn_tidstat_compute(unicorn_t *u,
     if (readset) u64set_destroy(readset);
     if (missing) chrset_destroy(missing);
     return ret;
+}
+
+static step_t *s = _loadtaxa(unicorn_t *u, utax_t *utax)
+{
+	step_t *s = malloc(sizeof(step_t));
+	if (!s) return NULL;
+	s->queue = calloc(8, sizeof(bamq_t));
+	s->nqueue  = 8;
+	_loadalns(s->queue, &s->nqueue, u, utax);
+	return s;
+}
+
+static void *_taxstats_pipeline(void *data, int step, void *in)
+{
+	pipeline_t *p = (pipeline_t *)data;
+	if      ( 0 == step ) {
+		step_t *s = _loadtaxa(p->u, p->utax)
+		if (!s) return 0;
+		return s;
+	} //Load queries
+	else if ( 1 == step ) {} //Compute statistics
+	else if (2  == step ) {} //Write output
+	return 0;
+}
+
+static int _sorted_compute(unicorn_t *u,
+														unicorn_stat_t *stats,
+														utax_t *utax)
+{
+	pipeline_t p = {u, stats, utax};
+	kt_pipeline(3, _taxstats_pipeline, &p, 3);
+	return 0;
+}
+
+int unicorn_tidstat_compute(unicorn_t *u,
+                            unicorn_stat_t *stats,
+                            utax_t *utax)
+{
+	if (u->sorted) {
+		if (VERBOSE)
+			fprintf(stderr, "[libunicorn::%s] XR sorted file.\n", __func__);
+		return _sorted_compute(u, stats, utax);
+	}
+	return _compute(u, stats, utax);
 }
 
 void unicorn_taxstat_print(const unicorn_t *u,
