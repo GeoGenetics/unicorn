@@ -5,21 +5,22 @@
 
 #include "genesisC.h"
 
+
 typedef struct  pipeline {
-	unicorn_t *u;
-	unicorn_stat_t *stats;
-	utax_t *utax;
-	void *forpool;
+  unicorn_t *u;
+  unicorn_stat_t *stats;
+  utax_t *utax;
+  void *forpool;
 } pipeline_t;
 
 typedef kvec_t(taxstat_t *) taxstatpq_t;
 
 typedef struct step {
-	bamq_t *queue;
-	uint8_t nqueue;
-	taxstatpq_t *taxq;
-	const unicorn_t *u;
-	const unicorn_stat_t *stats;
+  bamq_t *queue;
+  uint8_t nqueue;
+  taxstatpq_t *taxq;
+  const unicorn_t *u;
+  const unicorn_stat_t *stats;
 } step_t;
 
 KSORT_INIT(_tid_sfloat, float, ks_lt_generic)
@@ -59,14 +60,14 @@ static void _taxmapstats(unicorn_stat_t *stats)
         kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
         continue;
     }
-		//camex shenanigans
-		khint_t k;
-		uint64_t nkmers = 0;
-		kh_foreach(taxstat.camex, k) {
-			nkmers += kh_val(taxstat.camex, k);
-		}
+    //camex shenanigans
+    khint_t k;
+    uint64_t nkmers = 0;
+    kh_foreach(taxstat.camex, k) {
+      nkmers += kh_val(taxstat.camex, k);
+    }
     taxstat.duplicity = (float)kh_size(taxstat.camex)/(float)nkmers;
-		_falns  += taxstat.nalns;
+    _falns  += taxstat.nalns;
     //Add to total read set to avoid double counting
     kh_foreach(taxstat.readset, kref) {
       uint64_t qid = kh_key(taxstat.readset, kref);
@@ -128,6 +129,7 @@ static void _taxmapstats(unicorn_stat_t *stats)
 
 static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t)
 {
+  (void)t;
   uint8_t nq = *n;
   *n = 0;
   bam1_t *b = bam_init1();
@@ -138,14 +140,14 @@ static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t)
     bam1_t *first = bam_init1();
     if (!first) break;
     if (u->dcache) {
-      bam_copy1(first, u->daln);
+      if (!bam_copy1(first, u->daln)) break;
       u->dcache = 0;
     } else {
       if (sam_read1(u->_FP, u->hdr, b) < 0) {
         bam_destroy1(first);
         break; // EOF
       }
-      bam_copy1(first, b);
+      if (!bam_copy1(first, b)) break;
     }
     kv_push(bam1_t *, q[i], first);
     // Taxid of the current group comes from the XR tag
@@ -162,37 +164,159 @@ static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t)
       }
       uint8_t *ntag  = bam_aux_get(b, "XR");
       int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
-      if (q[i].n >= LOADALNS_BATCH && next_xr != group_xr) {
+			fprintf(stderr, "READING ALN WITH XR=%d\n", next_xr);
+			if (q[i].n >= LOADALNS_BATCH && next_xr != group_xr) {
         // Batch limit reached and taxid boundary crossed: cache for next call
-        bam_copy1(u->daln, b);
+        if (!bam_copy1(u->daln, b)) break;
         u->dcache = 1;
         break;
       }
       bam1_t *cp = bam_init1();
       if (!cp) break;
-      bam_copy1(cp, b);
+      if (!bam_copy1(cp, b)) break;
       kv_push(bam1_t *, q[i], cp);
-      if (next_xr != group_xr) group_xr = next_xr;
+      if (next_xr != group_xr) {
+				fprintf(stderr, "NEW XR tag!! %u %u\n", next_xr, group_xr);
+				group_xr = next_xr;
+			}
     }
     *n = i + 1;
   }
-done:
-  bam_destroy1(b);
+  done:
+    bam_destroy1(b);
 }
 
 static int _addaln(taxstat_t *ts,
-									 const unicorn_t *u,
-									 const unicorn_stat_t *stats,
-									 bam1_t *b,
-									 genesis_encoder_t enc)
+                   const unicorn_t *u,
+                   const unicorn_stat_t *stats,
+                   bam1_t *b,
+                   genesis_encoder_t enc)
 {
-  (void)ts; (void)u; (void)stats; (void)b; (void)enc;
-	return 0;
+  if (!ts || !u || !stats || !b) return -1;
+  if (!ts->readset || !ts->refmap) return -1;
+  if (_unmapped(b)) return 0;
+  if (b->core.tid < 0) return 0;
+  if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) return 0;
+  if (!_ASCHECK(b, stats->minalnas)) return 0;
+  int32_t dusts = (int32_t)(0.5 + dust(bam_get_seq(b),
+                                      b->core.l_qseq,
+                                      64,
+                                      NULL));
+  if (dusts > stats->maxdust) return 0;
+  int absent;
+  int32_t tid   = b->core.tid;
+  uint32_t qlen = b->core.l_qseq;
+  uint64_t naln = ++ts->nalns;
+  khint_t q = kh_hash_str(bam_get_qname(b));
+  u64set_put(ts->readset, q, &absent);
+  float mean, delta;
+  if (absent) {
+    // Read-length stats (unique reads only)
+    ts->v_rlen[qlen < 256 ? qlen : 255]++;
+    uint32_t n = kh_size(ts->readset);
+    mean = ts->readl_mean;
+    delta = qlen - mean;
+    ts->readl_mean += delta/n;
+    ts->_M += delta * (qlen - ts->readl_mean);
+    ts->readl_var = n>2 ? (ts->_M / (n-1)) : 0.0f;
+    ts->readl_min = qlen < ts->readl_min ? qlen : ts->readl_min;
+    ts->readl_max = qlen > ts->readl_max ? qlen : ts->readl_max;
+    // Complexity proxy (camex)
+    uint8_t ksize = stats->ksize;
+    if (ts->camex && enc) {
+      char seq[256] = {0};
+      uint8_t *s = bam_get_seq(b);
+      for (uint32_t i = 0; i < qlen && i < 255; i++)
+        seq[i] = seq_nt16_str[bam_seqi(s, i)];
+      for (uint32_t i = 0; ( i < (qlen-ksize+1) ) && (i < 255-ksize); i++) {
+        uint8_t ret = 0;
+        uint64_t kmeridx = genesis_getcamexidx(enc, seq+i, ksize, &ret);
+        khint_t k = lint2int_put(ts->camex, kmeridx, &absent);
+        if (absent) kh_val(ts->camex, k) = 1;
+        else kh_val(ts->camex, k)++;
+      }
+    }
+  }
+  // Per-reference stats
+  refstat_t refstat = {0};
+  khint_t kref = refmap_put(ts->refmap, tid, &absent);
+  if (absent) {
+    ts->nrefs++;
+    ts->reflen += u->hdr->target_len[tid];
+    kv_init(refstat.aEVENT);
+    kh_val(ts->refmap, kref) = refstat;
+  }
+  refstat = kh_val(ts->refmap, kref);
+  refstat.REFLEN = u->hdr->target_len[tid];
+  _urangeevent s = {b->core.pos, 1};
+  _urangeevent e = {bam_endpos(b), 0};
+  kv_push(_urangeevent, refstat.aEVENT, s);
+  kv_push(_urangeevent, refstat.aEVENT, e);
+  kh_val(ts->refmap, kref) = refstat;
+  // Alignment ANI/NM
+  uint32_t NM;
+  float ani = _ANINM(b, &NM);
+  kv_push(float, ts->a_ani, ani);
+  mean = ts->alnani_mean;
+  delta = ani-mean;
+  ts->alnani_mean += delta/naln;
+  ts->_MANI = delta * (ani - ts->alnani_mean);
+  ts->alnani_var = naln ? (ts->_MANI / (naln-1)) : 0.0f;
+  mean = ts->alnnm_mean;
+  delta = NM-mean;
+  ts->alnnm_mean += delta/naln;
+  // Alignment dust
+  mean = ts->mdust;
+  delta = dusts - mean;
+  ts->mdust += delta/naln;
+  ts->_MDUST += delta * (dusts - ts->mdust);
+  ts->vdust = naln > 1 ? (ts->_MDUST / (naln - 1)) : 0.0f;
+  return 0;
 }
 
 static void _taxafinalize(taxstat_t *ts)
 {
-	(void)ts;
+  if (!ts) return;
+  if (!ts->readset || !ts->refmap) return;
+  // camex shenanigans
+  if (ts->camex && kh_size(ts->camex)) {
+    khint_t k;
+    uint64_t nkmers = 0;
+    kh_foreach(ts->camex, k) {
+      nkmers += kh_val(ts->camex, k);
+    }
+    ts->duplicity = nkmers ? (float)kh_size(ts->camex)/(float)nkmers : 0.0f;
+  }
+  ts->readl_median = _udCAMEDIAN(ts->v_rlen, 256, kh_size(ts->readset));
+  ts->readl_mode   = _udCAMODE(ts->v_rlen, 256);
+  if (ts->a_ani.n) {
+    ks_introsort(_tid_sfloat, ts->a_ani.n, ts->a_ani.a);
+    ts->alnani_median = _fMEDIAN(ts->a_ani.a, ts->a_ani.n);
+  }
+  kv_destroy(ts->a_ani);
+  ts->a_ani.n = ts->a_ani.m = 0;
+  ts->a_ani.a = NULL;
+  // Coverage stats across references
+  uint64_t tcov = 0, tdepth = 0;
+  long double tsumsq = 0.0L;
+  khint_t kref;
+  kh_foreach(ts->refmap, kref) {
+    ueventq_t events = kh_val(ts->refmap, kref).aEVENT;
+    unicorn_sorturange(events.n, events.a);
+    _covstats_t covstats = {0};
+    tdepth += _refcoverage(events, kh_val(ts->refmap, kref).REFLEN, &covstats);
+    tcov += covstats.covbases;
+    tsumsq += (long double)covstats.covbases *
+              (covstats.varoncov +
+               (covstats.meanoncov * covstats.meanoncov));
+    kv_destroy(events);
+  }
+  ts->covbases  = tcov;
+  ts->covmean   = ts->reflen ? (double)tdepth / (double)ts->reflen : 0.0;
+  ts->meanoncov = tcov ? (double)tdepth / (double)tcov : 0.0;
+  ts->varoncov  = tcov ? tsumsq / tcov -
+                   (ts->meanoncov * ts->meanoncov) : 0.0;
+  if (ts->varoncov < 0.0f) ts->varoncov = 0.0f;
 }
 
 static int _compute(unicorn_t *u,
@@ -200,9 +324,9 @@ static int _compute(unicorn_t *u,
                     utax_t *utax)
 {
   int ret = -1, absent;
-	uint8_t ksize = stats->ksize;
-	genesis_encoder_t enc = genesis_encoderinit(ksize);
-	chrset_t *missing = NULL;
+  uint8_t ksize = stats->ksize;
+  genesis_encoder_t enc = genesis_encoderinit(ksize);
+  chrset_t *missing = NULL;
   u64set_t *readset = NULL;
   if (!u || !stats || !utax) goto exit;;
   bam1_t *b = bam_init1();
@@ -229,24 +353,24 @@ static int _compute(unicorn_t *u,
                                    u->hdr->target_name[tid],
                                    &absent);
     //If rank is set, get taxid for parent node at that rank
-  	uint8_t ret;
-		if (rank) taxid = utax_getidatrank(utax, taxid, rank, &ret);
+    uint8_t ret;
+    if (rank) taxid = utax_getidatrank(utax, taxid, rank, &ret);
     if (absent || ret) {
       chrset_put(missing, u->hdr->target_name[tid], &absent);
       nabsent++;
-			continue;
+      continue;
     }
     kaln++;
-		uint32_t qlen = b->core.l_qseq;
+    uint32_t qlen = b->core.l_qseq;
     taxstat_t taxstat = {0};
     ktax = taxmap_get(taxmap, taxid); //query taxid
     if ( ktax == kh_end(taxmap) ) {
       // New taxid, initialize stats and insert in map
       taxstat.readset = u64set_init();   //queryid set
       taxstat.refmap  = refmap_init();  //refid set
-			taxstat.camex = lint2int_init();
+      taxstat.camex = lint2int_init();
       kv_init(taxstat.a_ani);
-			taxstat.reflen  += u->hdr->target_len[tid];
+      taxstat.reflen  += u->hdr->target_len[tid];
       taxstat.readl_min = 0xffffffffU;
       ktax = taxmap_put(taxmap, taxid, &absent);
       kh_val(taxmap, ktax) = taxstat;
@@ -272,22 +396,22 @@ static int _compute(unicorn_t *u,
       taxstat.readl_var  = n>2 ? (taxstat._M / (n-1)) : 0.0f; //Running variance
       taxstat.readl_min = qlen < taxstat.readl_min ? qlen :  taxstat.readl_min;
       taxstat.readl_max = qlen > taxstat.readl_max ? qlen :  taxstat.readl_max;
-			//Add counts for suplicity
-			char seq[256] = {0};
-			for (uint32_t i = 0; i < qlen && i < 255; i++) {
-				seq[i] = seq_nt16_str[bam_seqi(bam_get_seq(b), i)];
-			}
-			uint8_t ret;
-			for (uint32_t i = 0; ( i < (qlen-ksize+1) ) && (i < 255-ksize); i++) {
+      //Add counts for suplicity
+      char seq[256] = {0};
+      for (uint32_t i = 0; i < qlen && i < 255; i++) {
+        seq[i] = seq_nt16_str[bam_seqi(bam_get_seq(b), i)];
+      }
+      uint8_t ret;
+      for (uint32_t i = 0; ( i < (qlen-ksize+1) ) && (i < 255-ksize); i++) {
         uint64_t kmeridx = genesis_getcamexidx(enc, seq+i, ksize, &ret);
-				khint_t k = lint2int_put(taxstat.camex, kmeridx, &absent);
-				if (absent) {
-					kh_val(taxstat.camex, k) = 1;
-				} else {
-					kh_val(taxstat.camex, k)++;
-				}
-			}
-		}
+        khint_t k = lint2int_put(taxstat.camex, kmeridx, &absent);
+        if (absent) {
+          kh_val(taxstat.camex, k) = 1;
+        } else {
+          kh_val(taxstat.camex, k)++;
+        }
+      }
+    }
     //Add ref tid to refmap to count number of references at tid
     refstat_t refstat = {0};
     kref = refmap_put(taxstat.refmap, tid, &absent);
@@ -362,6 +486,11 @@ static step_t *_loadtaxa(unicorn_t *u,
 	s->queue = calloc(8, sizeof(bamq_t));
 	s->nqueue  = 8;
 	_loadalns(s->queue, &s->nqueue, u, utax);
+	if (s->nqueue == 0) {
+		if (s->queue) free(s->queue);
+		free(s);
+		return NULL;
+	}
 	s->taxq = calloc(s->nqueue, sizeof(taxstatpq_t));
 	if (s->taxq) {
 		for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->taxq[i]);
@@ -373,111 +502,146 @@ static step_t *_loadtaxa(unicorn_t *u,
 
 static taxstat_t *_taxstat_new(void)
 {
-	taxstat_t *t = calloc(1, sizeof(*t));
-	if (!t) return NULL;
-	t->readset = u64set_init();
-	t->refmap = refmap_init();
-	t->camex = lint2int_init();
-	kv_init(t->a_ani);
-	t->readl_min = 0xffffffffU;
-	if (!t->readset || !t->refmap || !t->camex) {
-		if (t->readset) u64set_destroy(t->readset);
-		if (t->refmap) refmap_destroy(t->refmap);
-		if (t->camex) lint2int_destroy(t->camex);
-		kv_destroy(t->a_ani);
-		free(t);
-		return NULL;
-	}
-	return t;
+  taxstat_t *t = calloc(1, sizeof(*t));
+  if (!t) return NULL;
+  t->readset = u64set_init();
+  t->refmap = refmap_init();
+  t->camex = lint2int_init();
+  kv_init(t->a_ani);
+  t->readl_min = 0xffffffffU;
+  if (!t->readset || !t->refmap || !t->camex) {
+    if (t->readset) u64set_destroy(t->readset);
+    if (t->refmap) refmap_destroy(t->refmap);
+    if (t->camex) lint2int_destroy(t->camex);
+    kv_destroy(t->a_ani);
+    free(t);
+    return NULL;
+  }
+  return t;
 }
 
 static void _statfor(void *data, long i, int tid)
 {
-	(void)tid;
-	step_t *s = (step_t *)data;
-	if (!s || !s->queue) return;
-	if (i < 0 || i >= (long)s->nqueue) return;
-	bamq_t *q = &s->queue[i];
-	if ( q->n == 0 ) return;
-	if (!s->taxq) return;
-	if (!s->u || !s->stats) return;
-	uint8_t ksize = s->stats->ksize ? s->stats->ksize : 17;
-	genesis_encoder_t enc = genesis_encoderinit(ksize);
-	if (!enc) return;
-	taxstat_t *cur = _taxstat_new();
-	if (!cur) {
-		genesis_encoderfree(enc);
-		return;
-	}
-	taxstatpq_t *out = &s->taxq[i];
-	int32_t prev_xr = INT32_MIN;
-	for (uint32_t j = 0; j < q->n; j++) {
-		bam1_t *b = q->a[j];
-		uint8_t *xtag = bam_aux_get(b, "XR");
-		int32_t xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
-		if (j == 0) prev_xr = xr;
-		if (xr != prev_xr) {
-			fprintf(stderr, "[libunicorn::%s] XR change detected: %d -> %d\n",
-							__func__, prev_xr, xr);
-			_taxafinalize(cur);
-			kv_push(taxstat_t *, *out, cur);
-			cur = _taxstat_new();
-			if (!cur) break;
-			prev_xr = xr;
-		}
-		_addaln(cur, s->u, s->stats, b, enc);
-	}
-	if (cur) {
-		_taxafinalize(cur);
-		kv_push(taxstat_t *, *out, cur);
-	}
-	genesis_encoderfree(enc);
+  (void)tid;
+  step_t *s = (step_t *)data;
+  if (!s || !s->queue) return;
+  if (i < 0 || i >= (long)s->nqueue) return;
+  bamq_t *q = &s->queue[i];
+  if ( q->n == 0 ) return;
+  if (!s->taxq) return;
+  if (!s->u || !s->stats) return;
+  uint8_t ksize = s->stats->ksize;
+  genesis_encoder_t enc = genesis_encoderinit(ksize);
+  if (!enc) return;
+  taxstat_t *cur = _taxstat_new();
+  if (!cur) {
+    genesis_encoderfree(enc);
+    return;
+  }
+  taxstatpq_t *out = &s->taxq[i];
+  int32_t prev_xr = INT32_MIN;
+  for (uint32_t j = 0; j < q->n; j++) {
+    bam1_t *b = q->a[j];
+    uint8_t *xtag = bam_aux_get(b, "XR");
+    int32_t xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
+    if (j == 0) prev_xr = xr;
+    if (xr != prev_xr) {
+      fprintf(stderr, "[libunicorn::%s] XR change detected: %d -> %d\n", __func__, prev_xr, xr);
+      cur->_ntid = prev_xr;
+      _taxafinalize(cur);
+      kv_push(taxstat_t *, *out, cur);
+      cur = _taxstat_new();
+      if (!cur) break;
+      prev_xr = xr;
+    }
+    _addaln(cur, s->u, s->stats, b, enc);
+    bam_destroy1(b);
+    q->a[j] = NULL;
+  }
+  if (cur) {
+    cur->_ntid = prev_xr;
+    _taxafinalize(cur);
+    kv_push(taxstat_t *, *out, cur);
+  }
+  genesis_encoderfree(enc);
 }
 
 static void *_taxstats_pipeline(void *data, int step, void *in)
 {
-	pipeline_t *p = (pipeline_t *)data;
-	if      ( 0 == step ) {
+  pipeline_t *p = (pipeline_t *)data;
+	if      ( 0 == step ) { //Load alignments
 		step_t *s = _loadtaxa(p->u, p->stats, p->utax);
 		if (!s) return 0;
-		return s;
-	} //Load queries
-	else if ( 1 == step ) {//Compute statistics
-		step_t *s = (step_t *)in;
-		//TODO compute stats for each taxid queue in s->queue and store in p
-		if (s && s->nqueue)
-			kt_forpool(p->forpool, _statfor, s, s->nqueue);
-		return s;
-	} 
-	else if (2  == step ) {} //Write output
-	return 0;
+		if (VERBOSE)
+			fprintf(stderr, "[libunicorn::%s] Loaded %u queues.\n", __func__, s->nqueue);
+		if (p->stats && s->queue) {
+			uint64_t n = 0;
+			for (uint8_t i = 0; i < s->nqueue; i++) n += s->queue[i].n;
+			p->stats->_nalns += n;
+		}
+    return s;
+  } //Load queries
+  else if ( 1 == step ) { //Compute statistics
+    step_t *s = (step_t *)in;
+    if (s && s->nqueue)
+      kt_forpool(p->forpool, _statfor, s, s->nqueue);
+    return s;
+  }
+  else if (2  == step ) { //Write output
+    step_t *s = (step_t *)in;
+		unicorn_stat_t *stats = p->stats;
+		for (uint8_t i = 0; i < s->nqueue; i++) { //Loop over queues
+      taxstatpq_t *tq = &s->taxq[i];
+      for (uint32_t j = 0; j < tq->n; j++) { //Loop over taxstats
+        taxstat_t *ts = tq->a[j];
+        //int32_t taxid = ts->_ntid;
+        // Accumulate global stats
+        stats->_nalns  += ts->nalns;
+        stats->_nreads += kh_size(ts->readset);
+        stats->_nrefs  += ts->nrefs;
+      }
+      kv_destroy(*tq);
+    }
+    kv_destroy(*s->queue);
+    free(s);
+  }
+  return 0;
 }
 
 static int _sorted_compute(unicorn_t *u,
-														unicorn_stat_t *stats,
-														utax_t *utax)
+                            unicorn_stat_t *stats,
+                            utax_t *utax)
 {
-	int ret = -1;
-	if (!u || !stats || !utax) return ret;
-	pipeline_t p = {u, stats, utax, 0};
-	p.forpool = kt_forpool_init(u->threads);
-	if (!p.forpool) return ret;
-	kt_pipeline(3, _taxstats_pipeline, &p, 3);
-	kt_forpool_destroy(p.forpool);
-	ret = 0;
-	return ret;
+  int ret = -1;
+  if (!u || !stats || !utax) return ret;
+  stats->_nalns = 0;
+  stats->_nreads = 0;
+  stats->_nfreads = 0;
+  stats->_nfalns = 0;
+  stats->_nfrefs = 0;
+  pipeline_t p = {u, stats, utax, 0};
+  p.forpool = kt_forpool_init(u->threads);
+  if (!p.forpool) return ret;
+  kt_pipeline(3, _taxstats_pipeline, &p, 3);
+  kt_forpool_destroy(p.forpool);
+  sleep(1000);
+  ret = 0;
+  return ret;
 }
 
 int unicorn_tidstat_compute(unicorn_t *u,
                             unicorn_stat_t *stats,
                             utax_t *utax)
 {
-	if ( u->sorted & XRSORTED ) {
-		if (VERBOSE)
-			fprintf(stderr, "[libunicorn::%s] XR sorted file.\n", __func__);
-		return _sorted_compute(u, stats, utax);
-	}
-	return _compute(u, stats, utax);
+  fprintf(stderr, "====> %u\n", u->sorted);
+  if ( u->sorted & XRSORTED ) {
+    if (VERBOSE)
+      fprintf(stderr, "[libunicorn::%s] XR sorted file.\n", __func__);
+    return _sorted_compute(u, stats, utax);
+  }
+  if (VERBOSE)
+    fprintf(stderr, "[libunicorn::%s] unsorted file.\n", __func__);
+  return _compute(u, stats, utax);
 }
 
 void unicorn_taxstat_print(const unicorn_t *u,
@@ -488,8 +652,53 @@ void unicorn_taxstat_print(const unicorn_t *u,
   if (!stats || !fp || !u || !utax) return;
   if (!stats->fc) return;
   fprintf(fp, TIDSTATSTR);
-  khint_t k;
   taxmap_t *taxmap = (taxmap_t *)stats->__map;
+  if (!taxmap) return;
+
+  if (stats->_taxorder.n) {
+    for (uint32_t i = 0; i < stats->_taxorder.n; i++) {
+      int32_t taxid = stats->_taxorder.a[i];
+      khint_t k = taxmap_get(taxmap, taxid);
+      if (k == kh_end(taxmap)) continue;
+      taxstat_t taxstat = kh_val(taxmap, k);
+      float breath = taxstat.covbases/(double)taxstat.reflen;
+      float expbreath =  1.0f - expf(-breath);
+      float stdevoncov = sqrtf(taxstat.varoncov);
+      float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
+      fprintf(fp, TIDFMTSTR, taxid,
+                             utax_getname(utax, taxid),
+                             taxstat.nrefs,
+                             taxstat.reflen,
+                             taxstat.nalns,
+                             kh_size(taxstat.readset),
+                             taxstat.readl_mean,
+                             sqrtf(taxstat.readl_var),
+                             taxstat.readl_median,
+                             taxstat.readl_mode,
+                             taxstat.readl_min,
+                             taxstat.readl_max,
+                             taxstat.alnnm_mean,
+                             taxstat.alnani_mean,
+                             sqrtf(taxstat.alnani_var),
+                             taxstat.alnani_median,
+                             taxstat.covbases,
+                             taxstat.covmean,
+                             breath,
+                             expbreath,
+                             breath/expbreath,
+                             taxstat.meanoncov,
+                             stdevoncov,
+                             evenness,
+                             1000.0f * breath,
+                             taxstat.duplicity,
+                             taxstat.mdust,
+                             sqrtf(taxstat.vdust)
+            );
+    }
+    return;
+  }
+
+  khint_t k;
   kh_foreach(taxmap, k) {
     taxstat_t taxstat = kh_val(taxmap, k);
     float breath = taxstat.covbases/(double)taxstat.reflen;

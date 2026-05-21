@@ -264,13 +264,14 @@ typedef struct unicorn_stats_t {
   //Data
   void *__map; // Stat map to use, either _refmap or _taxmap
   uint8_t mapflg; //Map type, 0 for per reference, 1 for per taxid
+	int32q_t _taxorder; //Preserve XR-sorted taxid output order
   uint64_t _nalns;
   uint64_t _nreads;
   uint64_t _nfreads;
   uint64_t _nfalns;
   uint32_t _nrefs;        //Number of references in bam
 	uint32_t _nfrefs;        //Number of filtered references after computation
-  //bam wide stats
+  //bam wide stats TODO move to own struct
   float    _mrlen;        //Mean read length
   float    _vrlen;        //Variance of read length
   uint32_t _mdrlen;       //Median read length

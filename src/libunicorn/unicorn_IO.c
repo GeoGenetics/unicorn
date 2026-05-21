@@ -67,8 +67,10 @@ static uint8_t isXsorted(sam_hdr_t *h)
   for (int i = 0; i < nco; i++) {
     kstring_t ks = {0, 0, NULL};
     if (sam_hdr_find_line_pos(h, "CO", i, &ks) == 0) {
-      uint8_t match = (strncmp(ks.s, "unicorn:tax-tags", 16) == 0);
-      free(ks.s);
+			// sam_hdr_find_line_pos() returns the full line, often including "@CO\t".
+			// Detect the presence of the unicorn taxonomy-tag annotation regardless of prefix.
+			uint8_t match = (ks.s && strstr(ks.s, "unicorn:tax-tags") != NULL);
+			free(ks.s);
       if (match) return 1;
     }
   }

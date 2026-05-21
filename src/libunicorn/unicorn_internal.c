@@ -127,6 +127,7 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
       }
     }
     if (stats->_anihist) floatmap_destroy(stats->_anihist);
+		kv_destroy(stats->_taxorder);
     free(stats);
   }
 }
@@ -153,6 +154,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
   stats->minalnas  = minalnas;
   stats->maxdust   = maxdust;
   stats->ksize     = ksize;
+	kv_init(stats->_taxorder);
   memset(stats->_readlc, 0, 256*sizeof(uint32_t));
   return stats;
 }

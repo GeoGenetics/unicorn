@@ -740,7 +740,7 @@ static int unicorn_taxstats(int argc, char **argv)
   opts.minrefl   = 0;
   opts.minalnas  = INT32_MIN;
   opts.maxdust   = 100;
-  opts.rank  = strdup("species");
+  opts.rank  = strdup("genus");
   opts.ksize = 17;
   unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
@@ -916,7 +916,7 @@ static int unicorn_alnfilt(int argc, char **argv)
   opts.minani      = 90.0;
   opts.pct         = 0.90;
   opts.alnfiltmode = UNICORN_ALNFILT_ALLTOP;
-  utax_t *utax = NULL;
+  //utax_t *utax = NULL;
   unicorn_t *u = NULL;
   char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
@@ -939,12 +939,12 @@ static int unicorn_alnfilt(int argc, char **argv)
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   if (opts.acc2tax && opts.names && opts.nodes) {
     fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
-    utax = unicorn_loadtaxonomy(opts.acc2tax,
-                                opts.names,
-                                opts.nodes,
-                                opts.rank,
-                                &ret);
-    if (ret) goto exit;
+    //utax = unicorn_loadtaxonomy(opts.acc2tax,
+    //                            opts.names,
+    //                            opts.nodes,
+    //                            opts.rank,
+    //                            &ret);
+    //if (ret) goto exit;
   }
   fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
                   "\tmode           == %s\n"\
