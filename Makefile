@@ -6,14 +6,10 @@ else
 endif
 
 ifeq ($(origin HTSSRC), undefined)
-	HTS_PREFIX = $(PREFIX)
+  HTS_PREFIX = $(PREFIX)
 else
-	HTS_PREFIX = $(HTSSRC)
+  HTS_PREFIX = $(HTSSRC)
 endif
-
-# Directories for htslib headers and libraries
-HTSINCDIR = $(HTS_PREFIX)/include
-HTSLIBDIR = $(HTS_PREFIX)/lib
 
 CFLAGS+=-Wall -Wextra -Wsign-compare -Wno-unused-function -pedantic -std=c11 -Isrc -I$(HTSINCDIR) -Isrc/genesisC -fPIC
 ifeq ($(DEBUG),1)
@@ -36,10 +32,17 @@ GENESIS_SUBMODULE_PRESENT := $(shell [ -f $(GENESIS)/CMakeLists.txt ] && echo ye
 ifeq ($(GENESIS_SUBMODULE_PRESENT),yes)
   GENESIS_PREFIX_FOR_BUILD := $(CURDIR)/$(GENESIS)
   USE_CONDA_GENESIS := no
+  # Prefer the htslib built as part of the genesis submodule build.
+  # This avoids requiring a system-wide -lhts installation.
+  HTS_PREFIX := $(GENESIS_PREFIX_FOR_BUILD)/build/htslib-install
 else
   GENESIS_PREFIX_FOR_BUILD := $(CONDA_PREFIX)
   USE_CONDA_GENESIS := yes
 endif
+
+# Directories for htslib headers and libraries
+HTSINCDIR = $(HTS_PREFIX)/include
+HTSLIBDIR = $(HTS_PREFIX)/lib
 
 .PHONY: clean all
 
@@ -77,4 +80,3 @@ test:
 
 clean:
 	rm -f $(OBJ) src/version.h libunicorn.a unicorn unicorn.h $(KOBJ) data/out.bam data/out.stats.txt
-
