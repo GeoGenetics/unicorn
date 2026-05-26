@@ -80,7 +80,8 @@ static uint8_t isXsorted(sam_hdr_t *h)
 unicorn_t *unicorn_init( int threads,
                          const char *ifile,
                          char *outbam,
-                         int argc,
+												 FILE *ofp,
+												 int argc,
                          char **argv)
 {
     int ret = -1;
@@ -99,6 +100,7 @@ unicorn_t *unicorn_init( int threads,
     u->argv = argv;
     u->outbam = outbam;
 		u->daln = bam_init1();
+		u->ofp  = ofp;
 		if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
 		if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
 		if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;

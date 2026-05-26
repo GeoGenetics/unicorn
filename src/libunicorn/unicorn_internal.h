@@ -107,7 +107,8 @@ typedef struct {
   int  threads;
   char *ifile;
   char *outbam;
-  hts_tpool *p;
+	FILE *ofp;
+	hts_tpool *p;
   htsFile   *_FP;
   bam_hdr_t *hdr;
   uint8_t sorted; //See sort values

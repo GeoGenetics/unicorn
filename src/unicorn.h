@@ -73,8 +73,9 @@ typedef struct unicorn_t *unicorn_t;
 unicorn_t *unicorn_init(int threads,
                         const char *ifile,
                         char *prefix,
+												FILE *ofp,
                         int argc,
-                        char **argv);
+												char **argv);
 
 /**
  * @brief Free a unicorn object and associated resources.

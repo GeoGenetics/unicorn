@@ -425,7 +425,10 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
     refstat_t v = kh_val(refmap, k);
     char *accession = hdr->target_name[kh_key(refmap, k)];
     float breath = v.REFCOVB/(double)v.REFLEN;
-    float expbreath =  1.0f - expf(-v.REFMCOV);
+    float expbreath = -expm1f(-v.REFMCOV);
+    float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
+    float stdev_on_cov = sqrtf(v.REFVONCOV);
+    float evenness = v.REFMONCOV ? (stdev_on_cov / v.REFMONCOV) : 0.0f;
     fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                 accession,                                  //1
                 v.REFLEN,                                   //2
@@ -445,10 +448,10 @@ static void _print_notax(FILE *fp, sam_hdr_t *hdr, refmap_t *refmap)
                 v.REFMCOV,                                  //16
                 breath,                                     //17
                 expbreath,                                  //18
-                breath/expbreath,                           //19
+                breath_ratio,                               //19
                 v.REFMONCOV,                                //20
-                sqrtf(v.REFVONCOV),                         //21
-                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //22
+                stdev_on_cov,                               //21
+                evenness,                                   //22
                 1000.0f * breath,                           //23
                 v.duplicity,                                //24
                 v.REFENTROPY,                               //25
@@ -474,7 +477,10 @@ static void _print_withtax(FILE *fp,
     uint32_t taxid = utax_gettaxid(utax, accession, &absent);
     if (absent) taxid = 0;
     float breath = v.REFCOVB/(double)v.REFLEN;
-    float expbreath =  1.0f - expf(-v.REFMCOV);
+    float expbreath = -expm1f(-v.REFMCOV);
+    float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
+    float stdev_on_cov = sqrtf(v.REFVONCOV);
+    float evenness = v.REFMONCOV ? (stdev_on_cov / v.REFMONCOV) : 0.0f;
     fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
                 accession,                                  //1
                 taxid,                                      //2
@@ -495,10 +501,10 @@ static void _print_withtax(FILE *fp,
                 v.REFMCOV,                                  //17
                 breath,                                     //18
                 expbreath,                                  //19
-                breath/expbreath,                           //20
+                breath_ratio,                               //20
                 v.REFMONCOV,                                //21
-                sqrtf(v.REFVONCOV),                         //22
-                sqrtf(v.REFVONCOV)/v.REFMONCOV,             //23
+                stdev_on_cov,                               //22
+                evenness,                                   //23
                 1000.0f * breath,                           //24
                 v.duplicity,                                //25
                 v.REFENTROPY,                               //26
@@ -508,8 +514,8 @@ static void _print_withtax(FILE *fp,
                 v.tad80,                                    //30
                 v.mdust,                                    //31
                 sqrtf(v.vdust)                              //32
-           );
-    }
+                );
+  }
 }
 
 void unicorn_refstat_print(const unicorn_t *u,

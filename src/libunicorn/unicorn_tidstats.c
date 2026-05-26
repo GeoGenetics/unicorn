@@ -11,6 +11,8 @@ typedef struct  pipeline {
   unicorn_stat_t *stats;
   utax_t *utax;
   void *forpool;
+	u64set_t *treadset;
+  u64set_t *freadset;
 } pipeline_t;
 
 typedef kvec_t(taxstat_t *) taxstatpq_t;
@@ -164,7 +166,7 @@ static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t)
       }
       uint8_t *ntag  = bam_aux_get(b, "XR");
       int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
-			fprintf(stderr, "READING ALN WITH XR=%d\n", next_xr);
+			//fprintf(stderr, "READING ALN WITH XR=%d\n", next_xr);
 			if (q[i].n >= LOADALNS_BATCH && next_xr != group_xr) {
         // Batch limit reached and taxid boundary crossed: cache for next call
         if (!bam_copy1(u->daln, b)) break;
@@ -176,7 +178,6 @@ static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t)
       if (!bam_copy1(cp, b)) break;
       kv_push(bam1_t *, q[i], cp);
       if (next_xr != group_xr) {
-				fprintf(stderr, "NEW XR tag!! %u %u\n", next_xr, group_xr);
 				group_xr = next_xr;
 			}
     }
@@ -260,8 +261,8 @@ static int _addaln(taxstat_t *ts,
   mean = ts->alnani_mean;
   delta = ani-mean;
   ts->alnani_mean += delta/naln;
-  ts->_MANI = delta * (ani - ts->alnani_mean);
-  ts->alnani_var = naln ? (ts->_MANI / (naln-1)) : 0.0f;
+  ts->_MANI += delta * (ani - ts->alnani_mean);
+  ts->alnani_var = naln > 1 ? (ts->_MANI / (naln - 1)) : 0.0f;
   mean = ts->alnnm_mean;
   delta = NM-mean;
   ts->alnnm_mean += delta/naln;
@@ -370,7 +371,7 @@ static int _compute(unicorn_t *u,
       taxstat.refmap  = refmap_init();  //refid set
       taxstat.camex = lint2int_init();
       kv_init(taxstat.a_ani);
-      taxstat.reflen  += u->hdr->target_len[tid];
+      taxstat.reflen  = 0;
       taxstat.readl_min = 0xffffffffU;
       ktax = taxmap_put(taxmap, taxid, &absent);
       kh_val(taxmap, ktax) = taxstat;
@@ -437,8 +438,8 @@ static int _compute(unicorn_t *u,
     mean = taxstat.alnani_mean;
     delta = ani-mean;
     taxstat.alnani_mean += delta/naln;
-    taxstat._MANI = delta * (ani - taxstat.alnani_mean);
-    taxstat.alnani_var = naln ? (taxstat._MANI / (naln-1)) : 0.0f;
+    taxstat._MANI += delta * (ani - taxstat.alnani_mean);
+    taxstat.alnani_var = naln > 1 ? (taxstat._MANI / (naln - 1)) : 0.0f;
     //Alignment NM
     mean = taxstat.alnnm_mean;
     delta = NM-mean;
@@ -546,7 +547,6 @@ static void _statfor(void *data, long i, int tid)
     int32_t xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
     if (j == 0) prev_xr = xr;
     if (xr != prev_xr) {
-      fprintf(stderr, "[libunicorn::%s] XR change detected: %d -> %d\n", __func__, prev_xr, xr);
       cur->_ntid = prev_xr;
       _taxafinalize(cur);
       kv_push(taxstat_t *, *out, cur);
@@ -566,6 +566,45 @@ static void _statfor(void *data, long i, int tid)
   genesis_encoderfree(enc);
 }
 
+static void _printtaxstats(FILE *fp, const taxstat_t taxstat, const utax_t *utax)
+{
+	if (!fp) return;
+  float breath = taxstat.reflen ? (float)(taxstat.covbases/(double)taxstat.reflen) : 0.0f;
+  float expbreath = -expm1f(-breath);
+  float stdevoncov = sqrtf(taxstat.varoncov);
+  float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
+  float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
+	fprintf(fp, TIDFMTSTR, taxstat._ntid,
+	                         utax_getname(utax, taxstat._ntid),
+	                         taxstat.nrefs,
+	                         taxstat.reflen,
+	                         taxstat.nalns,
+	                         kh_size(taxstat.readset),
+	                         taxstat.readl_mean,
+	                         sqrtf(taxstat.readl_var),
+	                         taxstat.readl_median,
+	                         taxstat.readl_mode,
+	                         taxstat.readl_min,
+	                         taxstat.readl_max,
+	                         taxstat.alnnm_mean,
+	                         taxstat.alnani_mean,
+	                         sqrtf(taxstat.alnani_var),
+	                         taxstat.alnani_median,
+	                         taxstat.covbases,
+	                         taxstat.covmean,
+	                         breath,
+	                         expbreath,
+	                         breath_ratio,
+	                         taxstat.meanoncov,
+	                         stdevoncov,
+	                         evenness,
+	                         1000.0f * breath,
+	                         taxstat.duplicity,
+	                         taxstat.mdust,
+	                         sqrtf(taxstat.vdust)
+	            );
+}
+
 static void *_taxstats_pipeline(void *data, int step, void *in)
 {
   pipeline_t *p = (pipeline_t *)data;
@@ -573,19 +612,22 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
 		step_t *s = _loadtaxa(p->u, p->stats, p->utax);
 		if (!s) return 0;
 		if (VERBOSE)
-			fprintf(stderr, "[libunicorn::%s] Loaded %u queues.\n", __func__, s->nqueue);
 		if (p->stats && s->queue) {
 			uint64_t n = 0;
-			for (uint8_t i = 0; i < s->nqueue; i++) n += s->queue[i].n;
+			for (uint8_t i = 0; i < s->nqueue; i++) {
+				n += s->queue[i].n;
+			}
+			//fprintf(stderr, "[libunicorn::%s] Loaded %lu alignments in total.\n", __func__, n);
 			p->stats->_nalns += n;
 		}
     return s;
   } //Load queries
   else if ( 1 == step ) { //Compute statistics
-    step_t *s = (step_t *)in;
-    if (s && s->nqueue)
+		step_t *s = (step_t *)in;
+		if (s && s->nqueue)
       kt_forpool(p->forpool, _statfor, s, s->nqueue);
-    return s;
+		//fprintf(stderr, "[libunicorn::%s] Finished computing stats for %u queues.\n", __func__, s->nqueue);
+		return s;
   }
   else if (2  == step ) { //Write output
     step_t *s = (step_t *)in;
@@ -593,18 +635,42 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
 		for (uint8_t i = 0; i < s->nqueue; i++) { //Loop over queues
       taxstatpq_t *tq = &s->taxq[i];
       for (uint32_t j = 0; j < tq->n; j++) { //Loop over taxstats
-        taxstat_t *ts = tq->a[j];
-        //int32_t taxid = ts->_ntid;
+				taxstat_t *ts = tq->a[j];
+				_printtaxstats(p->u->ofp, *ts, p->utax);
         // Accumulate global stats
-        stats->_nalns  += ts->nalns;
         stats->_nreads += kh_size(ts->readset);
         stats->_nrefs  += ts->nrefs;
+				// Accumulate run-wide totals (unique reads)
+        if (p->treadset && ts->readset) {
+          khint_t kr;
+          kh_foreach(ts->readset, kr) {
+            uint64_t qid = kh_key(ts->readset, kr);
+            int absent;
+            u64set_put(p->treadset, qid, &absent);
+          }
+        }
+        // Accumulate "passed filters" (same criteria as _taxmapstats)
+        if (ts->readset &&
+            kh_size(ts->readset) >= stats->minnreads &&
+            ts->alnani_mean >= stats->minmani) {
+          stats->_nfalns += ts->nalns;
+          stats->_nfrefs += ts->nrefs;
+          if (p->freadset) {
+            khint_t kr;
+            kh_foreach(ts->readset, kr) {
+              uint64_t qid = kh_key(ts->readset, kr);
+              int absent;
+              u64set_put(p->freadset, qid, &absent);
+            }
+          }
+        }
       }
       kv_destroy(*tq);
     }
     kv_destroy(*s->queue);
     free(s);
-  }
+		//fprintf(stderr, "[libunicorn::%s] Printed %lu alignments in total.\n", __func__, stats->_nalns);
+	}
   return 0;
 }
 
@@ -620,11 +686,17 @@ static int _sorted_compute(unicorn_t *u,
   stats->_nfalns = 0;
   stats->_nfrefs = 0;
   pipeline_t p = {u, stats, utax, 0};
+	p.treadset = u64set_init();
+	p.freadset = u64set_init();
   p.forpool = kt_forpool_init(u->threads);
   if (!p.forpool) return ret;
-  kt_pipeline(3, _taxstats_pipeline, &p, 3);
+ 	fprintf(u->ofp, TIDSTATSTR);
+	kt_pipeline(3, _taxstats_pipeline, &p, 3);
   kt_forpool_destroy(p.forpool);
-  sleep(1000);
+  stats->_nreads  = p.treadset ? kh_size(p.treadset) : 0;
+  stats->_nfreads = p.freadset ? kh_size(p.freadset) : 0;
+  if (p.treadset) u64set_destroy(p.treadset);
+  if (p.freadset) u64set_destroy(p.freadset);
   ret = 0;
   return ret;
 }
@@ -633,8 +705,51 @@ int unicorn_tidstat_compute(unicorn_t *u,
                             unicorn_stat_t *stats,
                             utax_t *utax)
 {
-  fprintf(stderr, "====> %u\n", u->sorted);
+  static uint8_t _warned_xr_fallback = 0;
   if ( u->sorted & XRSORTED ) {
+    // NOTE: `XRSORTED` is currently inferred from a header annotation that
+    // only guarantees the presence of taxonomy tags, not that the file is
+    // actually grouped/sorted by XR. The XR fast-path assumes contiguity of
+    // identical XR values; if that assumption is violated, the same taxid will
+    // be emitted multiple times and results will differ from the order-agnostic
+    // `_compute()` path.
+    //
+    // To keep outputs identical, do a cheap monotonicity check and fall back
+    // to `_compute()` if XR order is not non-decreasing.
+    bam1_t *b = bam_init1();
+    if (!b) return -1;
+    int32_t prev_xr = INT32_MIN;
+    uint8_t seen_non_missing = 0;
+    uint32_t violations = 0;
+    uint64_t checked = 0;
+    const uint64_t max_check = 200000; // enough to catch unsorted inputs quickly
+    while (checked < max_check && sam_read1(u->_FP, u->hdr, b) >= 0) {
+      uint8_t *xtag = bam_aux_get(b, "XR");
+      int32_t xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
+      if (xtag) seen_non_missing = 1;
+      else if (seen_non_missing) { // missing tag after non-missing => broken ordering for fast-path
+        violations++;
+        break;
+      }
+      if (xr < prev_xr) {
+        violations++;
+        break;
+      }
+      prev_xr = xr;
+      checked++;
+    }
+    bam_destroy1(b);
+    if (unicorn_rewind(u)) return -1;
+    if (violations) {
+      if (!_warned_xr_fallback) {
+        fprintf(stderr,
+                "[libunicorn::%s] XR tag present but file not XR-sorted/grouped "
+                "(checked %"PRIu64" records). Falling back to order-agnostic computation.\n",
+                __func__, checked);
+        _warned_xr_fallback = 1;
+      }
+      return _compute(u, stats, utax);
+    }
     if (VERBOSE)
       fprintf(stderr, "[libunicorn::%s] XR sorted file.\n", __func__);
     return _sorted_compute(u, stats, utax);
@@ -662,9 +777,10 @@ void unicorn_taxstat_print(const unicorn_t *u,
       if (k == kh_end(taxmap)) continue;
       taxstat_t taxstat = kh_val(taxmap, k);
       float breath = taxstat.covbases/(double)taxstat.reflen;
-      float expbreath =  1.0f - expf(-breath);
+      float expbreath = -expm1f(-breath);
       float stdevoncov = sqrtf(taxstat.varoncov);
       float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
+      float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
       fprintf(fp, TIDFMTSTR, taxid,
                              utax_getname(utax, taxid),
                              taxstat.nrefs,
@@ -685,7 +801,7 @@ void unicorn_taxstat_print(const unicorn_t *u,
                              taxstat.covmean,
                              breath,
                              expbreath,
-                             breath/expbreath,
+                             breath_ratio,
                              taxstat.meanoncov,
                              stdevoncov,
                              evenness,
@@ -702,9 +818,10 @@ void unicorn_taxstat_print(const unicorn_t *u,
   kh_foreach(taxmap, k) {
     taxstat_t taxstat = kh_val(taxmap, k);
     float breath = taxstat.covbases/(double)taxstat.reflen;
-    float expbreath =  1.0f - expf(-breath);
+    float expbreath = -expm1f(-breath);
     float stdevoncov = sqrtf(taxstat.varoncov);
     float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
+    float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
     fprintf(fp, TIDFMTSTR, kh_key(taxmap, k),
                            utax_getname(utax, kh_key(taxmap, k)),
                            taxstat.nrefs,
@@ -725,7 +842,7 @@ void unicorn_taxstat_print(const unicorn_t *u,
                            taxstat.covmean,
                            breath,
                            expbreath,
-                           breath/expbreath,
+                           breath_ratio,
                            taxstat.meanoncov,
                            stdevoncov,
                            evenness,

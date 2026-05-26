@@ -198,6 +198,7 @@ static void taxstats_usage(FILE *fp)
             "                               <str> is used as a prefix when --filelist is provided.\n"\
             "  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
             "                               Providing a .khash file is much faster.\n"\
+            "                               If omitted, taxonomy names/nodes are still loaded but accession lookup is disabled.\n"\
             "  -n <str> | --names <str>     Taxonomy names file.\n"\
             "  -d <str> | --nodes <str>     Taxonomy nodes file\n"\
             "  -k <int>                     kmer size for duplicity computation [17]\n"\
@@ -508,7 +509,8 @@ static int unicorn_refstats(int argc, char **argv)
   u = unicorn_init(opts.threads,
                    opts.ifile,
                    opts.outbam ? opts.outbam : NULL,
-                   argc,
+                   ofp,
+									 argc,
                    _argv);
   if (!u) goto exit;
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
@@ -667,6 +669,7 @@ static int unicorn_bamstats(int argc, char **argv)
     u = unicorn_init(opts.threads,
                      fileq.a[i],
                      NULL,
+										 ofp,
                      argc,
                      _argv);
     if (!u) {
@@ -766,6 +769,16 @@ static int unicorn_taxstats(int argc, char **argv)
     if (!opts.dumpacc2tax) opts.dumpacc2tax = strdup("acc2tax.khash");
     kv_init(accq);
   }
+  if (opts.onlypresent && !opts.acc2tax) {
+    fprintf(stderr, "[unicorn::%s] Error: --onlypresent requires --acc2tax.\n", __func__);
+    ret = 7;
+    goto exit;
+  }
+  if (!opts.names || !opts.nodes) {
+    fprintf(stderr, "[unicorn::%s] Error: taxonomy reporting requires --names and --nodes.\n", __func__);
+    ret = 7;
+    goto exit;
+  }
   fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
   clock_gettime(CLOCK_MONOTONIC, &start);
   utax = unicorn_loadtaxonomy(opts.acc2tax,
@@ -795,6 +808,7 @@ static int unicorn_taxstats(int argc, char **argv)
     u = unicorn_init(opts.threads,
                      fileq.a[i],
                      obamstr,
+										 ofp,
                      argc,
                      _argv);
     if (obamstr && obamstr != opts.outbam) free(obamstr);
@@ -929,7 +943,7 @@ static int unicorn_alnfilt(int argc, char **argv)
                                                                      opts.ifile);
   fflush(stderr);
   clock_gettime(CLOCK_MONOTONIC, &start);
-  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, argc, _argv);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, argc, _argv);
   if (!u) goto exit;
   ret = 5;
   if (!unicorn_isqgrouped(u)) goto exit;

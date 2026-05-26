@@ -383,10 +383,10 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
 														 const char *rank,
-													 	 int *ret)
+														 int *ret)
 {
 	*ret = 7;
-	if (!nodes || !acc2tax || !names) return NULL;
+	if (!nodes || !names) return NULL;
 	utax_t *utax = calloc(1, sizeof(utax_t));
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading nodes\n", __func__);
 	if ( tloadnodes(nodes, utax, ret) ) goto exit;
@@ -396,9 +396,14 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 	if (kh_size(utax->nodes.map) != kh_size(utax->namemap))
 		goto exit;
 	utax->numnodes = kh_size(utax->nodes.map);
-	if (VERBOSE) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
-	if (tloadaccessions(acc2tax, utax, 8, ret)) goto exit;
-	utax->numaccs = _emapsize(utax->accmap);
+	if (acc2tax) {
+		if (VERBOSE) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
+		if (tloadaccessions(acc2tax, utax, 8, ret)) goto exit;
+		utax->numaccs = _emapsize(utax->accmap);
+	} else {
+		utax->accmap = NULL;
+		utax->numaccs = 0;
+	}
 	if (rank) {
 		khint_t k;
 		k = chr2int_get(utax->nodes.levelmap, rank);
