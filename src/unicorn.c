@@ -738,10 +738,9 @@ static int unicorn_bamstats(int argc, char **argv)
 static int unicorn_taxstats(int argc, char **argv)
 {
   int ret = 1;
-  struct timespec start, stop, pstart, pstop;
-  clock_gettime(CLOCK_MONOTONIC, &pstart);
-  uint64_t ns;
-  utax_t *utax = 0;
+	struct timespec start = {0}, stop = {0}, pstart = {0}, pstop = {0};
+  uint64_t ns = 0;
+  utax_t *utax = NULL;
   unicorn_opt_t opts = {0};
   opts.threads   = 4;
   opts.minnreads = 1;
@@ -756,18 +755,22 @@ static int unicorn_taxstats(int argc, char **argv)
   strq_t accq = {0};
   FILE *ofp = NULL;
   char *_argv[64] = {0};
+
+  clock_gettime(CLOCK_MONOTONIC, &pstart);
+
+	if (argc <= 2) goto exit;
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-  unicorn_printopts(&opts, stderr, 0);
-  if (!opts.ifile && !opts.filel) goto exit;
-  if (opts.outstat) {
-    ret = 2;
+	ret = 2;
+	if (!opts.ifile && !opts.filel) goto exit;
+	if (opts.outstat) {
     ofp = fopen(opts.outstat, "w");
     if (!ofp) goto exit;
   }
   else ofp = stdout;
-  //Add files to queue
+  unicorn_printopts(&opts, stderr, 0);
+	//Add files to queue
   strq_t fileq = {0};
   if (opts.ifile) kv_push(char *, fileq, opts.ifile);
   if (opts.filel) unicorn_addfilelist(opts.filel, &fileq);
@@ -882,8 +885,10 @@ static int unicorn_taxstats(int argc, char **argv)
   ret = 0;
   exit:
     if (ret) {
-      fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
-      taxstats_usage(stderr);
+			if (ret > 1)
+      	fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
+			else ret = 0;
+				taxstats_usage(stderr);
     }
     if (utax) unicorn_closetaxonomy(utax);
     if (opts.ifile)   free(opts.ifile);
