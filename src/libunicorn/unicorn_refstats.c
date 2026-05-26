@@ -371,7 +371,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   bam1_t *b = bam_init1();
   htsFile *ofp = hts_open(u->outbam, "wb5");
   if (!ofp) goto exit;
-  if (u->threads > 1) bgzf_thread_pool(ofp->fp.bgzf, u->p, 0);
+  if (u->nthreads > 1) bgzf_thread_pool(ofp->fp.bgzf, u->p, 0);
   //Create new header
   ohdr = _stats2samhdr(stats, u->hdr);
   if ( !ofp || !ohdr ) goto exit;

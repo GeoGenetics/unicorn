@@ -63,6 +63,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "minalnas",        ko_required_argument, 328 },
     { "maxdust",         ko_required_argument, 329 },
     { "ksize",           ko_required_argument, 330 },
+		{ "qsize",           ko_required_argument, 331 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -105,7 +106,9 @@ typedef struct unicorn_opts {
   uint32_t niter;       // Max number of EM algorithm iterations
   uint8_t  scale_type;  // Subject weight scaling type for EM algorithm
   uint8_t  ksize;        // Kmer size for taxstats
-  //alnfilt
+	//taxstats
+	uint32_t qsize;       // Size of queue for taxstats computation
+	//alnfilt
   float minani;         // Minimum average nucleotide identity
   uint8_t alnfiltmode;  // Alignment filtering mode
   float pct;            // Percentage threshold for filtering
@@ -194,16 +197,15 @@ static void taxstats_usage(FILE *fp)
     fprintf(fp, "./unicorn taxstats [options] -b <in.bam>|<in.sam>\n");
     fprintf(fp, "Options:\n"\
             "  -b <str>                     Input bam|sam\n"\
-            "  -o <str> | --outbam <str>    Output BAM file with filtered alignments.\n"\
-            "                               <str> is used as a prefix when --filelist is provided.\n"\
             "  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
             "                               Providing a .khash file is much faster.\n"\
             "                               If omitted, taxonomy names/nodes are still loaded but accession lookup is disabled.\n"\
             "  -n <str> | --names <str>     Taxonomy names file.\n"\
             "  -d <str> | --nodes <str>     Taxonomy nodes file\n"\
             "  -k <int>                     kmer size for duplicity computation [17]\n"\
+						"  -t <int>, --threads <int>    Number of threads [4]\n"\
+						"  --qsize <int>                Size of queue for taxstats computation [1024]\n"\
             "  --outstat <str>              Output statistics file [/dev/stdout]\n"\
-            "                               <str> is used as a prefix when --filelist is provided.\n"\
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      For example \"--minreads 100\" to filter out taxids with\n"\
             "      less than 100 reads.\n"\
@@ -213,8 +215,7 @@ static void taxstats_usage(FILE *fp)
             "       - minmani  <float> Minimum mean ANI per taxid. [0]\n"\
             "       - minalnas <int>   Minimum alignment score [-Inf]\n"\
             "       - maxdust  <int>   Maximum alignment dust score [100]\n"\
-            "  --filelist <str>             File containing input file paths. One per line.\n"\
-            "  --rank <str>                 Taxonomic rank to summarize by. [species]\n"\
+            "  --rank <str>                 Taxonomic rank to summarize by. [genus]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message\n");
 }
@@ -419,6 +420,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
       case 330: //ksize
         opts->ksize = strtoul(o.arg, NULL, 10);
         break;
+			case 331: //qsize
+				opts->qsize = strtoul(o.arg, NULL, 10);
+				break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -522,6 +526,7 @@ static int unicorn_refstats(int argc, char **argv)
                             opts.minalnas,
                             opts.maxdust,
                             opts.ksize,
+														0,
                             REFSTATS);
   if (!stats) goto exit;
   ret = -4;
@@ -681,7 +686,7 @@ static int unicorn_bamstats(int argc, char **argv)
     ret = -3;
     //Parse the statistics string and initialize stat object
     fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
-    stats = unicorn_stat_init(0, 0, 0, 0, 100, 0, 0);
+    stats = unicorn_stat_init(0, 0, 0, 0, 100, 0, 0, 0);
     if (!stats) goto exit;
     ret = -4;
     //Compute statistics
@@ -745,7 +750,8 @@ static int unicorn_taxstats(int argc, char **argv)
   opts.maxdust   = 100;
   opts.rank  = strdup("genus");
   opts.ksize = 17;
-  unicorn_t *u = NULL;
+  opts.qsize = 1024;
+	unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
   strq_t accq = {0};
   FILE *ofp = NULL;
@@ -825,6 +831,7 @@ static int unicorn_taxstats(int argc, char **argv)
                               opts.minalnas,
                               opts.maxdust,
                               opts.ksize,
+															opts.qsize,
                               TAXSTATS);
     if (!stats) goto exit;
     clock_gettime(CLOCK_MONOTONIC, &start);

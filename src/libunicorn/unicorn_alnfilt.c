@@ -1,7 +1,51 @@
 #define _XOPEN_SOURCE 700
 #include "unicorn_internal.h"
 
-sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap);
+sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap)
+{
+  if ( !hdr || !q.n ) return NULL;
+  kstring_t kstr = {0};
+	sam_hdr_t *ohdr = sam_hdr_init();
+  if (!ohdr) return NULL;
+  //Add HD line
+  sam_hdr_find_hd(hdr, &kstr);
+  sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+	khint32_t k, ntid = 0;
+	int absent, err = 1;
+	for (uint64_t i = 0; i < q.n; i++) { //Loop over scores
+		if (q.a[i].score)	{
+			int32_t tid = q.a[i].tid;
+			if ( sam_hdr_find_line_pos(hdr, "SQ", tid, &kstr) )
+      	goto exit;
+			k = int2int_put(tidmap, tid, &absent);
+			if (absent) { //Add tid with corresponding new tid
+				kh_val(tidmap, k) = ntid++;
+			 	//Add target to new header
+    		sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+			}
+		}
+	}
+	//Add RG lines
+  for (int j = 0; j < sam_hdr_count_lines(hdr, "RG"); j++) {
+    if ( sam_hdr_find_line_pos(hdr, "RG", j, &kstr) ) goto exit;
+    sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+  }
+  //Add PG lines
+  for (int j = 0; j < sam_hdr_count_lines(hdr, "PG"); j++)  {
+    if ( sam_hdr_find_line_pos(hdr, "PG", j, &kstr) ) goto exit;
+    sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+  }
+  //Add CO lines
+  for (int j = 0; j < sam_hdr_count_lines(hdr, "CO"); j++) {
+    if ( sam_hdr_find_line_pos(hdr, "CO", j, &kstr) ) goto exit;
+    sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+  }
+	free(kstr.s);
+	err = 0;
+	exit:
+		if (err) {sam_hdr_destroy(ohdr), ohdr = NULL;}
+		return ohdr;
+}
 
 static inline uint32_t mode_alltop(alnscoreq_t q, uint64_t p, float max, float pct)
 {
@@ -57,7 +101,7 @@ static inline uint32_t mode_rndtop(alnscoreq_t q, uint64_t p, float max, float p
 		q.a[i].score = 0.0;
 		f++;
 	}
-	return f; 
+	return f;
 }
 
 static inline uint32_t mode_pcttop(alnscoreq_t q, uint64_t p, float max, float pct)

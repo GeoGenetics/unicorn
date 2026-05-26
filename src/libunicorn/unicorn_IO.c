@@ -17,7 +17,7 @@ uint8_t unicorn_rewind(unicorn_t *u)
 		if ( !( u->_FP = hts_open(u->ifile, "r") ) ) goto exit;
 		bam_hdr_destroy(u->hdr);
 		if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
-		if (u->threads > 1)
+		if (u->nthreads > 1)
       bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0);
 		ret = 0;
 	}
@@ -77,7 +77,7 @@ static uint8_t isXsorted(sam_hdr_t *h)
   return 0;
 }
 
-unicorn_t *unicorn_init( int threads,
+unicorn_t *unicorn_init( int nthreads,
                          const char *ifile,
                          char *outbam,
 												 FILE *ofp,
@@ -87,11 +87,11 @@ unicorn_t *unicorn_init( int threads,
     int ret = -1;
     unicorn_t *u = calloc(1, sizeof(unicorn_t));
     if (!u) return NULL;
-    u->threads = threads;
+    u->nthreads = nthreads;
     u->ifile = strdup(ifile);
     if ( !( u->_FP = hts_open(ifile,"r") ) ) goto exit;
-    if (threads > 1) {
-        u->p = hts_tpool_init(threads < 4 ? threads : 4);
+    if (nthreads > 1) {
+        u->p = hts_tpool_init(nthreads < 4 ? nthreads : 4);
         if (!u->p) goto exit;
         bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0);
     }
@@ -255,8 +255,8 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 dataq_t *unicorn_qloadqueue(unicorn_t *u, uint64_t *naln)
 {
 	*naln = 0;
-	dataq_t *dq = calloc(u->threads, sizeof(dataq_t));
-	for (int32_t i = 0; i < u->threads; i++) {
+	dataq_t *dq = calloc(u->nthreads, sizeof(dataq_t));
+	for (int32_t i = 0; i < u->nthreads; i++) {
 		kv_init(dq[i]);
 		alnscoreq_t threadq;
 		kv_init(threadq);

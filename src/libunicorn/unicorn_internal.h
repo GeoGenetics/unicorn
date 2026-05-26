@@ -104,7 +104,7 @@ typedef struct values_t {
 typedef struct {
   int  argc;
   char **argv;
-  int  threads;
+  int  nthreads;
   char *ifile;
   char *outbam;
 	FILE *ofp;
@@ -290,6 +290,7 @@ typedef struct unicorn_stats_t {
   int32_t  minalnas;  // Minimum alignment score to consider
   int32_t  maxdust;   // Maximum dust score to consider
 	uint8_t	 ksize;     // kmer size for complexity estimation
+	uint32_t qsize;     // Queue size for taxstats computation
 } unicorn_stat_t;
 
 typedef struct _covstats_t {

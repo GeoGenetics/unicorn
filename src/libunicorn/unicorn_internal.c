@@ -138,6 +138,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   int32_t  minalnas,
                                   int32_t  maxdust,
                                   uint8_t  ksize,
+																	uint32_t qsize,
                                   uint8_t  flg)
 {
   unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
@@ -154,6 +155,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
   stats->minalnas  = minalnas;
   stats->maxdust   = maxdust;
   stats->ksize     = ksize;
+	stats->qsize     = qsize;
 	kv_init(stats->_taxorder);
   memset(stats->_readlc, 0, 256*sizeof(uint32_t));
   return stats;

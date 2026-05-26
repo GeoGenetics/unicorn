@@ -129,7 +129,7 @@ static void _taxmapstats(unicorn_stat_t *stats)
 
 #define LOADALNS_BATCH 1000
 
-static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t)
+static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t, uint32_t qsize)
 {
   (void)t;
   uint8_t nq = *n;
@@ -167,7 +167,7 @@ static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t)
       uint8_t *ntag  = bam_aux_get(b, "XR");
       int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
 			//fprintf(stderr, "READING ALN WITH XR=%d\n", next_xr);
-			if (q[i].n >= LOADALNS_BATCH && next_xr != group_xr) {
+			if (q[i].n >= qsize && next_xr != group_xr) {
         // Batch limit reached and taxid boundary crossed: cache for next call
         if (!bam_copy1(u->daln, b)) break;
         u->dcache = 1;
@@ -484,9 +484,9 @@ static step_t *_loadtaxa(unicorn_t *u,
 {
 	step_t *s = malloc(sizeof(step_t));
 	if (!s) return NULL;
-	s->queue = calloc(8, sizeof(bamq_t));
-	s->nqueue  = 8;
-	_loadalns(s->queue, &s->nqueue, u, utax);
+	s->queue = calloc(u->nthreads, sizeof(bamq_t));
+	s->nqueue  = u->nthreads;
+	_loadalns(s->queue, &s->nqueue, u, utax, stats->qsize);
 	if (s->nqueue == 0) {
 		if (s->queue) free(s->queue);
 		free(s);
@@ -688,7 +688,7 @@ static int _sorted_compute(unicorn_t *u,
   pipeline_t p = {u, stats, utax, 0};
 	p.treadset = u64set_init();
 	p.freadset = u64set_init();
-  p.forpool = kt_forpool_init(u->threads);
+  p.forpool = kt_forpool_init(u->nthreads);
   if (!p.forpool) return ret;
  	fprintf(u->ofp, TIDSTATSTR);
 	kt_pipeline(3, _taxstats_pipeline, &p, 3);

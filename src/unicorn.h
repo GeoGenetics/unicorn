@@ -136,6 +136,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   int32_t  minalnas,
                                   int32_t  maxdust,
                                   uint8_t  ksize,
+																	uint32_t qsize,
                                   uint8_t  flg);
 
 void unicorn_stat_destroy(unicorn_stat_t *stats);
