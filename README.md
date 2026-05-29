@@ -100,11 +100,11 @@ Commands:
 
 ### refstats
 
-`refstats` computes one row of statistics per reference sequence. It is the main
+Computes one row of statistics per reference sequence. It is the main
 command for reference-level filtering, coverage metrics, and adding taxonomy tags
 to filtered BAM files.
 
-```
+```bash
 unicorn refstats -h
 unicorn 2.5.0 c414a07
         May 27 2026 13:08:46
@@ -135,8 +135,7 @@ Options:
   --rank <str>    Taxonomic rank for XR tag. [genus]
   --verbose  Print libunicorn's messages.
   -h         print this help message
-
-#### refstats Filters
+```
 
 Filter aligned.bam so that we only keep references with at least 10 reads aligned to them.
 We also only keep references that are 1000bp or more. Additionally only keep alignments with 
