@@ -45,14 +45,6 @@ The executable is called `unicorn`. The conda package is currently named
 conda install -c conda-forge -c bioconda enhjoerning
 ```
 
-#### Conda Requirements
-
-Conda installs the runtime dependencies for you:
-
-- `htslib` for SAM/BAM IO
-- `genesis` for canonical k-mer encoding used by duplicity statistics
-- `zlib` and transitive compression libraries required by htslib and Genesis
-
 ### From Source
 
 Clone with submodules and build:
@@ -67,8 +59,8 @@ make
 
 Building from source requires:
 
-- A C compiler
-- A C++ compiler with C++20 support
+- C compiler (gcc is fine)
+- A C++ compiler with C++20 support(gcc is fine)
 - `make`
 - [htslib](https://github.com/samtools/htslib)
 - [Genesis](https://github.com/lczech/genesis)
@@ -106,66 +98,57 @@ Commands:
   alnfilt     Filter alignments based on user-defined criteria.
 ```
 
-Most commands read SAM/BAM with `-b`. Statistics are written to stdout unless
-`--outstat` is supplied.
-
 ### refstats
 
-`refstats` computes one row of statistics per reference sequence. It is the main
+Computes one row of statistics per reference sequence. It is the main
 command for reference-level filtering, coverage metrics, and adding taxonomy tags
 to filtered BAM files.
 
-#### refstats Parameters
-
-- `-b <str>`: input SAM/BAM file.
-- `-t <int>`, `--threads <int>`: number of threads to use. Default: `4`.
-- `-o <str>`, `--outbam <str>`: write a BAM containing alignments to references that pass filters.
-- `--outstat <str>`: write the statistics table to this file instead of stdout.
-- `--minrefl <int>`: minimum reference length to consider. Default: `1`.
-- `--minreads <int>`: minimum number of reads per reference. Default: `1`.
-- `--minalnas <int>`: minimum alignment score. Default: no lower bound.
-- `--maxdust <int>`: maximum alignment dust score. Default: `100`.
-- `--names <str>`: NCBI `names.dmp` file for taxonomy names.
-- `--nodes <str>`: NCBI `nodes.dmp` file for taxonomy parent and rank information.
-- `--acc2tax <str>`: accession-to-taxid map. This can be a text file, compressed text file, or `.khash` map.
-- `--rank <str>`: taxonomic rank used for the `XR` tag. Default: `species`.
-- `-k <int>`: k-mer size used for duplicity computation. Default: `17`.
-- `--verbose`: print libunicorn progress messages.
-- `-h`: print command help.
-
-#### Run refstats
-
 ```bash
-unicorn refstats -b aligned.bam --outstat refstats.txt
+unicorn refstats -h
+unicorn 2.5.0 c414a07
+        May 27 2026 13:08:46
+./unicorn refstats [options] -b <in.bam>|<in.sam>
+Options:
+  -b <str>   Input bam|sam [Required]
+  -t <int>, --threads <int> Number of threads [4]
+  -o <str>, --outbam  <str> Output BAM file with filtered references
+  --outstat <str> Output statistics file
+  --[FILTER] <PARAM>  Apply reference filter "FILTER" with parameter "PARAM"
+      For example "--minreads 100" to filter out references with
+      less than 100 reads.
+      Available filters:
+       - minrefl  <int>  Minimum reference length to consider [1]
+       - minreads <int>  Minimum number of reads per reference  [1]
+       - minalnas <int>  Minimum alignment score [-Inf]
+       - maxdust  <int>  Maximum alignment dust score [100]
+  --names   <str> Taxonomy nodeid to name mapping file.
+  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.
+  --acc2tax <str> Accession to taxid mapping file or .khash file.
+  -k <int> kmer size for duplicity computation [17]
+  Report taxid of reference sequence. Enabled automatically when
+  --acc2tax, --names and --nodes are provided.
+  taxid is reported in bam records in custom:
+  XT:i:<taxid> tag and
+  XR:i:<taxid> tag
+  In column 2 in the output statistics file.
+  --rank <str>    Taxonomic rank for XR tag. [genus]
+  --verbose  Print libunicorn's messages.
+  -h         print this help message
 ```
 
-#### refstats Filters
-
-Filters are applied while statistics are computed. Filtered rows are excluded
-from the printed statistics and, when `--outbam` is used, from the output BAM.
+Filter aligned.bam so that we only keep references with at least 10 reads aligned to them.
+We also only keep references that are 1000bp or more. Additionally only keep reads whose dust value is 80 or less.
+Write the statistics to refstats.txt and the alignments that passed filters to refstats.bam.
 
 ```bash
 unicorn refstats \
   -b aligned.bam \
+  -o refstats.bam
   --minreads 10 \
   --minrefl 1000 \
-  --minalnas 30 \
-  --maxdust 100 \
-  --outstat refstats.filtered.txt
-```
-
-#### Write BAM After Filtering
-
-Use `--outbam` to write a BAM containing only alignments assigned to references
-that pass the `refstats` filters:
-
-```bash
-unicorn refstats \
-  -b aligned.bam \
-  --minreads 10 \
-  --minrefl 1000 \
-  --outbam filtered.bam \
-  --outstat refstats.filtered.txt
+  --maxdust 80 \
+  --outstat refstats.txt
 ```
 
 #### Add Taxonomy To BAM Files
@@ -176,19 +159,18 @@ the filtered BAM with taxonomy tags.
 ```bash
 unicorn refstats \
   -b aligned.bam \
-  --acc2tax acc2tax.txt.gz \
+  --acc2tax acc2tax.txt \
   --names names.dmp \
   --nodes nodes.dmp \
   --rank genus \
-  --outbam tagged.bam \
-  --outstat refstats.with_taxonomy.txt
+  --outbam refstats.bam > refstats.txt
 ```
 
 The taxonomy inputs are:
 
-- `--nodes`: NCBI taxonomy nodes file. It describes parent-child relationships and rank for each taxid.
-- `--names`: NCBI taxonomy names file. It maps taxids to readable names.
-- `--acc2tax`: accession-to-taxid map. It maps BAM reference names/accessions to taxids.
+- `--nodes`: NCBI taxonomy nodes file.
+- `--names`: NCBI taxonomy names file.
+- `--acc2tax`: accession-to-taxid map. It maps BAM reference names to taxids.
 
 `refstats` writes two integer tags to BAM records:
 
@@ -210,26 +192,35 @@ map.
 can either assign alignments to taxa from an accession map, or consume BAM files
 that already contain Unicorn `XT` and `XR` tags.
 
-#### taxstats Parameters
-
-- `-b <str>`: input SAM/BAM file.
-- `-a <str>`, `--acc2tax <str>`: accession-to-taxid map. This is optional when the BAM already contains Unicorn taxonomy tags.
-- `-n <str>`, `--names <str>`: NCBI `names.dmp` file.
-- `-d <str>`, `--nodes <str>`: NCBI `nodes.dmp` file.
-- `-k <int>`: k-mer size used for duplicity computation. Default: `17`.
-- `-t <int>`, `--threads <int>`: number of threads to use. Default: `4`.
-- `--qsize <int>`: queue size for batched taxstats computation. Default: `1024`.
-- `--outstat <str>`: write the statistics table to this file instead of stdout.
-- `--minrefl <int>`: minimum reference length. Default: `0`.
-- `--minreads <int>`: minimum number of reads per taxid. Default: `1`.
-- `--minmani <float>`: minimum mean ANI per taxid, parsed as a value from `0` to `1`. Default: `0`.
-- `--minalnas <int>`: minimum alignment score. Default: no lower bound.
-- `--maxdust <int>`: maximum alignment dust score. Default: `100`.
-- `--rank <str>`: taxonomic rank to summarize by. Default: `genus`.
-- `--verbose`: print libunicorn progress messages.
-- `-h`: print command help.
-
-#### Run taxstats
+```bash
+unicorn 2.5.0 c414a07
+        May 27 2026 13:08:46
+./unicorn taxstats [options] -b <in.bam>|<in.sam>
+Options:
+  -b <str>                     Input bam|sam
+  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.
+                               Providing a .khash file is much faster.
+                               If omitted, taxonomy names/nodes are still loaded but accession lookup is disabled.
+  -n <str> | --names <str>     Taxonomy names file.
+  -d <str> | --nodes <str>     Taxonomy nodes file
+  -k <int>                     kmer size for duplicity computation [17]
+  -t <int>, --threads <int>    Number of threads [4]
+  --qsize <int>                Size of queue for taxstats computation [1024]
+  --outstat <str>              Output statistics file [/dev/stdout]
+  --[FILTER] <PARAM>  Apply filter "FILTER" with parameter "PARAM"
+      For example "--minreads 100" to filter out taxids with
+      less than 100 reads.
+      Available filters:
+       - minrefl  <int>   Minimum reference length. [0]
+       - minreads <int>   Minimum number of reads per taxid. [1]
+       - minmani  <float> Minimum mean ANI per taxid. [0]
+       - minalnas <int>   Minimum alignment score [-Inf]
+       - maxdust  <int>   Maximum alignment dust score [100]
+  --rank <str>                 Taxonomic rank to summarize by. [genus]
+  --verbose                    Prints libunicorn's messages.
+  -h                           Print this help message
+[unicorn::unicorn_taxstats] Total time: 0.000025 seconds
+```
 
 Run `taxstats` from an accession map:
 
@@ -246,98 +237,50 @@ unicorn taxstats \
 Run `taxstats` from a BAM already annotated by `refstats`:
 
 ```bash
+unicorn refstats \
+  -b alignments.bam \
+  -o refstats.bam \
+  --names names.dmp --nodes nodes.dmp > /dev/null 
 unicorn taxstats \
-  -b tagged.bam \
+  -b refstats.bam \
   --names names.dmp \
   --nodes nodes.dmp \
   --rank genus \
   --outstat genus.taxstats.txt
-```
-
-#### taxstats Filters
-
-Filters remove taxids from the final table and from the run-wide "passed
-filters" counters.
-
-```bash
-unicorn taxstats \
-  -b aligned.bam \
-  --acc2tax acc2tax.txt.gz \
-  --names names.dmp \
-  --nodes nodes.dmp \
-  --rank genus \
-  --minreads 10 \
-  --minmani 0.90 \
-  --minalnas 30 \
-  --maxdust 100 \
-  --outstat genus.filtered.taxstats.txt
 ```
 
 #### Relation To refstats Taxonomy Tags
 
 `refstats` and `taxstats` are designed to work together. A common workflow is:
 
+From a metagenomic sample, let's keep only the reads that mapped to any mamal.
+Only report mammals with at least 1000 reads.
+    
+
 ```bash
 unicorn refstats \
   -b aligned.bam \
+  --maxdust 50\
   --acc2tax acc2tax.txt.gz \
   --names names.dmp \
   --nodes nodes.dmp \
-  --rank genus \
-  --outbam tagged.bam \
+  --rank class \
+  --outbam refstat.bam \
   --outstat refstats.txt
 
+samtools sort -t XR refstat.bam > refstats.XRsorted.bam
+
 unicorn taxstats \
-  -b tagged.bam \
-  --names names.dmp \
-  --nodes nodes.dmp \
-  --rank genus \
+  -b refstats.XRSorted.bam \
+  --minrefl 1000000000\
+  --minreads 10000\
+  --minalnas -10\
   --outstat genus.taxstats.txt
+
+
+samtools view refstats.XRSorted.bam <() | 
+  
 ```
-
-In this second command, `--acc2tax` is not required because `refstats` already
-wrote taxonomy information into the BAM. `taxstats` uses the `XR` tag to group
-records by the selected rank taxid.
-
-For best performance, use a BAM grouped or sorted by `XR`. Unicorn detects the
-`unicorn:tax-tags` header annotation and uses an XR-aware fast path when records
-are actually grouped by rank taxid. If the order is not valid, Unicorn falls
-back to the order-agnostic computation.
-
-### alnfilt
-
-`alnfilt` filters alignments within each query group. Input must be query-sorted
-or query-grouped.
-
-```bash
-samtools sort -n -o query_sorted.bam aligned.bam
-
-unicorn alnfilt \
-  -b query_sorted.bam \
-  --mode ALLTOP \
-  --minani 90 \
-  --maxani 100 \
-  --outbam filtered.bam
-```
-
-#### alnfilt Parameters
-
-- `-b <str>`: input SAM/BAM file. It must be query-sorted or query-grouped.
-- `-o <str>`, `--outbam <str>`: output BAM file. Default: stdout.
-- `--mode <str>`: filtering mode. Default: `ALLTOP`.
-- `--pct <float>`: percentage threshold for `PCTTOP` mode. Default: `0.90`.
-- `--minani <float>`: minimum average nucleotide identity. Default: `90.0`.
-- `--maxani <float>`: maximum average nucleotide identity. Default: `100.0`.
-- `--strictbounds`: remove a query if any of its alignments falls outside the ANI bounds.
-- `--verbose`: print libunicorn progress messages.
-- `-h`: print command help.
-
-Available `--mode` values:
-
-- `ALLTOP`: keep all alignments tied for the best score.
-- `RNDTOP`: randomly keep one best alignment.
-- `PCTTOP`: keep alignments within `--pct` of the best score.
-- `ALL`: keep all alignments that pass ANI bounds.
 
 ## Output Columns
 
@@ -388,15 +331,6 @@ species genus family order class phylum kingdom domain
 - Coverage breadth is the fraction of reference bases covered at least once.
 - Coverage evenness is computed from coverage on covered bases, so it is best interpreted together with `breath_cov`.
 
-## Testing
-
-```bash
-make test
-```
-
-## Developers
-
-Development notes are in [src/README.md](src/README.md).
 
 ## License
 
