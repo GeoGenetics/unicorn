@@ -104,7 +104,7 @@ Add taxonomy tags to the filtered BAM while running `refstats`:
 ```bash
 unicorn refstats \
   -b aligned.bam \
-  --acc2tax acc2tax.khash \
+  --acc2tax acc2tax.txt[.gz] \
   --names names.dmp \
   --nodes nodes.dmp \
   --rank genus \
