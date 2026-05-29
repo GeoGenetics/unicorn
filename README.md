@@ -126,15 +126,12 @@ Use `taxstats` to summarize alignments by taxonomic rank:
 ```bash
 unicorn taxstats \
   -b aligned.bam \
-  --acc2tax acc2tax.khash \
+  --acc2tax acc2tax.txt[.gz] \
   --names names.dmp \
   --nodes nodes.dmp \
   --rank genus \
   --outstat genus.taxstats.txt
 ```
-
-`--acc2tax` may be a text accession-to-taxid table or a `.khash` map. The
-`.khash` format loads much faster for repeated runs.
 
 If the BAM already contains Unicorn taxonomy tags from `refstats`, `taxstats`
 can run without `--acc2tax`:
