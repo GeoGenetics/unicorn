@@ -138,10 +138,8 @@ Options:
 ```
 
 Filter aligned.bam so that we only keep references with at least 10 reads aligned to them.
-We also only keep references that are 1000bp or more. Additionally only keep alignments with 
-scores: 30 or less and whose dust value is 80 or less. Write the statistics to refstats.txt
-and the alignments that passed filters to refstats.bam.
-the file refstats.bam
+We also only keep references that are 1000bp or more. Additionally only keep reads whose dust value is 80 or less.
+Write the statistics to refstats.txt and the alignments that passed filters to refstats.bam.
 
 ```bash
 unicorn refstats \
@@ -149,7 +147,6 @@ unicorn refstats \
   -o refstats.bam
   --minreads 10 \
   --minrefl 1000 \
-  --minalnas 30 \
   --maxdust 80 \
   --outstat refstats.txt
 ```
@@ -225,8 +222,6 @@ Options:
 [unicorn::unicorn_taxstats] Total time: 0.000025 seconds
 ```
 
-#### Run taxstats
-
 Run `taxstats` from an accession map:
 
 ```bash
@@ -242,53 +237,34 @@ unicorn taxstats \
 Run `taxstats` from a BAM already annotated by `refstats`:
 
 ```bash
+unicorn refstats \
+  -b alignments.bam \
+  -o refstats.bam \
+  --names names.dmp --nodes nodes.dmp > /dev/null 
 unicorn taxstats \
-  -b tagged.bam \
+  -b refstats.bam \
   --names names.dmp \
   --nodes nodes.dmp \
   --rank genus \
   --outstat genus.taxstats.txt
 ```
 
-#### taxstats Filters
-
-Filters remove taxids from the final table and from the run-wide "passed
-filters" counters.
-
-```bash
-unicorn taxstats \
-  -b aligned.bam \
-  --acc2tax acc2tax.txt.gz \
-  --names names.dmp \
-  --nodes nodes.dmp \
-  --rank genus \
-  --minreads 10 \
-  --minmani 0.90 \
-  --minalnas 30 \
-  --maxdust 100 \
-  --outstat genus.filtered.taxstats.txt
-```
-
 #### Relation To refstats Taxonomy Tags
 
 `refstats` and `taxstats` are designed to work together. A common workflow is:
 
-From alignments.bam, get me all the alignments:
-    Whose references have at least 1000 reads.
-    Alignment must have scores smaller than 3.
-    Reads should not have dust scores higher that 50
+From a metagenomic sample, let's keep only the reads that mapped to any mamal.
+Only report mammals with at least 1000 reads.
     
 
 ```bash
 unicorn refstats \
   -b aligned.bam \
-  --minreads 1000\
-  --minalnas 3\
   --maxdust 50\
   --acc2tax acc2tax.txt.gz \
   --names names.dmp \
   --nodes nodes.dmp \
-  --rank genus \
+  --rank class \
   --outbam refstat.bam \
   --outstat refstats.txt
 
@@ -296,55 +272,15 @@ samtools sort -t XR refstat.bam > refstats.XRsorted.bam
 
 unicorn taxstats \
   -b refstats.XRSorted.bam \
+  --minrefl 1000000000\
+  --minreads 10000\
+  --minalnas -10\
   --outstat genus.taxstats.txt
 
-Get me the reads of 
+
+samtools view refstats.XRSorted.bam <() | 
   
 ```
-
-In this second command, `--acc2tax` is not required because `refstats` already
-wrote taxonomy information into the BAM. `taxstats` uses the `XR` tag to group
-records by the selected rank taxid.
-
-For best performance, use a BAM grouped or sorted by `XR`. Unicorn detects the
-`unicorn:tax-tags` header annotation and uses an XR-aware fast path when records
-are actually grouped by rank taxid. If the order is not valid, Unicorn falls
-back to the order-agnostic computation.
-
-### alnfilt
-
-`alnfilt` filters alignments within each query group. Input must be query-sorted
-or query-grouped.
-
-```bash
-samtools sort -n -o query_sorted.bam aligned.bam
-
-unicorn alnfilt \
-  -b query_sorted.bam \
-  --mode ALLTOP \
-  --minani 90 \
-  --maxani 100 \
-  --outbam filtered.bam
-```
-
-#### alnfilt Parameters
-
-- `-b <str>`: input SAM/BAM file. It must be query-sorted or query-grouped.
-- `-o <str>`, `--outbam <str>`: output BAM file. Default: stdout.
-- `--mode <str>`: filtering mode. Default: `ALLTOP`.
-- `--pct <float>`: percentage threshold for `PCTTOP` mode. Default: `0.90`.
-- `--minani <float>`: minimum average nucleotide identity. Default: `90.0`.
-- `--maxani <float>`: maximum average nucleotide identity. Default: `100.0`.
-- `--strictbounds`: remove a query if any of its alignments falls outside the ANI bounds.
-- `--verbose`: print libunicorn progress messages.
-- `-h`: print command help.
-
-Available `--mode` values:
-
-- `ALLTOP`: keep all alignments tied for the best score.
-- `RNDTOP`: randomly keep one best alignment.
-- `PCTTOP`: keep alignments within `--pct` of the best score.
-- `ALL`: keep all alignments that pass ANI bounds.
 
 ## Output Columns
 
@@ -395,15 +331,6 @@ species genus family order class phylum kingdom domain
 - Coverage breadth is the fraction of reference bases covered at least once.
 - Coverage evenness is computed from coverage on covered bases, so it is best interpreted together with `breath_cov`.
 
-## Testing
-
-```bash
-make test
-```
-
-## Developers
-
-Development notes are in [src/README.md](src/README.md).
 
 ## License
 
