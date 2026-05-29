@@ -14,7 +14,7 @@ else
   GENESIS_LIB := -L$(GENESIS_PREFIX)/lib/ -Wl,-rpath,$(GENESIS_PREFIX)/lib
 endif
 
-CXXFLAGS := $(GENESIS_INC) -O3 -std=c++20 -Wall -Wextra -pedantic
+CXXFLAGS := $(GENESIS_INC) -O3 -std=c++2a -Wall -Wextra -pedantic
 CFLAGS   := -Wall -Wextra -pedantic -O3
 LDFLAGS  := $(GENESIS_LIB)
 LDLIBS   := -lgenesis -lstdc++ -lz
