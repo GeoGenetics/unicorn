@@ -119,6 +119,12 @@ unicorn's BAM statistic computation interface
  */
 typedef struct unicorn_stat_t *unicorn_stat_t;
 
+/*
+unicorn's taxonomy interface (opaque). Forward declaration is needed because
+some statistics routines optionally take a taxonomy handle.
+*/
+typedef struct utax_t *utax_t;
+
 /**
  * @brief Initialize a unicorn_stat_t object
  * @param minnreads - Minimum number of reads per reference
@@ -144,7 +150,7 @@ void unicorn_stat_destroy(unicorn_stat_t *stats);
 /**
  * @brief Compute reference statistics
  */
-int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats);
+int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax);
 /**
  * @brief Compute bam statistics
  */
@@ -175,8 +181,6 @@ unicorn's taxonomy interface
 This is an opaque structure.
 Members and methods are accessed via the unicron_* functions
 */
-typedef struct utax_t *utax_t;
-
 /* B|Sam manipulation routines */
 uint8_t unicorn_refstats_filterbam(unicorn_t *u,
                                    unicorn_stat_t *stats,

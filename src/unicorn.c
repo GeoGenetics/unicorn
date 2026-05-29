@@ -40,7 +40,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "outbam",          ko_required_argument, 305 },
     { "outstat",         ko_required_argument, 306 },
     { "withtaxid",       ko_no_argument,       307 },
-    { "minrefl",         ko_required_argument, 308 },
+    { "minreflen",       ko_required_argument, 308 },
     { "minreads",        ko_required_argument, 309 },
     { "filelist",        ko_required_argument, 310 },
     { "printdists",      ko_no_argument,       311 },
@@ -162,10 +162,10 @@ static void refstats_usage(FILE *fp)
             "      For example \"--minreads 100\" to filter out references with\n"\
             "      less than 100 reads.\n"\
             "      Available filters:\n"\
-            "       - minrefl  <int>  Minimum reference length to consider [1]\n"\
-            "       - minreads <int>  Minimum number of reads per reference  [1]\n"\
-            "       - minalnas <int>  Minimum alignment score [-Inf]\n"\
-            "       - maxdust  <int>  Maximum alignment dust score [100]\n"\
+            "       - minreflen <int>  Minimum reference length to consider [1]\n"\
+            "       - minreads  <int>  Minimum number of reads per reference  [1]\n"\
+            "       - minalnas  <int>  Minimum alignment score [-Inf]\n"\
+            "       - maxdust   <int>  Maximum alignment dust score [100]\n"\
             "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
             "  --acc2tax <str> Accession to taxid mapping file or .khash file.\n"\
@@ -336,7 +336,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         opts->minmani = strtof(o.arg, NULL);
         if (opts->minmani < 0.f || opts->minmani > 1.f) {
           fprintf(stderr, "[unicorn::%s] Error: --minmani must be between 0 and 1\n", __func__);
-          ret = 6;
+          ret = 7;
           goto exit;
         }
         break;
@@ -344,7 +344,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         opts->alpha = strtof(o.arg, NULL);
         if (opts->alpha <= 0.f || opts->alpha > 1.f) {
           fprintf(stderr, "[unicorn::%s] Error: --alpha must be in the range (0, 1]\n", __func__);
-          ret = 6;
+          ret = 7;
           goto exit;
         }
         break;
@@ -352,7 +352,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         opts->niter = strtoul(o.arg, NULL, 10);
         if (opts->niter == 0) {
           fprintf(stderr, "[unicorn::%s] Error: --niter must be at least 1\n", __func__);
-          ret = 6;
+          ret = 7;
           goto exit;
         }
         break;
@@ -365,7 +365,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
           opts->scale_type = UNICORN_SCALE_SQRTLEN;
         } else {
           fprintf(stderr, "[unicorn::%s] Error: Unknown scale type %s\n", __func__, o.arg);
-          ret = 6;
+          ret = 7;
           goto exit;
         }
       break;
@@ -380,7 +380,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
           opts->alnfiltmode = UNICORN_ALNFILT_ALL;
         } else {
           fprintf(stderr, "[unicorn::%s] Error: Unknown --mode %s\n", __func__, o.arg);
-          ret = 6;
+          ret = 7;
           goto exit;
         }
       break;
@@ -388,7 +388,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         opts->minani = strtof(o.arg, NULL);
         if (opts->minani < 0.f || opts->minani > 100.f) {
           fprintf(stderr, "[unicorn::%s] Error: --minani must be between (0.0 and 100.0]\n", __func__);
-          ret = 6;
+          ret = 7;
           goto exit;
         }
         break;
@@ -396,7 +396,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
           opts->pct = strtof(o.arg, NULL);
         if (opts->pct <= 0.f || opts->pct > 100.f) {
           fprintf(stderr, "[unicorn::%s] Error: --pct must be between (0.0 and 1.0]\n", __func__);
-          ret = 6;
+          ret = 7;
           goto exit;
         }
         break;
@@ -404,7 +404,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         opts->maxani = strtof(o.arg, NULL);
         if (opts->maxani < 0.f || opts->maxani > 100.f) {
           fprintf(stderr, "[unicorn::%s] Error: --maxani must be between (0.0 and 100.0]\n", __func__);
-          ret = 6;
+          ret = 7;
           goto exit;
         }
         break;
@@ -432,7 +432,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         fprintf(stderr, "[unicorn::%s] Unknown option %s\n",
                         __func__,
                         argv[ o.ind - 1 ]);
-        ret = 6;
+        ret = 7;
         goto exit;
       }
   }
@@ -449,7 +449,7 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
   fprintf(fp, "\t--outbam %s\n", opts->outbam ? opts->outbam : "NO");
   fprintf(fp, "\t--outstat  %s\n", opts->outstat ? opts->outstat : "/dev/stdout");
   fprintf(stderr, "\tFilters:\n");
-  fprintf(fp, "\t--minreflen %" PRIu64 "\n", opts->minrefl);
+  fprintf(fp, "\t--minrefl %" PRIu64 "\n", opts->minrefl);
   fprintf(fp, "\t--minreads  %d\n", opts->minnreads);
   fprintf(fp, "\t--minalnas  %d\n", opts->minalnas);
   fprintf(fp, "\t--maxdust   %d\n", opts->maxdust);
@@ -518,6 +518,25 @@ static int unicorn_refstats(int argc, char **argv)
                    _argv);
   if (!u) goto exit;
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
+
+  // Load taxonomy (needed for coord-sorted fast path, which prints during compute)
+  uint32_t missingref = 0;
+  if (opts.withtid) {
+    fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
+    fflush(stderr);
+    int tret = 0;
+    utax = unicorn_loadtaxonomy(opts.acc2tax,
+                                opts.names,
+                                opts.nodes,
+                                opts.rank,
+                                &tret);
+    if (!utax) {
+      fprintf(stderr, "[unicorn::%s] Error: Failed to load taxonomy data\n", __func__);
+      goto exit;
+    }
+    missingref = unicorn_refstat_missing_taxids(u, utax);
+  }
+
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
   fflush(stderr);
   stats = unicorn_stat_init(opts.minnreads,
@@ -532,7 +551,7 @@ static int unicorn_refstats(int argc, char **argv)
   ret = -4;
   //Compute statistics
   clock_gettime(CLOCK_MONOTONIC, &start);
-  if ( (ret = unicorn_refstat_compute(u, stats)) ) goto exit;
+  if ( (ret = unicorn_refstat_compute(u, stats, utax)) ) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   uint64_t taln, faln, tread, fread;
@@ -553,23 +572,6 @@ static int unicorn_refstats(int argc, char **argv)
                   (float)unicorn_stats_getfrefn(stats)/unicorn_getnref(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
-  //Load taxonomy if needed
-	uint32_t missingref = 0;
-	if (opts.withtid) {
-    fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
-    fflush(stderr);
-    int ret = 0;
-    utax = unicorn_loadtaxonomy(opts.acc2tax,
-                                opts.names,
-                                opts.nodes,
-                                opts.rank,
-                                &ret);
-    if (!utax) {
-      fprintf(stderr, "[unicorn::%s] Error: Failed to load taxonomy data\n", __func__);
-      goto exit;
-    }
-		missingref = unicorn_refstat_missing_taxids(u, utax);
-  }
   fflush(stderr);
   unicorn_refstat_print(u, stats, ofp, utax);
   if (opts.outbam) {

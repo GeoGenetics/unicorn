@@ -611,13 +611,11 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
 	if      ( 0 == step ) { //Load alignments
 		step_t *s = _loadtaxa(p->u, p->stats, p->utax);
 		if (!s) return 0;
-		if (VERBOSE)
 		if (p->stats && s->queue) {
 			uint64_t n = 0;
 			for (uint8_t i = 0; i < s->nqueue; i++) {
 				n += s->queue[i].n;
 			}
-			//fprintf(stderr, "[libunicorn::%s] Loaded %lu alignments in total.\n", __func__, n);
 			p->stats->_nalns += n;
 		}
     return s;
@@ -626,7 +624,6 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
 		step_t *s = (step_t *)in;
 		if (s && s->nqueue)
       kt_forpool(p->forpool, _statfor, s, s->nqueue);
-		//fprintf(stderr, "[libunicorn::%s] Finished computing stats for %u queues.\n", __func__, s->nqueue);
 		return s;
   }
   else if (2  == step ) { //Write output
