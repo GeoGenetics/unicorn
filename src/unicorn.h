@@ -73,7 +73,7 @@ typedef struct unicorn_t *unicorn_t;
 unicorn_t *unicorn_init(int threads,
                         const char *ifile,
                         char *prefix,
-												FILE *ofp,
+												const char *ofile,
                         int argc,
 												char **argv);
 

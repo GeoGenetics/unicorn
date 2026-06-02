@@ -157,18 +157,18 @@ static void refstats_usage(FILE *fp)
             "  -b <str>   Input bam|sam [Required]\n"\
             "  -t <int>, --threads <int> Number of threads [4]\n"
             "  -o <str>, --outbam  <str> Output BAM file with filtered references\n"\
-            "  --outstat <str> Output statistics file\n"\
-            "  --[FILTER] <PARAM>  Apply reference filter \"FILTER\" with parameter \"PARAM\"\n"\
-            "      For example \"--minreads 100\" to filter out references with\n"\
-            "      less than 100 reads.\n"\
-            "      Available filters:\n"\
+            "  --outstat <str> Print statistics to file <str> [stdout]\n"\
+            "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
+            "      Example: \"--minreads 100\" to filter out references with\n"\
+            "                 less than 100 reads.\n"\
+            "      Filters:\n"\
             "       - minreflen <int>  Minimum reference length to consider [1]\n"\
             "       - minreads  <int>  Minimum number of reads per reference  [1]\n"\
             "       - minalnas  <int>  Minimum alignment score [-Inf]\n"\
             "       - maxdust   <int>  Maximum alignment dust score [100]\n"\
             "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
-            "  --acc2tax <str> Accession to taxid mapping file or .khash file.\n"\
+            "  --acc2tax <str> Accession to taxid mapping file.\n"\
 						"  -k <int> kmer size for duplicity computation [17]\n"\
 						"  Report taxid of reference sequence. Enabled automatically when\n"\
 						"  --acc2tax, --names and --nodes are provided.\n"\
@@ -176,7 +176,7 @@ static void refstats_usage(FILE *fp)
 						"  XT:i:<taxid> tag and\n"\
 						"  XR:i:<taxid> tag in.\n"\
 						"  taxid column 2 in the output statistics file.\n"\
-						"  --rank <str>    Taxonomic rank for XR tag. [species]\n"\
+						"  --rank <str> Taxonomic rank for XR tag. [genus]\n"\
             "  --verbose  Print libunicorn's messages.\n"\
             "  -h         print this help message\n");
 }
@@ -328,7 +328,10 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
       case 314: //onlypresent
         opts->onlypresent = 1;
         break;
-      case 318: //rank
+			case 316: //help
+				ret = 1;
+				goto exit;
+			case 318: //rank
         free(opts->rank);
         opts->rank = strdup(o.arg);
         break;
@@ -465,9 +468,28 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
   }
 }
 
+static uint8_t _refstats_checkopt(unicorn_opt_t *opts)
+{
+	uint8_t ret = 1;
+  if (!opts->ifile) {
+		ret = 2;
+		goto exit;
+	}
+	if (opts->acc2tax || opts->names || opts->nodes) {
+    if (!opts->acc2tax || !opts->names || !opts->nodes) {
+      ret = 2;
+      fprintf(stderr, "[unicorn::%s] Error: taxonomy reporting requires --acc2tax, --names and --nodes options.\n", __func__);
+      goto exit;
+    }
+    opts->withtid = 1;
+  }
+	ret = 0;
+	exit:
+		return ret;
+}
+
 static int unicorn_refstats(int argc, char **argv)
 {
-	fprintf(stderr, "argc: %d\n", argc);
   int ret = 2;
   struct timespec start, stop;
   uint64_t ns;
@@ -488,39 +510,21 @@ static int unicorn_refstats(int argc, char **argv)
 	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-  if (opts.withtid || opts.acc2tax || opts.names || opts.nodes) {
-    if (!opts.acc2tax || !opts.names || !opts.nodes) {
-      ret = 7;
-      fprintf(stderr, "[unicorn::%s] Error: taxonomy reporting requires --acc2tax, --names and --nodes options.\n", __func__);
-      goto exit;
-    }
-    opts.withtid = 1;
-  }
-  if (opts.outbam) {
-    if (opts.minrefl < 1) opts.minrefl = 1;
-    if (opts.minnreads < 1) opts.minnreads = 1;
-  }
+	if ( (ret = _refstats_checkopt(&opts)) )            goto exit;
 	unicorn_printopts(&opts, stderr, REFSTATS);
-  if (!opts.ifile)  goto exit;
-  if (opts.outstat) {
-    ret = 2;
-    ofp = fopen(opts.outstat, "w");
-    if (!ofp) goto exit;
-  }
-  else ofp = stdout;
-  fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n", __func__,
+  fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n", __func__,
                                                               opts.ifile);
-  u = unicorn_init(opts.threads,
+	fflush(stderr);
+	u = unicorn_init(opts.threads,
                    opts.ifile,
                    opts.outbam ? opts.outbam : NULL,
-                   ofp,
+                   opts.outstat ? opts.outstat : NULL,
 									 argc,
                    _argv);
   if (!u) goto exit;
-  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
-
-  // Load taxonomy (needed for coord-sorted fast path, which prints during compute)
-  uint32_t missingref = 0;
+  fprintf(stderr, "\t%d reference sequence(s).\n", unicorn_getnref(u));
+	fflush(stderr);
+	uint32_t missingref = 0;
   if (opts.withtid) {
     fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
     fflush(stderr);
@@ -535,8 +539,7 @@ static int unicorn_refstats(int argc, char **argv)
       goto exit;
     }
     missingref = unicorn_refstat_missing_taxids(u, utax);
-  }
-
+	}
   fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
   fflush(stderr);
   stats = unicorn_stat_init(opts.minnreads,
@@ -676,7 +679,7 @@ static int unicorn_bamstats(int argc, char **argv)
     u = unicorn_init(opts.threads,
                      fileq.a[i],
                      NULL,
-										 ofp,
+										 NULL,
                      argc,
                      _argv);
     if (!u) {
@@ -819,7 +822,7 @@ static int unicorn_taxstats(int argc, char **argv)
     u = unicorn_init(opts.threads,
                      fileq.a[i],
                      obamstr,
-										 ofp,
+										 opts.outstat ? opts.outstat : NULL,
                      argc,
                      _argv);
     if (obamstr && obamstr != opts.outbam) free(obamstr);

@@ -697,7 +697,7 @@ Originally idea from Bianca Desacnctis to use sdust to remove low complexity rea
 #define WMASK (WTOT - 1)
 double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount)
 {
-  static int32_t wCount0[WTOT], wSeq[64];
+  int32_t wCount0[WTOT], wSeq[64];
   if (window < WLEN) return -1; // window too small
   if (!wCount) wCount = wCount0 ;
   memset(wCount, 0, WTOT*sizeof(int32_t)) ;

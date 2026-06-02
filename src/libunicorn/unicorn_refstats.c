@@ -819,7 +819,9 @@ int unsorted_compute(unicorn_t *u, unicorn_stat_t *stats)
 
 int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 {
-  if (!u || !stats) return -1;
+	fprintf(stderr, "FASTPATH\n");
+	sleep(100)
+	if (!u || !stats) return -1;
   // Print header once for the entire run. The coord-sorted pipeline prints
   // per-reference rows directly and does not populate `stats->__map` yet.
   if (utax) fprintf(u->ofp, REFSTATSTR2);

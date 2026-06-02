@@ -545,7 +545,7 @@ typedef struct utax_t {
 
 uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);
 
-const char *utax_getname(utax_t *utax, uint32_t taxid);
+const char *utax_getname(const utax_t *utax, uint32_t taxid);
 
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret);
 

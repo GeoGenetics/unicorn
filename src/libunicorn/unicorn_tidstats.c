@@ -478,29 +478,6 @@ static int _compute(unicorn_t *u,
     return ret;
 }
 
-static step_t *_loadtaxa(unicorn_t *u,
-												 const unicorn_stat_t *stats,
-												 utax_t *utax)
-{
-	step_t *s = malloc(sizeof(step_t));
-	if (!s) return NULL;
-	s->queue = calloc(u->nthreads, sizeof(bamq_t));
-	s->nqueue  = u->nthreads;
-	_loadalns(s->queue, &s->nqueue, u, utax, stats->qsize);
-	if (s->nqueue == 0) {
-		if (s->queue) free(s->queue);
-		free(s);
-		return NULL;
-	}
-	s->taxq = calloc(s->nqueue, sizeof(taxstatpq_t));
-	if (s->taxq) {
-		for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->taxq[i]);
-	}
-	s->u = u;
-	s->stats = stats;
-	return s;
-}
-
 static taxstat_t *_taxstat_new(void)
 {
   taxstat_t *t = calloc(1, sizeof(*t));
@@ -519,6 +496,79 @@ static taxstat_t *_taxstat_new(void)
     return NULL;
   }
   return t;
+}
+
+static void _taxstat_free(taxstat_t *t)
+{
+  if (!t) return;
+  if (t->readset) u64set_destroy(t->readset);
+  if (t->refmap) refmap_destroy(t->refmap);
+  if (t->camex) lint2int_destroy(t->camex);
+  kv_destroy(t->a_ani);
+  free(t);
+}
+
+static step_t *_step_new(void)
+{
+	step_t *s = malloc(sizeof(step_t));
+	if (!s) return NULL;
+	s->queue  = NULL;
+	s->nqueue = 0;
+	s->taxq   = NULL;
+	s->u      = NULL;
+	s->stats  = NULL;
+	return s;
+}
+
+static void _step_free(step_t *s)
+{
+  if (!s) return;
+  if (s->queue) {
+    for (uint8_t i = 0; i < s->nqueue; i++) {
+      bamq_t *q = &s->queue[i];
+      for (uint32_t j = 0; j < q->n; j++) {
+        if (q->a[j]) bam_destroy1(q->a[j]);
+      }
+      kv_destroy(*q);
+    }
+    free(s->queue);
+  }
+  if (s->taxq) {
+    for (uint8_t i = 0; i < s->nqueue; i++) {
+      taxstatpq_t *tq = &s->taxq[i];
+      for (uint32_t j = 0; j < tq->n; j++) {
+        _taxstat_free(tq->a[j]);
+      }
+      kv_destroy(*tq);
+    }
+    free(s->taxq);
+  }
+  free(s);
+}
+
+static step_t *_loadtaxa(unicorn_t *u,
+												 const unicorn_stat_t *stats,
+												 utax_t *utax)
+{
+	step_t *s = malloc(sizeof(step_t));
+	if (!s) return NULL;
+	s->queue = calloc(u->nthreads, sizeof(bamq_t));
+	s->nqueue  = u->nthreads;
+	_loadalns(s->queue, &s->nqueue, u, utax, stats->qsize);
+	if (s->nqueue == 0) {
+		if (s->queue) free(s->queue);
+		free(s);
+		return NULL;
+	}
+	s->taxq = calloc(s->nqueue, sizeof(taxstatpq_t));
+	if (!s->taxq) {
+		_step_free(s);
+		return NULL;
+	}
+	for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->taxq[i]);
+	s->u = u;
+	s->stats = stats;
+	return s;
 }
 
 static void _statfor(void *data, long i, int tid)
@@ -662,11 +712,8 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
           }
         }
       }
-      kv_destroy(*tq);
     }
-    kv_destroy(*s->queue);
-    free(s);
-		//fprintf(stderr, "[libunicorn::%s] Printed %lu alignments in total.\n", __func__, stats->_nalns);
+		_step_free(s);
 	}
   return 0;
 }

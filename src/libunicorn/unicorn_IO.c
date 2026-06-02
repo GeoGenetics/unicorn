@@ -77,10 +77,25 @@ static uint8_t isXsorted(sam_hdr_t *h)
   return 0;
 }
 
+static const char *SORTORDER[5] = {"unsorted",
+																	 "queryname sorted",
+																	 "queryname grouped",
+																	 "coordinate sorted",
+																	 "XR tag sorted"};
+
+static const char *unicorn_sortorder_str(uint8_t sorted)
+{
+  if (sorted & XRSORTED)     return SORTORDER[4];
+  if (sorted & COORDSORTED)  return SORTORDER[3];
+  if (sorted & QUERYGROUPED) return SORTORDER[2];
+  if (sorted & QUERYSORTED)  return SORTORDER[1];
+  return SORTORDER[0];
+}
+
 unicorn_t *unicorn_init( int nthreads,
                          const char *ifile,
                          char *outbam,
-												 FILE *ofp,
+												 const char *ofile,
 												 int argc,
                          char **argv)
 {
@@ -100,11 +115,19 @@ unicorn_t *unicorn_init( int nthreads,
     u->argv = argv;
     u->outbam = outbam;
 		u->daln = bam_init1();
-		u->ofp  = ofp;
+		if (ofile) {
+			u->ofp = fopen(ofile, "w");
+			if (!u->ofp) goto exit;
+		}
+		else u->ofp = stdout;
 		if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
 		if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
 		if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;
 		if (isXsorted(u->hdr))  u->sorted  = XRSORTED;
+		if (VERBOSE)
+			fprintf(stderr, "[libunicorn::%s] %s file\n",
+							__func__,
+							unicorn_sortorder_str(u->sorted));
 		u->values.nref = u->hdr->n_targets;
 		ret = 0;
     exit:

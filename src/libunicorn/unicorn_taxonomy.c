@@ -467,7 +467,7 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
 		return ret;
 }
 
-const char *utax_getname(utax_t *utax, uint32_t taxid)
+const char *utax_getname(const utax_t *utax, uint32_t taxid)
 {
 	if (!utax) return NULL;
 	int2chr_t *map = utax->namemap;
