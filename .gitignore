@@ -17,3 +17,5 @@ other_code
 testing
 .vscode
 conda/*.gz
+figures/
+src/genesisC/*.o
