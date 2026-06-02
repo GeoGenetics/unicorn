@@ -2,6 +2,8 @@
 
 # Unicorn
 
+```unicorn``` is a command-line tool for analyzing SAM/BAM alignment files. It computes alignment-based statistics at multiple levels, including per-reference, per-taxid, and whole-BAM summaries. It can also filter alignments and references based on criteria such as read count, reference length, alignment score, ANI, and sequence complexity. When taxonomy metadata is available, ```unicorn``` can annotate BAM files with taxonomic tags and aggregate results by rank using NCBI-style taxonomy files. This makes it especially useful for metagenomic workflows, reference screening, and quality control of alignment data. It is also handy for extracting coverage, ANI, and duplicity metrics from large sequencing datasets. In short, Unicorn helps turn raw alignments into actionable summaries and filtered outputs for downstream analysis.
+
 ## Index
 
 - [Install](#install)
