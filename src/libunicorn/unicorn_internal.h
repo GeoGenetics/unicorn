@@ -106,12 +106,15 @@ typedef struct {
   char **argv;
   int  nthreads;
   char *ifile;
-  char *outbam;
+	char *outbam;
 	FILE *ofp;
 	hts_tpool *p;
   htsFile   *_FP;
   bam_hdr_t *hdr;
-  uint8_t sorted; //See sort values
+  htsFile   *_OFP;
+	bam_hdr_t *ohdr;
+	//char *outbam;
+	uint8_t sorted; //See sort values
   uint8_t dcache; //Last alignment flag
   bam1_t *daln;   //Last alignment read from the file
   values_t values; //bamfile values

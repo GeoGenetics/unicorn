@@ -383,7 +383,7 @@ static void _statfor(void *data, long i, int tid)
   if ( q->n == 0 ) return;
   if (!s->refq) return;
   if (!s->u || !s->stats) return;
-  uint8_t ksize = s->stats->ksize ? s->stats->ksize : 17;
+  uint8_t ksize = s->stats->ksize;
   genesis_encoder_t enc = genesis_encoderinit(ksize);
   if (!enc) return;
   refstatpq_t *out = &s->refq[i];
@@ -437,7 +437,7 @@ static void *_refstats_pipeline(void *data, int step, void *in)
 {
   pipeline_t *p = (pipeline_t *)data;
   if (!p || p->err) return 0;
-  if (0 == step) {          // Load
+  if (0 == step) { // Load
 		step_t *s = _loadrefs(p->u, p->stats, p->utax);
     if (!s) return 0;
 		if (p->stats && s->queue) {
@@ -449,13 +449,13 @@ static void *_refstats_pipeline(void *data, int step, void *in)
 		}
     return s;
   }
-	else if (1 == step) {   // Compute
+	else if (1 == step) { // Compute
   	step_t *s = (step_t *)in;
 		if (s && s->nqueue)
       kt_forpool(p->forpool, _statfor, s, s->nqueue);
     return in;
   }
-	else if (2 == step) {   // Output/flush
+	else if (2 == step) { // Output/flush
     step_t *s = (step_t *)in;
     if (!s) return 0;
 		unicorn_stat_t *stats = p->stats;
@@ -819,8 +819,6 @@ int unsorted_compute(unicorn_t *u, unicorn_stat_t *stats)
 
 int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 {
-	fprintf(stderr, "FASTPATH\n");
-	sleep(100)
 	if (!u || !stats) return -1;
   // Print header once for the entire run. The coord-sorted pipeline prints
   // per-reference rows directly and does not populate `stats->__map` yet.
@@ -831,14 +829,13 @@ int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
   pipeline_t p = {0};
   p.u = u;
   p.stats = stats;
-  p.utax = utax;
-  p.refmap = (refmap_t *)stats->__map;
-  p.ksize = stats->ksize ? stats->ksize : 17;
-  p.enc = genesis_encoderinit(p.ksize);
+  p.utax  = utax;
+  p.refmap  = (refmap_t *)stats->__map;
+  p.ksize   = stats->ksize ? stats->ksize : 17;
+  p.enc     = genesis_encoderinit(p.ksize);
   p.forpool = kt_forpool_init(u->nthreads);
   p.b = bam_init1();
   p.err = 0;
-
   // Optional: stream an output BAM without a second pass over the input.
   // We keep the original header (no tid remapping) and only emit alignments
   // for references that pass filters.
@@ -889,7 +886,6 @@ int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
   // Fast path for coordinate-sorted BAMs (prototype). Falls back to the
   // existing order-agnostic implementation until fully implemented.
   if (u->sorted & COORDSORTED) return sorted_compute(u, stats, utax);
-  (void)utax;
   return unsorted_compute(u, stats);
 }
 

@@ -749,57 +749,9 @@ int unicorn_tidstat_compute(unicorn_t *u,
                             unicorn_stat_t *stats,
                             utax_t *utax)
 {
-  static uint8_t _warned_xr_fallback = 0;
   if ( u->sorted & XRSORTED ) {
-    // NOTE: `XRSORTED` is currently inferred from a header annotation that
-    // only guarantees the presence of taxonomy tags, not that the file is
-    // actually grouped/sorted by XR. The XR fast-path assumes contiguity of
-    // identical XR values; if that assumption is violated, the same taxid will
-    // be emitted multiple times and results will differ from the order-agnostic
-    // `_compute()` path.
-    //
-    // To keep outputs identical, do a cheap monotonicity check and fall back
-    // to `_compute()` if XR order is not non-decreasing.
-    bam1_t *b = bam_init1();
-    if (!b) return -1;
-    int32_t prev_xr = INT32_MIN;
-    uint8_t seen_non_missing = 0;
-    uint32_t violations = 0;
-    uint64_t checked = 0;
-    const uint64_t max_check = 200000; // enough to catch unsorted inputs quickly
-    while (checked < max_check && sam_read1(u->_FP, u->hdr, b) >= 0) {
-      uint8_t *xtag = bam_aux_get(b, "XR");
-      int32_t xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
-      if (xtag) seen_non_missing = 1;
-      else if (seen_non_missing) { // missing tag after non-missing => broken ordering for fast-path
-        violations++;
-        break;
-      }
-      if (xr < prev_xr) {
-        violations++;
-        break;
-      }
-      prev_xr = xr;
-      checked++;
-    }
-    bam_destroy1(b);
-    if (unicorn_rewind(u)) return -1;
-    if (violations) {
-      if (!_warned_xr_fallback) {
-        fprintf(stderr,
-                "[libunicorn::%s] XR tag present but file not XR-sorted/grouped "
-                "(checked %"PRIu64" records). Falling back to order-agnostic computation.\n",
-                __func__, checked);
-        _warned_xr_fallback = 1;
-      }
-      return _compute(u, stats, utax);
-    }
-    if (VERBOSE)
-      fprintf(stderr, "[libunicorn::%s] XR sorted file.\n", __func__);
     return _sorted_compute(u, stats, utax);
   }
-  if (VERBOSE)
-    fprintf(stderr, "[libunicorn::%s] unsorted file.\n", __func__);
   return _compute(u, stats, utax);
 }
 

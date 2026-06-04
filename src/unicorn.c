@@ -157,27 +157,28 @@ static void refstats_usage(FILE *fp)
             "  -b <str>   Input bam|sam [Required]\n"\
             "  -t <int>, --threads <int> Number of threads [4]\n"
             "  -o <str>, --outbam  <str> Output BAM file with filtered references\n"\
-            "  --outstat <str> Print statistics to file <str> [stdout]\n"\
+						"  -k <int>, --ksize <int>   kmer size for duplicity computation [17]\n"\
+						"  --outstat <str> Print statistics to file <str> [stdout]\n"\
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      Example: \"--minreads 100\" to filter out references with\n"\
             "                 less than 100 reads.\n"\
             "      Filters:\n"\
-            "       - minreflen <int>  Minimum reference length to consider [1]\n"\
-            "       - minreads  <int>  Minimum number of reads per reference  [1]\n"\
+            "       - minreflen <int>  Minimum reference length to consider  [1]\n"\
+            "       - minreads  <int>  Minimum number of reads per reference [1]\n"\
             "       - minalnas  <int>  Minimum alignment score [-Inf]\n"\
             "       - maxdust   <int>  Maximum alignment dust score [100]\n"\
             "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
             "  --acc2tax <str> Accession to taxid mapping file.\n"\
-						"  -k <int> kmer size for duplicity computation [17]\n"\
 						"  Report taxid of reference sequence. Enabled automatically when\n"\
 						"  --acc2tax, --names and --nodes are provided.\n"\
 						"  taxid is reported in bam records in custom:\n"\
 						"  XT:i:<taxid> tag and\n"\
 						"  XR:i:<taxid> tag in.\n"\
 						"  taxid column 2 in the output statistics file.\n"\
-						"  --rank <str> Taxonomic rank for XR tag. [genus]\n"\
-            "  --verbose  Print libunicorn's messages.\n"\
+						"  --rank <str>  Taxonomic rank for XR tag. [genus]\n"\
+						"  --qsize <int> Size of queue for coordinate sorted input bam files [1024]\n"\
+						"  --verbose  Print libunicorn's messages.\n"\
             "  -h         print this help message\n");
 }
 
@@ -197,27 +198,25 @@ static void taxstats_usage(FILE *fp)
     fprintf(fp, "./unicorn taxstats [options] -b <in.bam>|<in.sam>\n");
     fprintf(fp, "Options:\n"\
             "  -b <str>                     Input bam|sam\n"\
-            "  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
-            "                               Providing a .khash file is much faster.\n"\
-            "                               If omitted, taxonomy names/nodes are still loaded but accession lookup is disabled.\n"\
-            "  -n <str> | --names <str>     Taxonomy names file.\n"\
-            "  -d <str> | --nodes <str>     Taxonomy nodes file\n"\
-            "  -k <int>                     kmer size for duplicity computation [17]\n"\
 						"  -t <int>, --threads <int>    Number of threads [4]\n"\
-						"  --qsize <int>                Size of queue for taxstats computation [1024]\n"\
-            "  --outstat <str>              Output statistics file [/dev/stdout]\n"\
-            "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
+            "  -k <int>, --ksize <int>      kmer size for duplicity computation [17]\n"\
+						"  --outstat <str> Print statistics to file <str> [stdout]\n"\
+	          "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      For example \"--minreads 100\" to filter out taxids with\n"\
             "      less than 100 reads.\n"\
             "      Available filters:\n"\
-            "       - minrefl  <int>   Minimum reference length. [0]\n"\
+            "       - minrefl  <int>   Minimum reference length. [1]\n"\
             "       - minreads <int>   Minimum number of reads per taxid. [1]\n"\
             "       - minmani  <float> Minimum mean ANI per taxid. [0]\n"\
             "       - minalnas <int>   Minimum alignment score [-Inf]\n"\
             "       - maxdust  <int>   Maximum alignment dust score [100]\n"\
-            "  --rank <str>                 Taxonomic rank to summarize by. [genus]\n"\
-            "  --verbose                    Prints libunicorn's messages.\n"\
-            "  -h                           Print this help message\n");
+						"  --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
+            "  --names <str>     Taxonomy names file.\n"\
+            "  --nodes <str>     Taxonomy nodes file\n"\
+            "  --rank <str>      Taxonomic rank to summarize by. [genus]\n"\
+						"  --qsize <int>     Size of queue for XR sorted input bam files [1024]\n"\
+            "  --verbose         Prints libunicorn's messages.\n"\
+            "  -h                Print this help message\n");
 }
 
 static void alnfilt_usage(FILE *fp)
@@ -448,24 +447,23 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
 {
   fprintf(fp, "[unicorn::%s] Options:\n", __func__);
   fprintf(fp, "\t-b %s\n", opts->ifile ? opts->ifile : "N/A");
+  fprintf(fp, "\t-o %s\n", opts->outbam ? opts->outbam : "N/A");
   fprintf(fp, "\t-t %d\n", opts->threads);
-  fprintf(fp, "\t--outbam %s\n", opts->outbam ? opts->outbam : "NO");
-  fprintf(fp, "\t--outstat  %s\n", opts->outstat ? opts->outstat : "/dev/stdout");
-  fprintf(stderr, "\tFilters:\n");
-  fprintf(fp, "\t--minrefl %" PRIu64 "\n", opts->minrefl);
+  fprintf(fp, "\t-k %d\n", opts->ksize);
+	fprintf(fp, "\t--outstat  %s\n", opts->outstat ? opts->outstat : "/dev/stdout");
+  fprintf(fp, "\t--minrefl %lu\n", opts->minrefl);
   fprintf(fp, "\t--minreads  %d\n", opts->minnreads);
   fprintf(fp, "\t--minalnas  %d\n", opts->minalnas);
   fprintf(fp, "\t--maxdust   %d\n", opts->maxdust);
-  if (opts->withtid) {
-    if (_f == REFSTATS)
-      fprintf(fp, "\tReport taxid of reference sequence: Yes\n");
-    fprintf(fp, "\tAccession to taxid map: %s\n", opts->acc2tax ? opts->acc2tax : "N/A");
-    fprintf(fp, "\tTaxonomy names file: %s\n", opts->names ? opts->names : "N/A");
-    fprintf(fp, "\tTaxonomy nodes file: %s\n", opts->nodes ? opts->nodes : "N/A");
-  }
-  else {
-    fprintf(fp, "\tReport taxid of reference sequence: No\n");
-  }
+	if (_f == TAXSTATS)
+		fprintf(fp, "\t--minmani  %f\n", opts->minmani);
+	fprintf(fp, "\t--qsize     %d\n", opts->qsize);
+	if (opts->withtid) {
+    fprintf(fp, "\t--acc2tax %s\n", opts->acc2tax ? opts->acc2tax : "N/A");
+    fprintf(fp, "\t--names %s\n", opts->names);
+    fprintf(fp, "\t--nodes %s\n", opts->nodes);
+	  fprintf(fp, "\t--rank      %s\n", opts->rank);
+	}
 }
 
 static uint8_t _refstats_checkopt(unicorn_opt_t *opts)
@@ -488,10 +486,32 @@ static uint8_t _refstats_checkopt(unicorn_opt_t *opts)
 		return ret;
 }
 
+static void _printrefnums(unicorn_t *u, unicorn_stat_t *stats, uint64_t ns)
+{
+  uint64_t taln, faln, tread, fread;
+  taln  = unicorn_stat_gettaln(stats);
+  faln  = unicorn_stat_getfaln(stats);
+  tread = unicorn_stat_gettread(stats);
+  fread = unicorn_stat_getfread(stats);
+  fprintf(stderr, "\t%" PRIu64 " alignments, %" PRIu64 " passed filters (%f)\n",
+                  taln,
+                  faln,
+                  (float)faln/taln);
+  fprintf(stderr, "\t%" PRIu64 " reads, %" PRIu64 " passed filters (%f)\n",
+                  tread,
+                  fread,
+                  (float)fread/tread);
+  fprintf(stderr, "\t %d references, %lu passed filters (%f)\n",
+									unicorn_getnref(u),
+                  unicorn_stats_getfrefn(stats),
+                  (float)unicorn_stats_getfrefn(stats)/unicorn_getnref(u));
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+}
+
 static int unicorn_refstats(int argc, char **argv)
 {
   int ret = 2;
-  struct timespec start, stop;
+  struct timespec start, stop, progB, progE;
   uint64_t ns;
   unicorn_opt_t opts = {0};
   opts.threads   = 4;
@@ -500,7 +520,8 @@ static int unicorn_refstats(int argc, char **argv)
   opts.minalnas  = INT32_MIN;
   opts.maxdust   = 100;
   opts.ksize     = 17;
- 	opts.rank  = strdup("genus");
+  opts.qsize		 = 1024;
+	opts.rank  = strdup("genus");
 	unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
   utax_t *utax = NULL;
@@ -512,9 +533,12 @@ static int unicorn_refstats(int argc, char **argv)
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
 	if ( (ret = _refstats_checkopt(&opts)) )            goto exit;
 	unicorn_printopts(&opts, stderr, REFSTATS);
-  fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n", __func__,
+  clock_gettime(CLOCK_MONOTONIC, &progB);
+
+	fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n", __func__,
                                                               opts.ifile);
 	fflush(stderr);
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	u = unicorn_init(opts.threads,
                    opts.ifile,
                    opts.outbam ? opts.outbam : NULL,
@@ -522,8 +546,12 @@ static int unicorn_refstats(int argc, char **argv)
 									 argc,
                    _argv);
   if (!u) goto exit;
+	clock_gettime(CLOCK_MONOTONIC, &stop);
+	ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   fprintf(stderr, "\t%d reference sequence(s).\n", unicorn_getnref(u));
+	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 	fflush(stderr);
+
 	uint32_t missingref = 0;
   if (opts.withtid) {
     fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
@@ -552,29 +580,13 @@ static int unicorn_refstats(int argc, char **argv)
                             REFSTATS);
   if (!stats) goto exit;
   ret = -4;
-  //Compute statistics
   clock_gettime(CLOCK_MONOTONIC, &start);
   if ( (ret = unicorn_refstat_compute(u, stats, utax)) ) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-  uint64_t taln, faln, tread, fread;
-  taln  = unicorn_stat_gettaln(stats);
-  faln  = unicorn_stat_getfaln(stats);
-  tread = unicorn_stat_gettread(stats);
-  fread = unicorn_stat_getfread(stats);
-  fprintf(stderr, "\t%" PRIu64 " alignments, %" PRIu64 " passed filters (%f)\n",
-                  taln,
-                  faln,
-                  (float)faln/taln);
-  fprintf(stderr, "\t%" PRIu64 " reads, %" PRIu64 " passed filters (%f)\n",
-                  tread,
-                  fread,
-                  (float)fread/tread);
-  fprintf(stderr, "\tout of %" PRIu64 " references (%f)\n",
-                  unicorn_stats_getfrefn(stats),
-                  (float)unicorn_stats_getfrefn(stats)/unicorn_getnref(u));
-  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
-  fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
+	_printrefnums(u, stats, ns);
+
+	fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   fflush(stderr);
   unicorn_refstat_print(u, stats, ofp, utax);
   if (opts.outbam) {
@@ -599,7 +611,10 @@ static int unicorn_refstats(int argc, char **argv)
 	}
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
   ret = 0;
-  exit:
+  clock_gettime(CLOCK_MONOTONIC, &progE);
+	ns = (progE.tv_sec - progB.tv_sec) * 1000000000 + (progE.tv_nsec - progB.tv_nsec);
+	fprintf(stderr, "[unicorn::%s] Total runtime: %f seconds\n", __func__, (double)ns/1000000000.f);
+	exit:
     if (ret) {
 			refstats_usage(stderr);
 			if (1==ret) ret = 0;
@@ -749,20 +764,20 @@ static int unicorn_taxstats(int argc, char **argv)
   unicorn_opt_t opts = {0};
   opts.threads   = 4;
   opts.minnreads = 1;
-  opts.minrefl   = 0;
+  opts.minrefl   = 1;
   opts.minalnas  = INT32_MIN;
   opts.maxdust   = 100;
-  opts.rank  = strdup("genus");
+  opts.minmani  = 0.f;
+	opts.rank  = strdup("genus");
   opts.ksize = 17;
   opts.qsize = 1024;
+	opts.withtid = 1;
 	unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
   strq_t accq = {0};
   FILE *ofp = NULL;
   char *_argv[64] = {0};
-
   clock_gettime(CLOCK_MONOTONIC, &pstart);
-
 	if (argc <= 2) goto exit;
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
@@ -774,7 +789,7 @@ static int unicorn_taxstats(int argc, char **argv)
     if (!ofp) goto exit;
   }
   else ofp = stdout;
-  unicorn_printopts(&opts, stderr, 0);
+  unicorn_printopts(&opts, stderr, TAXSTATS);
 	//Add files to queue
   strq_t fileq = {0};
   if (opts.ifile) kv_push(char *, fileq, opts.ifile);
@@ -809,7 +824,7 @@ static int unicorn_taxstats(int argc, char **argv)
                   unicorn_tax_getnumaccs(utax));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   for (uint32_t i = 0; i < fileq.n; ++i) {
-    fprintf(stderr, "[unicorn::%s] Loading BAM data from %s\n",
+    fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n",
                      __func__, fileq.a[i]);
     char *obamstr = NULL;
     if (opts.outbam && fileq.n > 1) {
@@ -819,7 +834,8 @@ static int unicorn_taxstats(int argc, char **argv)
     }
     else
       obamstr = opts.outbam;
-    u = unicorn_init(opts.threads,
+    clock_gettime(CLOCK_MONOTONIC, &start);
+		u = unicorn_init(opts.threads,
                      fileq.a[i],
                      obamstr,
 										 opts.outstat ? opts.outstat : NULL,
@@ -831,8 +847,11 @@ static int unicorn_taxstats(int argc, char **argv)
                        __func__, fileq.a[i]);
       continue;
     }
+		clock_gettime(CLOCK_MONOTONIC, &stop);
+		ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
-    fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
+		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+		fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
     stats = unicorn_stat_init(opts.minnreads,
                               opts.minrefl,
                               opts.minmani,

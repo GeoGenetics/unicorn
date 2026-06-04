@@ -25,18 +25,6 @@ uint8_t unicorn_rewind(unicorn_t *u)
 		return ret;
 }
 
-void unicorn_destroy(unicorn_t *u)
-{
-  if (u) {
-    if (u->ifile) free(u->ifile);
-    if (u->hdr)   bam_hdr_destroy(u->hdr);
-    if (u->_FP)   hts_close(u->_FP);
-    if (u->p)     hts_tpool_destroy(u->p);
-		if (u->daln)  bam_destroy1(u->daln);
-		free(u);
-  }
-}
-
 static uint8_t isqsorted(sam_hdr_t *h) {
   kstring_t ks = {0,0,NULL};
   int ok = sam_hdr_find_tag_hd(h, "SO", &ks);  // 0 on success
@@ -63,18 +51,17 @@ static uint8_t isqgrouped(sam_hdr_t *h) {
 
 static uint8_t isXsorted(sam_hdr_t *h)
 {
-  int nco = sam_hdr_count_lines(h, "CO");
-  for (int i = 0; i < nco; i++) {
-    kstring_t ks = {0, 0, NULL};
-    if (sam_hdr_find_line_pos(h, "CO", i, &ks) == 0) {
-			// sam_hdr_find_line_pos() returns the full line, often including "@CO\t".
-			// Detect the presence of the unicorn taxonomy-tag annotation regardless of prefix.
-			uint8_t match = (ks.s && strstr(ks.s, "unicorn:tax-tags") != NULL);
-			free(ks.s);
-      if (match) return 1;
-    }
-  }
-  return 0;
+  kstring_t so = {0, 0, NULL};
+  kstring_t ss = {0, 0, NULL};
+  int ok_so = sam_hdr_find_tag_hd(h, "SO", &so);
+  int ok_ss = sam_hdr_find_tag_hd(h, "SS", &ss);
+  uint8_t res = (ok_so == 0 &&
+                 ok_ss == 0 &&
+                 kh_eq_str(so.s, "unsorted") &&
+                 strncmp(ss.s, "unsorted:XR:", 12) == 0);
+  free(so.s);
+  free(ss.s);
+  return res;
 }
 
 static const char *SORTORDER[5] = {"unsorted",
@@ -90,6 +77,19 @@ static const char *unicorn_sortorder_str(uint8_t sorted)
   if (sorted & QUERYGROUPED) return SORTORDER[2];
   if (sorted & QUERYSORTED)  return SORTORDER[1];
   return SORTORDER[0];
+}
+
+void unicorn_destroy(unicorn_t *u)
+{
+  if (u) {
+    if (u->ifile) free(u->ifile);
+    if (u->hdr)   bam_hdr_destroy(u->hdr);
+    if (u->_FP)   hts_close(u->_FP);
+    if (u->_OFP)  hts_close(u->_OFP);
+		if (u->p)     hts_tpool_destroy(u->p);
+		if (u->daln)  bam_destroy1(u->daln);
+		free(u);
+  }
 }
 
 unicorn_t *unicorn_init( int nthreads,
@@ -113,7 +113,15 @@ unicorn_t *unicorn_init( int nthreads,
     if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
     u->argc = argc;
     u->argv = argv;
-    u->outbam = outbam;
+    if (outbam) {
+		  u->outbam = outbam;
+      if ( !( u->_OFP = hts_open(outbam,"wbz") ) ) goto exit;
+		  if (nthreads > 1) {
+        //u->p = hts_tpool_init(nthreads < 4 ? nthreads : 4);
+        //if (!u->p) goto exit;
+        bgzf_thread_pool(u->_OFP->fp.bgzf, u->p, 0);
+      }
+		}
 		u->daln = bam_init1();
 		if (ofile) {
 			u->ofp = fopen(ofile, "w");
