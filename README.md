@@ -8,28 +8,14 @@
 
 - [Install](#install)
   - [From Conda](#from-conda)
-    - [Requirements](#conda-requirements)
   - [From Source](#from-source)
-    - [Requirements](#source-requirements)
 - [Run](#run)
-  - [Commands](#commands)
   - [refstats](#refstats)
-    - [Parameters](#refstats-parameters)
-    - [Run](#run-refstats)
-    - [Filters](#refstats-filters)
-    - [Write BAM After Filtering](#write-bam-after-filtering)
-    - [Add Taxonomy To BAM Files](#add-taxonomy-to-bam-files)
   - [taxstats](#taxstats)
-    - [Parameters](#taxstats-parameters)
-    - [Run](#run-taxstats)
-    - [Filters](#taxstats-filters)
-    - [Relation To refstats Taxonomy Tags](#relation-to-refstats-taxonomy-tags)
   - [alnfilt](#alnfilt)
-    - [Parameters](#alnfilt-parameters)
-- [Output Columns](#output-columns)
+- [Output](#output-columns)
 - [Taxonomy Files](#taxonomy-files)
 - [Input Notes](#input-notes)
-- [Testing](#testing)
 
 Unicorn computes alignment-based statistics from SAM/BAM files. It is aimed at
 metagenomic and reference-screening workflows where the same alignment file may
@@ -107,34 +93,34 @@ command for reference-level filtering, coverage metrics, and adding taxonomy tag
 to filtered BAM files.
 
 ```bash
-unicorn refstats -h
-unicorn 2.5.0 c414a07
-        May 27 2026 13:08:46
+unicorn 2.5.1 b53cd7e
+	Jun  4 2026 13:36:20
 ./unicorn refstats [options] -b <in.bam>|<in.sam>
 Options:
   -b <str>   Input bam|sam [Required]
   -t <int>, --threads <int> Number of threads [4]
   -o <str>, --outbam  <str> Output BAM file with filtered references
-  --outstat <str> Output statistics file
-  --[FILTER] <PARAM>  Apply reference filter "FILTER" with parameter "PARAM"
-      For example "--minreads 100" to filter out references with
-      less than 100 reads.
-      Available filters:
-       - minrefl  <int>  Minimum reference length to consider [1]
-       - minreads <int>  Minimum number of reads per reference  [1]
-       - minalnas <int>  Minimum alignment score [-Inf]
-       - maxdust  <int>  Maximum alignment dust score [100]
+  -k <int>, --ksize <int>   kmer size for duplicity computation [17]
+  --outstat <str> Print statistics to file <str> [stdout]
+  --[FILTER] <PARAM>  Apply filter "FILTER" with parameter "PARAM"
+      Example: "--minreads 100" to filter out references with
+                 less than 100 reads.
+      Filters:
+       - minreflen <int>  Minimum reference length to consider  [1]
+       - minreads  <int>  Minimum number of reads per reference [1]
+       - minalnas  <int>  Minimum alignment score [-Inf]
+       - maxdust   <int>  Maximum alignment dust score [100]
   --names   <str> Taxonomy nodeid to name mapping file.
   --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.
-  --acc2tax <str> Accession to taxid mapping file or .khash file.
-  -k <int> kmer size for duplicity computation [17]
+  --acc2tax <str> Accession to taxid mapping file.
   Report taxid of reference sequence. Enabled automatically when
   --acc2tax, --names and --nodes are provided.
   taxid is reported in bam records in custom:
   XT:i:<taxid> tag and
-  XR:i:<taxid> tag
-  In column 2 in the output statistics file.
-  --rank <str>    Taxonomic rank for XR tag. [genus]
+  XR:i:<taxid> tag in.
+  taxid column 2 in the output statistics file.
+  --rank <str>  Taxonomic rank for XR tag. [genus]
+  --qsize <int> Size of queue for coordinate sorted input bam files [1024]
   --verbose  Print libunicorn's messages.
   -h         print this help message
 ```
@@ -195,33 +181,30 @@ can either assign alignments to taxa from an accession map, or consume BAM files
 that already contain Unicorn `XT` and `XR` tags.
 
 ```bash
-unicorn 2.5.0 c414a07
-        May 27 2026 13:08:46
+unicorn 2.5.1 b53cd7e
+	Jun  4 2026 13:36:20
 ./unicorn taxstats [options] -b <in.bam>|<in.sam>
 Options:
   -b <str>                     Input bam|sam
-  -a <str> | --acc2tax <str>   Accession to taxid mapping file or .khash file.
-                               Providing a .khash file is much faster.
-                               If omitted, taxonomy names/nodes are still loaded but accession lookup is disabled.
-  -n <str> | --names <str>     Taxonomy names file.
-  -d <str> | --nodes <str>     Taxonomy nodes file
-  -k <int>                     kmer size for duplicity computation [17]
   -t <int>, --threads <int>    Number of threads [4]
-  --qsize <int>                Size of queue for taxstats computation [1024]
-  --outstat <str>              Output statistics file [/dev/stdout]
+  -k <int>, --ksize <int>      kmer size for duplicity computation [17]
+  --outstat <str> Print statistics to file <str> [stdout]
   --[FILTER] <PARAM>  Apply filter "FILTER" with parameter "PARAM"
       For example "--minreads 100" to filter out taxids with
       less than 100 reads.
       Available filters:
-       - minrefl  <int>   Minimum reference length. [0]
+       - minrefl  <int>   Minimum reference length. [1]
        - minreads <int>   Minimum number of reads per taxid. [1]
        - minmani  <float> Minimum mean ANI per taxid. [0]
        - minalnas <int>   Minimum alignment score [-Inf]
        - maxdust  <int>   Maximum alignment dust score [100]
-  --rank <str>                 Taxonomic rank to summarize by. [genus]
-  --verbose                    Prints libunicorn's messages.
-  -h                           Print this help message
-[unicorn::unicorn_taxstats] Total time: 0.000025 seconds
+  --acc2tax <str>   Accession to taxid mapping file or .khash file.
+  --names <str>     Taxonomy names file.
+  --nodes <str>     Taxonomy nodes file
+  --rank <str>      Taxonomic rank to summarize by. [genus]
+  --qsize <int>     Size of queue for XR sorted input bam files [1024]
+  --verbose         Prints libunicorn's messages.
+  -h                Print this help message
 ```
 
 Run `taxstats` from an accession map:
