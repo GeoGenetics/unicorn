@@ -43,6 +43,7 @@ typedef struct {
   float  score;
   uint32_t al; //Alignment length
   uint32_t tid;
+  uint8_t keep;
 } alnscore_t;
 #define kv_pushq(v, x) do {                                         \
         if ((v).n == (v).m) {                                       \
