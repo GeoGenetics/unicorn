@@ -791,15 +791,7 @@ static int unicorn_taxstats(int argc, char **argv)
   strq_t fileq = {0};
   if (opts.ifile) kv_push(char *, fileq, opts.ifile);
   if (opts.filel) unicorn_addfilelist(opts.filel, &fileq);
-  if (opts.onlypresent) {
-    if (!opts.dumpacc2tax) opts.dumpacc2tax = strdup("acc2tax.khash");
-    kv_init(accq);
-  }
-  if (opts.onlypresent && !opts.acc2tax) {
-    fprintf(stderr, "[unicorn::%s] Error: --onlypresent requires --acc2tax.\n", __func__);
-    ret = 7;
-    goto exit;
-  }
+
   if (!opts.names || !opts.nodes) {
     fprintf(stderr, "[unicorn::%s] Error: taxonomy reporting requires --names and --nodes.\n", __func__);
     ret = 7;
@@ -888,8 +880,6 @@ static int unicorn_taxstats(int argc, char **argv)
                   frefs,
                   (float)frefs/unicorn_getnref(u));
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
-    //Extract accessions into queue
-    if (opts.onlypresent) unicorn_fillaccq(u, &accq);
     fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
     unicorn_taxstat_print(u, stats, ofp, utax);
     unicorn_stat_destroy(stats);

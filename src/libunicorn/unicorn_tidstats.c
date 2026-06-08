@@ -13,6 +13,8 @@ typedef struct  pipeline {
   void *forpool;
 	u64set_t *treadset;
   u64set_t *freadset;
+	htsFile *ofp;
+	sam_hdr_t *ohdr ;
 } pipeline_t;
 
 typedef kvec_t(taxstat_t *) taxstatpq_t;
@@ -21,6 +23,10 @@ typedef struct step {
   bamq_t *queue;
   uint8_t nqueue;
   taxstatpq_t *taxq;
+  uint64_t *nreads;
+  uint64_t *nrefs;
+  u64set_t *treadset;
+  u64set_t *freadset;
   const unicorn_t *u;
   const unicorn_stat_t *stats;
 } step_t;
@@ -275,10 +281,10 @@ static int _addaln(taxstat_t *ts,
   return 0;
 }
 
-static void _taxafinalize(taxstat_t *ts)
+static uint8_t _taxafinalize(taxstat_t *ts, const unicorn_stat_t *stats)
 {
-  if (!ts) return;
-  if (!ts->readset || !ts->refmap) return;
+  if (!ts || !stats) return 0;
+  if (!ts->readset || !ts->refmap) return 0;
   // camex shenanigans
   if (ts->camex && kh_size(ts->camex)) {
     khint_t k;
@@ -318,6 +324,9 @@ static void _taxafinalize(taxstat_t *ts)
   ts->varoncov  = tcov ? tsumsq / tcov -
                    (ts->meanoncov * ts->meanoncov) : 0.0;
   if (ts->varoncov < 0.0f) ts->varoncov = 0.0f;
+  if (kh_size(ts->readset) < stats->minnreads) return 0;
+  if (ts->alnani_mean < stats->minmani) return 0;
+  return 1;
 }
 
 static int _compute(unicorn_t *u,
@@ -515,6 +524,10 @@ static step_t *_step_new(void)
 	s->queue  = NULL;
 	s->nqueue = 0;
 	s->taxq   = NULL;
+  s->nreads = NULL;
+  s->nrefs  = NULL;
+  s->treadset = NULL;
+  s->freadset = NULL;
 	s->u      = NULL;
 	s->stats  = NULL;
 	return s;
@@ -533,6 +546,8 @@ static void _step_free(step_t *s)
     }
     free(s->queue);
   }
+  if (s->nreads) free(s->nreads);
+  if (s->nrefs) free(s->nrefs);
   if (s->taxq) {
     for (uint8_t i = 0; i < s->nqueue; i++) {
       taxstatpq_t *tq = &s->taxq[i];
@@ -552,17 +567,27 @@ static step_t *_loadtaxa(unicorn_t *u,
 {
 	step_t *s = malloc(sizeof(step_t));
 	if (!s) return NULL;
+  s->nreads = NULL;
+  s->nrefs = NULL;
+  s->treadset = NULL;
+  s->freadset = NULL;
 	s->queue = calloc(u->nthreads, sizeof(bamq_t));
-	s->nqueue  = u->nthreads;
+  s->nqueue  = u->nthreads;
 	_loadalns(s->queue, &s->nqueue, u, utax, stats->qsize);
-	if (s->nqueue == 0) {
-		if (s->queue) free(s->queue);
-		free(s);
-		return NULL;
-	}
-	s->taxq = calloc(s->nqueue, sizeof(taxstatpq_t));
-	if (!s->taxq) {
-		_step_free(s);
+  if (s->nqueue == 0) {
+    if (s->queue) free(s->queue);
+    free(s);
+    return NULL;
+  }
+  s->nreads = calloc(s->nqueue, sizeof(uint64_t));
+  s->nrefs  = calloc(s->nqueue, sizeof(uint64_t));
+  if (!s->nreads || !s->nrefs) {
+    _step_free(s);
+    return NULL;
+  }
+  s->taxq = calloc(s->nqueue, sizeof(taxstatpq_t));
+  if (!s->taxq) {
+    _step_free(s);
 		return NULL;
 	}
 	for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->taxq[i]);
@@ -598,20 +623,60 @@ static void _statfor(void *data, long i, int tid)
     if (j == 0) prev_xr = xr;
     if (xr != prev_xr) {
       cur->_ntid = prev_xr;
-      _taxafinalize(cur);
-      kv_push(taxstat_t *, *out, cur);
+      s->nreads[i] += kh_size(cur->readset);
+      s->nrefs[i]  += cur->nrefs;
+      if (s->treadset && cur->readset) {
+        khint_t kr;
+        kh_foreach(cur->readset, kr) {
+          uint64_t qid = kh_key(cur->readset, kr);
+          int absent;
+          u64set_put(s->treadset, qid, &absent);
+        }
+      }
+      if (_taxafinalize(cur, s->stats)) {
+        if (s->freadset && cur->readset) {
+          khint_t kr;
+          kh_foreach(cur->readset, kr) {
+            uint64_t qid = kh_key(cur->readset, kr);
+            int absent;
+            u64set_put(s->freadset, qid, &absent);
+          }
+        }
+        kv_push(taxstat_t *, *out, cur);
+      } else {
+        _taxstat_free(cur);
+      }
       cur = _taxstat_new();
       if (!cur) break;
       prev_xr = xr;
     }
     _addaln(cur, s->u, s->stats, b, enc);
-    bam_destroy1(b);
-    q->a[j] = NULL;
   }
   if (cur) {
     cur->_ntid = prev_xr;
-    _taxafinalize(cur);
-    kv_push(taxstat_t *, *out, cur);
+    s->nreads[i] += kh_size(cur->readset);
+    s->nrefs[i]  += cur->nrefs;
+    if (s->treadset && cur->readset) {
+      khint_t kr;
+      kh_foreach(cur->readset, kr) {
+        uint64_t qid = kh_key(cur->readset, kr);
+        int absent;
+        u64set_put(s->treadset, qid, &absent);
+      }
+    }
+    if (_taxafinalize(cur, s->stats)) {
+      if (s->freadset && cur->readset) {
+        khint_t kr;
+        kh_foreach(cur->readset, kr) {
+          uint64_t qid = kh_key(cur->readset, kr);
+          int absent;
+          u64set_put(s->freadset, qid, &absent);
+        }
+      }
+      kv_push(taxstat_t *, *out, cur);
+    } else {
+      _taxstat_free(cur);
+    }
   }
   genesis_encoderfree(enc);
 }
@@ -655,12 +720,76 @@ static void _printtaxstats(FILE *fp, const taxstat_t taxstat, const utax_t *utax
 	            );
 }
 
+static void _taxstats_add_passed_totals(pipeline_t *p,
+                                        unicorn_stat_t *stats,
+                                        const taxstat_t *ts)
+{
+  if (!p || !stats || !ts) return;
+  stats->_nfalns += ts->nalns;
+  stats->_nfrefs += ts->nrefs;
+  if (p->freadset && ts->readset) {
+    khint_t kr;
+    kh_foreach(ts->readset, kr) {
+      uint64_t qid = kh_key(ts->readset, kr);
+      int absent;
+      u64set_put(p->freadset, qid, &absent);
+    }
+  }
+}
+
+static int _taxstats_group_range(const bamq_t *q,
+                                 uint32_t *qi,
+                                 uint32_t *qstart,
+                                 uint32_t *qend,
+                                 int32_t *xr)
+{
+  if (!q || !qi || !qstart || !qend || !xr) return 0;
+  while (*qi < q->n && !q->a[*qi]) (*qi)++;
+  if (*qi >= q->n) return 0;
+  *qstart = *qi;
+  bam1_t *b = q->a[*qi];
+  uint8_t *xtag = bam_aux_get(b, "XR");
+  *xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
+  while (*qi < q->n) {
+    bam1_t *bb = q->a[*qi];
+    if (!bb) {
+      (*qi)++;
+      continue;
+    }
+    uint8_t *ntag = bam_aux_get(bb, "XR");
+    int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
+    if (next_xr != *xr) break;
+    (*qi)++;
+  }
+  *qend = *qi;
+  return 1;
+}
+
+static int _taxstats_flush_group_alignments(bamq_t *q,
+                                            uint32_t qstart,
+                                            uint32_t qend,
+                                            htsFile *ofp,
+                                            sam_hdr_t *ohdr)
+{
+  if (!q) return 0;
+  for (uint32_t qj = qstart; qj < qend; qj++) {
+    bam1_t *b = q->a[qj];
+    if (!b) continue;
+    if (ofp && ohdr && sam_write1(ofp, ohdr, b) < 0) return -1;
+    bam_destroy1(b);
+    q->a[qj] = NULL;
+  }
+  return 0;
+}
+
 static void *_taxstats_pipeline(void *data, int step, void *in)
 {
   pipeline_t *p = (pipeline_t *)data;
 	if      ( 0 == step ) { //Load alignments
 		step_t *s = _loadtaxa(p->u, p->stats, p->utax);
 		if (!s) return 0;
+    s->treadset = p->treadset;
+    s->freadset = p->freadset;
 		if (p->stats && s->queue) {
 			uint64_t n = 0;
 			for (uint8_t i = 0; i < s->nqueue; i++) {
@@ -680,36 +809,30 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
     step_t *s = (step_t *)in;
 		unicorn_stat_t *stats = p->stats;
 		for (uint8_t i = 0; i < s->nqueue; i++) { //Loop over queues
+      bamq_t *q = &s->queue[i];
       taxstatpq_t *tq = &s->taxq[i];
-      for (uint32_t j = 0; j < tq->n; j++) { //Loop over taxstats
-				taxstat_t *ts = tq->a[j];
-				_printtaxstats(p->u->ofp, *ts, p->utax);
-        // Accumulate global stats
-        stats->_nreads += kh_size(ts->readset);
-        stats->_nrefs  += ts->nrefs;
-				// Accumulate run-wide totals (unique reads)
-        if (p->treadset && ts->readset) {
-          khint_t kr;
-          kh_foreach(ts->readset, kr) {
-            uint64_t qid = kh_key(ts->readset, kr);
-            int absent;
-            u64set_put(p->treadset, qid, &absent);
+      /* 1. Computation of summary statistics */
+      stats->_nrefs += s->nrefs ? s->nrefs[i] : 0;
+      uint32_t qi = 0;
+      uint32_t tj = 0;
+      while (qi < q->n) {
+        uint32_t qstart = 0, qend = 0;
+        int32_t xr = INT32_MIN;
+        if (!_taxstats_group_range(q, &qi, &qstart, &qend, &xr)) break;
+        taxstat_t *ts = (tj < tq->n) ? tq->a[tj] : NULL;
+        if (ts && ts->_ntid == xr) {
+          /* 2. Printing statistics */
+          _printtaxstats(p->u->ofp, *ts, p->utax);
+          _taxstats_add_passed_totals(p, stats, ts);
+          /* 3. Handling of alignment records */
+          if (_taxstats_flush_group_alignments(q, qstart, qend, p->ofp, p->ohdr) < 0) {
+            _step_free(s);
+            return (void *)1;
           }
-        }
-        // Accumulate "passed filters" (same criteria as _taxmapstats)
-        if (ts->readset &&
-            kh_size(ts->readset) >= stats->minnreads &&
-            ts->alnani_mean >= stats->minmani) {
-          stats->_nfalns += ts->nalns;
-          stats->_nfrefs += ts->nrefs;
-          if (p->freadset) {
-            khint_t kr;
-            kh_foreach(ts->readset, kr) {
-              uint64_t qid = kh_key(ts->readset, kr);
-              int absent;
-              u64set_put(p->freadset, qid, &absent);
-            }
-          }
+          tj++;
+        } else {
+          /* 3. Handling of alignment records */
+          _taxstats_flush_group_alignments(q, qstart, qend, NULL, NULL);
         }
       }
     }
@@ -729,19 +852,34 @@ static int _sorted_compute(unicorn_t *u,
   stats->_nfreads = 0;
   stats->_nfalns = 0;
   stats->_nfrefs = 0;
-  pipeline_t p = {u, stats, utax, 0};
+  pipeline_t p = {0};
+  p.u = u;
+  p.stats = stats;
+  p.utax  = utax;
 	p.treadset = u64set_init();
 	p.freadset = u64set_init();
   p.forpool = kt_forpool_init(u->nthreads);
   if (!p.forpool) return ret;
  	fprintf(u->ofp, TIDSTATSTR);
+	if (u->outbam) {
+		p.ofp = hts_open(u->outbam, "wb5");
+		p.ohdr = bam_hdr_dup(u->hdr);
+		if ( sam_hdr_write(p.ofp, p.ohdr) < 0 ) {
+			kt_forpool_destroy(p.forpool);
+			if (p.ohdr) bam_hdr_destroy(p.ohdr);
+			if (p.ofp) hts_close(p.ofp);
+			return ret;
+		}
+	}
 	kt_pipeline(3, _taxstats_pipeline, &p, 3);
   kt_forpool_destroy(p.forpool);
   stats->_nreads  = p.treadset ? kh_size(p.treadset) : 0;
   stats->_nfreads = p.freadset ? kh_size(p.freadset) : 0;
   if (p.treadset) u64set_destroy(p.treadset);
   if (p.freadset) u64set_destroy(p.freadset);
-  ret = 0;
+	if (p.ohdr) bam_hdr_destroy(p.ohdr);
+	if (p.ofp && u->outbam) hts_close(p.ofp);
+	ret = 0;
   return ret;
 }
 
