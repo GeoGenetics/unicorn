@@ -1,6 +1,6 @@
-#define VERSION "2.5.1"
+#define VERSION "2.5.2"
 #define UNICORN_MAYOR 2
 #define UNICORN_MINOR 5
-#define UNICORN_REV   1
+#define UNICORN_REV   2
 #define GIT_COMMIT    "@GIT_COMMIT@"
 #define COMPILE_DATE  __DATE__ " " __TIME__
