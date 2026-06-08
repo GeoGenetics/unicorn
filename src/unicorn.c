@@ -28,6 +28,7 @@ SOFTWARE.
 #include <time.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <float.h>
 
 #include "klib/ketopt.h"
 #define OPT_STR "b:o:t:a:n:d:1:2:p:q:k:h"
@@ -56,9 +57,9 @@ static ko_longopt_t unicorn_lopts[] = {
     { "niter",           ko_required_argument, 321 },
     { "scale-type",      ko_required_argument, 322 },
     { "mode",            ko_required_argument, 323 },
-    { "minani",          ko_required_argument, 324 },
+    { "minscore",        ko_required_argument, 324 },
     { "pct",             ko_required_argument, 325 },
-    { "maxani",          ko_required_argument, 326 },
+    { "maxscore",        ko_required_argument, 326 },
     { "strictbounds",    ko_no_argument,       327 },
     { "minalnas",        ko_required_argument, 328 },
     { "maxdust",         ko_required_argument, 329 },
@@ -109,11 +110,11 @@ typedef struct unicorn_opts {
 	//taxstats
 	uint32_t qsize;       // Size of queue for taxstats computation
 	//alnfilt
-  float minani;         // Minimum average nucleotide identity
+  float minscore;       // Minimum absolute alignment score to consider
   uint8_t alnfiltmode;  // Alignment filtering mode
   float pct;            // Percentage threshold for filtering
-  float maxani;         // Maximum average nucleotide identity
-  uint8_t strictb;      // Remove query if ANI out of bounds at any alignment
+  float maxscore;       // Maximum absolute alignment score to consider
+  uint8_t strict_score_bounds; // Remove query if absolute score out of bounds at any alignment
   int32_t minalnas;     // Minimum alignment score
   int32_t maxdust;      // Maximum dust score
   //statcmp
@@ -230,12 +231,11 @@ static void alnfilt_usage(FILE *fp)
             "                                RNDTOP  - Randomly select a best alignment\n"\
             "                                ALLTOP  - Select all best alignments\n"\
             "                                PCTTOP  - Select alignments within --pct\n"\
-            "                                           percentage of best alignment.\n"\
+            "                                           percentage of best absolute score.\n"\
             "                                ALL     - Select all alignments.\n"\
             "  --pct <float>                Percentage threshold for PCTTOP mode [0.90]\n"\
-            "  --minani <float>             Minimum average nucleotide identity [90.0]\n"\
-            "  --maxani <float>             Maximum average nucleotide identity [100.0]\n"\
-            "  --strictbounds               Remove query if ANI out of bounds at any alignment.\n"\
+            "  --minscore <float>           Minimum absolute alignment score [0.0]\n"\
+            "  --maxscore <float>           Maximum absolute alignment score [FLT_MAX]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message.\n");
 }
@@ -386,32 +386,27 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
           goto exit;
         }
       break;
-      case 324: //minani
-        opts->minani = strtof(o.arg, NULL);
-        if (opts->minani < 0.f || opts->minani > 100.f) {
-          fprintf(stderr, "[unicorn::%s] Error: --minani must be between (0.0 and 100.0]\n", __func__);
-          ret = 7;
-          goto exit;
-        }
+      case 324: //minscore
+        opts->minscore = strtof(o.arg, NULL);
         break;
       case 325: //pct
           opts->pct = strtof(o.arg, NULL);
-        if (opts->pct <= 0.f || opts->pct > 100.f) {
+        if (opts->pct <= 0.f || opts->pct > 1.f) {
           fprintf(stderr, "[unicorn::%s] Error: --pct must be between (0.0 and 1.0]\n", __func__);
           ret = 7;
           goto exit;
         }
         break;
-      case 326: //maxani
-        opts->maxani = strtof(o.arg, NULL);
-        if (opts->maxani < 0.f || opts->maxani > 100.f) {
-          fprintf(stderr, "[unicorn::%s] Error: --maxani must be between (0.0 and 100.0]\n", __func__);
+      case 326: //maxscore
+        opts->maxscore = strtof(o.arg, NULL);
+        if (opts->maxscore < opts->minscore) {
+          fprintf(stderr, "[unicorn::%s] Error: --maxscore must be greater than or equal to --minscore\n", __func__);
           ret = 7;
           goto exit;
         }
         break;
       case 327: //strictbounds
-        opts->strictb = 1;
+        opts->strict_score_bounds = 1;
         break;
       case 328: //minalnas
         opts->minalnas = strtol(o.arg, NULL, 10);
@@ -963,11 +958,12 @@ static int unicorn_alnfilt(int argc, char **argv)
   uint64_t ns = 0;
   clock_gettime(CLOCK_MONOTONIC, &pB);
   unicorn_opt_t opts = {0};
-  opts.strictb     = 0;
-  opts.threads     = 4;
-  opts.minani      = 90.0;
-  opts.pct         = 0.90;
-  opts.alnfiltmode = UNICORN_ALNFILT_ALLTOP;
+  opts.strict_score_bounds = 0;
+  opts.threads             = 4;
+  opts.minscore            = 0.0f;
+  opts.maxscore            = FLT_MAX;
+  opts.pct                 = 0.90;
+  opts.alnfiltmode         = UNICORN_ALNFILT_ALLTOP;
   //utax_t *utax = NULL;
   unicorn_t *u = NULL;
   char *_argv[64] = {0};
@@ -976,6 +972,11 @@ static int unicorn_alnfilt(int argc, char **argv)
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
   ret = 1;
   if (!opts.ifile) goto exit;
+  if (opts.maxscore < opts.minscore) {
+    fprintf(stderr, "[unicorn::%s] Error: --maxscore must be greater than or equal to --minscore\n", __func__);
+    ret = 7;
+    goto exit;
+  }
   ret = 2;
   fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
                                                                      opts.ifile);
@@ -1000,15 +1001,15 @@ static int unicorn_alnfilt(int argc, char **argv)
   }
   fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
                   "\tmode           == %s\n"\
-                  "\tminani         == %f\n"\
-                  "\tmaxani         == %f\n",
-                  __func__, ALNFILT_MODES[opts.alnfiltmode], opts.minani, opts.maxani);
+                  "\tminscore      == %f\n"\
+                  "\tmaxscore      == %f\n",
+                  __func__, ALNFILT_MODES[opts.alnfiltmode], opts.minscore, opts.maxscore);
   if (opts.alnfiltmode == UNICORN_ALNFILT_PCTTOP)
     fprintf(stderr, "\tpct          == %f\n", opts.pct);
-  if (opts.strictb)
+  if (opts.strict_score_bounds)
     fprintf(stderr, "\tstrictbounds == TRUE\n");
   fflush(stderr);
-  ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minani, opts.maxani, opts.pct, opts.strictb);
+  ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minscore, opts.maxscore, opts.pct, opts.strict_score_bounds);
   if (ret) goto exit;
   fprintf(stderr, "[unicorn::%s] Done\n"\
                   "\t%"PRIu64" alignments, %" PRIu64 " passed filters (%f)\n"\

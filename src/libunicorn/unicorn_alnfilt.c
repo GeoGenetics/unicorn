@@ -13,7 +13,7 @@ sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap)
 	khint32_t k, ntid = 0;
 	int absent, err = 1;
 	for (uint64_t i = 0; i < q.n; i++) { //Loop over scores
-		if (q.a[i].score)	{
+		if (q.a[i].keep)	{
 			int32_t tid = q.a[i].tid;
 			if ( sam_hdr_find_line_pos(hdr, "SQ", tid, &kstr) )
       	goto exit;
@@ -47,70 +47,69 @@ sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap)
 		return ohdr;
 }
 
-static inline uint32_t mode_alltop(alnscoreq_t q, uint64_t p, float max, float pct)
+static inline uint32_t mode_alltop(alnscoreq_t q, uint64_t p, float best_score, float pct)
 {
 	(void)pct;
 	if (!q.n || p >= q.n) return 0;
 	uint32_t f = 0;
 	for (uint64_t i = p; i < q.n; i++) {
-		if (q.a[i].score < max) {
-			q.a[i].score = 0.0;
+		if (!q.a[i].keep) continue;
+		if (q.a[i].score != best_score) {
+			q.a[i].keep = 0;
 			f++;
 		}
 	}
 	return f;
 }
 
-static inline uint32_t mode_all(alnscoreq_t q, uint64_t p, float max, float pct)
+static inline uint32_t mode_all(alnscoreq_t q, uint64_t p, float best_score, float pct)
 {
+	(void)q;
+	(void)p;
+	(void)best_score;
 	(void)pct;
-	if (!q.n || p >= q.n) return 0;
-	uint32_t f = 0;
-	max = 0.0;
-	for (uint64_t i = p; i < q.n; i++) {
-		if (q.a[i].score == max) {
-			f++;
-		}
-	}
-	return f;
+	return 0;
 }
 
-static inline uint32_t mode_rndtop(alnscoreq_t q, uint64_t p, float max, float pct)
+static inline uint32_t mode_rndtop(alnscoreq_t q, uint64_t p, float best_score, float pct)
 {
 	(void)pct;
  	if (!q.n || p >= q.n) return 0;
 	uint32_t f = 0, count = 0, flg = 0;
 	uint64_t selected = 0;
 	for (uint64_t i = p; i < q.n; i++) {
-		if (q.a[i].score == max) {
+		if (!q.a[i].keep) continue;
+		if (q.a[i].score == best_score) {
 			count++;
 			//reservoir sampling
 			if (rand() % count == 0) {
 				if (flg) { //Kick out previously selected max alignment
-					q.a[selected].score = 0.0;
+					q.a[selected].keep = 0;
 					f++;
 				}
 				selected = i;
 				flg = 1;
 				continue;
 			}
-			q.a[i].score = 0.0;
+			q.a[i].keep = 0;
 			f++;
 			continue;
 		}
-		q.a[i].score = 0.0;
+		q.a[i].keep = 0;
 		f++;
 	}
 	return f;
 }
 
-static inline uint32_t mode_pcttop(alnscoreq_t q, uint64_t p, float max, float pct)
+static inline uint32_t mode_pcttop(alnscoreq_t q, uint64_t p, float best_score, float pct)
 {
   if (!q.n || p >= q.n) return 0;
+	float threshold = best_score / pct;
 	uint32_t f = 0;
 	for (uint64_t i = p; i < q.n; i++) {
-		if (q.a[i].score < max*pct) {
-			q.a[i].score = 0.0;
+		if (!q.a[i].keep) continue;
+		if (q.a[i].score > threshold) {
+			q.a[i].keep = 0;
 			f++;
 		}
 	}
@@ -152,7 +151,7 @@ static uint64_t unicorn_filter(unicorn_t *u, alnscoreq_t q)
 	b = bam_init1();
 	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		alnscore_t score = q.a[alnid++];
-		if (score.score <= 0.0f) continue; //Skip filtered out alignments
+		if (!score.keep) continue; //Skip filtered out alignments
 		int32_t tid = b->core.tid;
     khint_t k = int2int_get(tidmap, tid);
 		int32_t ntid = kh_val(tidmap, k);
@@ -168,65 +167,60 @@ static uint64_t unicorn_filter(unicorn_t *u, alnscoreq_t q)
 	return faln;
 }
 
-int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct, uint8_t strictb)
+int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minscore, float maxscore, float pct, uint8_t strict_bounds)
 {
 	int ret = 5;
 	if (!unicorn_isqgrouped(u)) goto exit;
 	mode_fn filter = MODE_TBL[mode];
 	int32_t n;
-	alnscoreq_t alnscores;
-	kv_init(alnscores);
-	uint64_t prev = alnscores.n, tqueries = 0, fqueries = 0, falns = 0;
+	alnscoreq_t scores;
+	kv_init(scores);
+	uint64_t prev = scores.n, tqueries = 0, fqueries = 0, falns = 0;
 	struct timespec start, stop;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	while ( (n = unicorn_alnfiltload(u, &alnscores)) >= 0) {
+	while ( (n = unicorn_alnfiltload(u, &scores)) >= 0) { //Loop over queries
 		tqueries++;
-		float max = 0.0;
-		//Loop over freshly loaded alignments and apply minani filter
-		uint32_t _n = 0;
-		for (uint64_t i = prev; i < alnscores.n; i++) {
-			//Check for ANI bounds
-			if ((alnscores.a[i].score < minani) || (alnscores.a[i].score > maxani)) {
-				if (strictb) {
-					for (uint64_t j = prev; j < alnscores.n; j++) {
-						alnscores.a[j].score = 0;
-					}
-					_n = n;
-					n = 0;
-					break;
-				}
-				alnscores.a[i].score = 0;
-				_n++;
+		float best_score = scores.a[prev].score;
+		uint32_t bounds_filtered = 0;
+		for (uint64_t i = prev; i < scores.n; i++) { //Loop over alignments
+			//Check for score bounds
+			if ((scores.a[i].score < minscore) || (scores.a[i].score > maxscore)) {
+				scores.a[i].keep = 0;
+				bounds_filtered++;
 				n--;
+				continue;
 			}
-			max = alnscores.a[i].score > max ? alnscores.a[i].score : max;
+			if (scores.a[i].score < best_score) {
+				best_score = scores.a[i].score;
+			}
 		}
 		if (!n) {
-			falns += _n;
-			prev = alnscores.n;
+			falns += bounds_filtered;
+			prev = scores.n;
 			continue;
 		}
 		fqueries++;
-		falns += filter(alnscores, prev, max, pct);
-		prev = alnscores.n;
+		falns += bounds_filtered;
+		falns += filter(scores, prev, best_score, pct);
+		prev = scores.n;
 	}
 	clock_gettime(CLOCK_MONOTONIC, &stop);
 	if (VERBOSE) {
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
 		fprintf(stderr, "\t%lu alignments from %"PRIu64" queries\n",
-										alnscores.n, tqueries);
+										scores.n, tqueries);
 		fprintf(stderr, "\tFiltered %"PRIu64" alignments\n", falns);
 		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 		fflush(stderr);
 	}
-	u->values.naln   = alnscores.n;
+	u->values.naln   = scores.n;
 	u->values.nread  = tqueries;
 	u->values.nfread = fqueries;
-	u->values.nfaln = alnscores.n - falns;
+	u->values.nfaln = scores.n - falns;
 	ret = -1;
 	if (unicorn_rewind(u)) goto exit;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	uint64_t t = unicorn_filter(u, alnscores);
+	uint64_t t = unicorn_filter(u, scores);
 	clock_gettime(CLOCK_MONOTONIC, &stop);
 	if (VERBOSE) {
 		uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);

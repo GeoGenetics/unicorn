@@ -187,6 +187,8 @@ uint64_t unicorn_loadqueues(unicorn_t *u, bamq_t *q, uint8_t n)
   return naln;
 }
 
+#include <math.h>
+
 int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q)
 {
 	bam1_t *b = bam_init1();
@@ -202,12 +204,10 @@ int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q)
 	n = 0, l = 1;
 	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
 		n++;
-		alnscore_t s = {0, 0, 0};
-		uint8_t *aux = bam_aux_get(b, "NM");
-		uint8_t NM = bam_aux2i(aux);
-		//if (AS < minscore) minscore = AS;
+		alnscore_t s = {0, 0, 0, 1};
+		uint8_t *aux = bam_aux_get(b, "AS");
 		uint32_t al = bam_endpos(b) - b->core.pos;
-		s.score = (1.0 - ((float)NM / (float)al)) * 100;
+		s.score = aux ? fabsf((float)bam_aux2i(aux)) : 0.0f;
 		s.tid = b->core.tid;
 		s.al = al;
 		kv_push(alnscore_t, *q, s);
@@ -241,7 +241,7 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	n = 0, l = 1;
 	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
 		n++;
-		alnscore_t s = {0, 0, 0};
+		alnscore_t s = {0, 0, 0, 1};
 		uint8_t *aux = bam_aux_get(b, "AS");
 		float AS = (float)bam_aux2i(aux);
 		if (AS < minscore) minscore = AS;
