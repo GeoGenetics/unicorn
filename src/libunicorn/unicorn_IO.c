@@ -113,15 +113,7 @@ unicorn_t *unicorn_init( int nthreads,
     if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
     u->argc = argc;
     u->argv = argv;
-    if (outbam) {
-		  u->outbam = outbam;
-      if ( !( u->_OFP = hts_open(outbam,"wbz") ) ) goto exit;
-		  if (nthreads > 1) {
-        //u->p = hts_tpool_init(nthreads < 4 ? nthreads : 4);
-        //if (!u->p) goto exit;
-        bgzf_thread_pool(u->_OFP->fp.bgzf, u->p, 0);
-      }
-		}
+    u->outbam = outbam;
 		u->daln = bam_init1();
 		if (ofile) {
 			u->ofp = fopen(ofile, "w");
@@ -195,6 +187,8 @@ uint64_t unicorn_loadqueues(unicorn_t *u, bamq_t *q, uint8_t n)
   return naln;
 }
 
+#include <math.h>
+
 int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q)
 {
 	bam1_t *b = bam_init1();
@@ -210,12 +204,10 @@ int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q)
 	n = 0, l = 1;
 	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
 		n++;
-		alnscore_t s = {0, 0, 0};
-		uint8_t *aux = bam_aux_get(b, "NM");
-		uint8_t NM = bam_aux2i(aux);
-		//if (AS < minscore) minscore = AS;
+		alnscore_t s = {0, 0, 0, 1};
+		uint8_t *aux = bam_aux_get(b, "AS");
 		uint32_t al = bam_endpos(b) - b->core.pos;
-		s.score = (1.0 - ((float)NM / (float)al)) * 100;
+		s.score = aux ? fabsf((float)bam_aux2i(aux)) : 0.0f;
 		s.tid = b->core.tid;
 		s.al = al;
 		kv_push(alnscore_t, *q, s);
@@ -249,7 +241,7 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	n = 0, l = 1;
 	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
 		n++;
-		alnscore_t s = {0, 0, 0};
+		alnscore_t s = {0, 0, 0, 1};
 		uint8_t *aux = bam_aux_get(b, "AS");
 		float AS = (float)bam_aux2i(aux);
 		if (AS < minscore) minscore = AS;

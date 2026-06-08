@@ -935,14 +935,14 @@ static sam_hdr_t *_stats2samhdr(unicorn_stat_t *stats, sam_hdr_t *hdr)
   refmap_t *refmap = (refmap_t *)stats->__map;
   //Loop over references in refmap and add them to the header
   //Update ntid for each reference
-  kh_foreach(refmap, k) {
+	kh_foreach(refmap, k) {
     int32_t tid = kh_key(refmap, k);
     if ( sam_hdr_find_line_pos(hdr, "SQ", tid, &kstr) )
       goto exit;
     //Add new tid
     kh_val(refmap, k)._ntid = ntid++;
     //Add target to new header
-    sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
+		sam_hdr_add_lines(ohdr, kstr.s, kstr.l);
   }
   //Add RG lines
   for (int j = 0; j < sam_hdr_count_lines(hdr, "RG"); j++) {
@@ -965,6 +965,8 @@ static sam_hdr_t *_stats2samhdr(unicorn_stat_t *stats, sam_hdr_t *hdr)
   free(kstr.s);
   ret = 0;
   exit:
+	  //fprintf(stderr, "ERROR: %d\n", ret);
+		//fprintf(stderr, "%s\n", hdr->text);
     if (ret) {
       if (ohdr) sam_hdr_destroy(ohdr);
       ohdr = NULL;
@@ -1007,6 +1009,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   uint8_t ret = 1;
   if (!u || !stats) return ret;
   if (!stats->fc)   return ret;
+  if (u->sorted & COORDSORTED) return 0;
   sam_hdr_t *ohdr = NULL;
   sam_hdr_t *_hdr = NULL;
   bam1_t *b = bam_init1();

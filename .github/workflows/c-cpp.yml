@@ -2,9 +2,9 @@ name: C/C++ CI
 
 on:
   push:
-    branches: [ "unicorn" ]
+    branches: [ "dev", "unicorn" ]
   pull_request:
-    branches: [ "unicorn" ]
+    branches: [ "dev", "unicorn" ]
 
 jobs:
   build:
@@ -22,6 +22,10 @@ jobs:
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             brew install htslib
           fi
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libbz2-dev zlib1g-dev liblzma-dev libcurl4-openssl-dev
       - name: Update submodules
         run: git submodule update --init --recursive
       - name: make
