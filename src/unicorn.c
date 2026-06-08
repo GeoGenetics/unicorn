@@ -532,6 +532,8 @@ static int unicorn_refstats(int argc, char **argv)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
 	if ( (ret = _refstats_checkopt(&opts)) )            goto exit;
+	if (opts.outstat) ofp = fopen(opts.outstat, "w");
+	else ofp = stdout;
 	unicorn_printopts(&opts, stderr, REFSTATS);
   clock_gettime(CLOCK_MONOTONIC, &progB);
 

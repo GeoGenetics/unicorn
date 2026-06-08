@@ -113,15 +113,7 @@ unicorn_t *unicorn_init( int nthreads,
     if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
     u->argc = argc;
     u->argv = argv;
-    if (outbam) {
-		  u->outbam = outbam;
-      if ( !( u->_OFP = hts_open(outbam,"wbz") ) ) goto exit;
-		  if (nthreads > 1) {
-        //u->p = hts_tpool_init(nthreads < 4 ? nthreads : 4);
-        //if (!u->p) goto exit;
-        bgzf_thread_pool(u->_OFP->fp.bgzf, u->p, 0);
-      }
-		}
+    u->outbam = outbam;
 		u->daln = bam_init1();
 		if (ofile) {
 			u->ofp = fopen(ofile, "w");
