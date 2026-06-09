@@ -485,24 +485,42 @@ uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_
 	chr2int_t  *levels = utax->nodes.levelmap;
 	//Get dsired rank level
 	khint_t k  = chr2int_get(levels, rank);
+	if (k == kh_end(levels)) return 0;
 	uint32_t trank_val = kh_val(levels, k);
-	//Get node info: parent and rank level
-	k  = uint2tup_get(nodemap, taxid);
-	if (k==kh_end(nodemap)) return 0;
-	uint32_t parent   = kh_val(nodemap, k).taxid;
-	uint32_t rank_val = kh_val(nodemap, k).rank_val;
-	uint32_t _taxid = taxid;
-	while (rank_val < trank_val) {
-		_taxid = parent;
-		k = uint2tup_get(nodemap, parent);
-		parent   = kh_val(nodemap, k).taxid;
-		// Check if we reached the root
-		if ( _taxid == parent ) {
-			_taxid = taxid; //If we reached the root, return the original taxid
-			break;
+	uint32_t cur = taxid;
+	while (1) {
+		k = uint2tup_get(nodemap, cur);
+		if (k == kh_end(nodemap)) return 0;
+		uint32_t rank_val = kh_val(nodemap, k).rank_val;
+		if (rank_val == trank_val) {
+			*ret = 0;
+			return cur;
 		}
-		rank_val = kh_val(nodemap, k).rank_val;
+		uint32_t parent = kh_val(nodemap, k).taxid;
+		if (parent == cur) break; // root
+		cur = parent;
 	}
-	*ret = 0;
-	return _taxid;
+	return 0;
+}
+
+uint8_t utax_hastaxon(const utax_t *utax,
+                      const uint32q_t *keeptaxa,
+                      uint32_t taxid)
+{
+  if (!keeptaxa || keeptaxa->n == 0) return 1;
+  if (!utax || !taxid) return 0;
+  uint2tup_t *nodemap = utax->nodes.map;
+  if (!nodemap) return 0;
+  uint32_t cur = taxid;
+  while (1) {
+    for (uint32_t i = 0; i < keeptaxa->n; i++) {
+      if (keeptaxa->a[i] == 1 || keeptaxa->a[i] == cur) return 1;
+    }
+    khint_t k = uint2tup_get(nodemap, cur);
+    if (k == kh_end(nodemap)) return 0;
+    uint32_t parent = kh_val(nodemap, k).taxid;
+    if (parent == cur) break;
+    cur = parent;
+  }
+  return 0;
 }

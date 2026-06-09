@@ -27,6 +27,7 @@ typedef struct step {
   uint64_t *nrefs;
   const unicorn_t *u;
   const unicorn_stat_t *stats;
+  const utax_t *utax;
 } step_t;
 
 KSORT_INIT(_tid_sfloat, float, ks_lt_generic)
@@ -37,6 +38,14 @@ static inline float _fMEDIAN(float *v, uint32_t n)
     return v[n/2];
   return (v[n/2 - 1] + v[n/2]) / 2.0;
 }
+
+static uint8_t _keep_taxid(const utax_t *utax,
+                           const unicorn_stat_t *stats,
+                           uint32_t taxid);
+
+static uint8_t _keep_tagged_alignment(const utax_t *utax,
+                                      const unicorn_stat_t *stats,
+                                      const bam1_t *b);
 
 static void _taxmapstats(unicorn_stat_t *stats)
 {
@@ -132,64 +141,6 @@ static void _taxmapstats(unicorn_stat_t *stats)
 }
 
 #define LOADALNS_BATCH 1000
-
-static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t, uint32_t qsize)
-{
-  (void)t;
-  uint8_t nq = *n;
-  *n = 0;
-  bam1_t *b = bam_init1();
-  if (!b) return;
-  for (uint8_t i = 0; i < nq; i++) {
-    kv_init(q[i]);
-    // Seed this queue with the first alignment (from cache or file)
-    bam1_t *first = bam_init1();
-    if (!first) break;
-    if (u->dcache) {
-      if (!bam_copy1(first, u->daln)) break;
-      u->dcache = 0;
-    } else {
-      if (sam_read1(u->_FP, u->hdr, b) < 0) {
-        bam_destroy1(first);
-        break; // EOF
-      }
-      if (!bam_copy1(first, b)) break;
-    }
-    kv_push(bam1_t *, q[i], first);
-    // Taxid of the current group comes from the XR tag
-    uint8_t *xtag = bam_aux_get(first, "XR");
-    int32_t group_xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
-    // Keep loading until >= LOADALNS_BATCH, then extend until the *current*
-    // XR taxid changes. This avoids splitting a taxid group when the initial
-    // group is smaller than LOADALNS_BATCH and we spill into the next taxid.
-    while (1) {
-      if (sam_read1(u->_FP, u->hdr, b) < 0) {
-        // EOF: commit this queue and stop
-        *n = i + 1;
-        goto done;
-      }
-      uint8_t *ntag  = bam_aux_get(b, "XR");
-      int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
-			//fprintf(stderr, "READING ALN WITH XR=%d\n", next_xr);
-			if (q[i].n >= qsize && next_xr != group_xr) {
-        // Batch limit reached and taxid boundary crossed: cache for next call
-        if (!bam_copy1(u->daln, b)) break;
-        u->dcache = 1;
-        break;
-      }
-      bam1_t *cp = bam_init1();
-      if (!cp) break;
-      if (!bam_copy1(cp, b)) break;
-      kv_push(bam1_t *, q[i], cp);
-      if (next_xr != group_xr) {
-				group_xr = next_xr;
-			}
-    }
-    *n = i + 1;
-  }
-  done:
-    bam_destroy1(b);
-}
 
 static int _addaln(taxstat_t *ts,
                    const unicorn_t *u,
@@ -360,11 +311,19 @@ static int _compute(unicorn_t *u,
     uint32_t taxid = utax_gettaxid(utax,
                                    u->hdr->target_name[tid],
                                    &absent);
+    if (absent) {
+      int missing_absent;
+      chrset_put(missing, u->hdr->target_name[tid], &missing_absent);
+      nabsent++;
+      continue;
+    }
+    if (!_keep_taxid(utax, stats, taxid)) continue;
     //If rank is set, get taxid for parent node at that rank
-    uint8_t ret;
+    uint8_t ret = 0;
     if (rank) taxid = utax_getidatrank(utax, taxid, rank, &ret);
     if (absent || ret) {
-      chrset_put(missing, u->hdr->target_name[tid], &absent);
+      int missing_absent;
+      chrset_put(missing, u->hdr->target_name[tid], &missing_absent);
       nabsent++;
       continue;
     }
@@ -522,10 +481,11 @@ static step_t *_step_new(void)
 	s->queue  = NULL;
   s->nqueue = 0;
   s->taxq   = NULL;
-  s->nreads = NULL;
+	s->nreads = NULL;
   s->nrefs  = NULL;
 	s->u      = NULL;
 	s->stats  = NULL;
+  s->utax   = NULL;
 	return s;
 }
 
@@ -557,6 +517,84 @@ static void _step_free(step_t *s)
   free(s);
 }
 
+static void _loadalns(step_t *s,
+                      uint8_t *n,
+                      unicorn_t *u,
+                      const unicorn_stat_t *stats,
+                      const utax_t *t,
+                      uint32_t qsize)
+{
+	bamq_t *q = s->queue;
+  uint8_t nq = s->nqueue, n = 0;
+  bam1_t *b = bam_init1();
+  if (!b) return;
+  for (uint8_t i = 0; i < nq; i++) { //Loop over queues
+    kv_init(q[i]);
+    bam1_t *first = NULL;
+    int32_t group_xr = INT32_MIN;
+    // Seed this queue with the first alignment that passes the keeptaxa filter.
+    while (1) {
+      first = bam_init1();
+      if (!first) goto done;
+      if (u->dcache) {
+        if (!bam_copy1(first, u->daln)) {
+          bam_destroy1(first);
+          goto done;
+        }
+        u->dcache = 0;
+      } else {
+        if (sam_read1(u->_FP, u->hdr, b) < 0) {
+          bam_destroy1(first);
+          goto done; // EOF
+        }
+        if (!bam_copy1(first, b)) {
+          bam_destroy1(first);
+          goto done;
+        }
+      }
+      if (!_keep_tagged_alignment(t, stats, first)) {
+        bam_destroy1(first);
+        first = NULL;
+        continue;
+      }
+      kv_push(bam1_t *, q[i], first);
+      uint8_t *xtag = bam_aux_get(first, "XR");
+      group_xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
+      break;
+    }
+    // Keep loading until >= LOADALNS_BATCH, then extend until the *current*
+    // XR taxid changes. This avoids splitting a taxid group when the initial
+    // group is smaller than LOADALNS_BATCH and we spill into the next taxid.
+    while (1) {
+      if (sam_read1(u->_FP, u->hdr, b) < 0) {
+        // EOF: commit this queue and stop
+        n = i + 1;
+        goto done;
+      }
+      uint8_t *ntag  = bam_aux_get(b, "XR");
+      int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
+      if (!_keep_tagged_alignment(t, stats, b)) continue;
+      if (q[i].n >= qsize && next_xr != group_xr) {
+        // Batch limit reached and taxid boundary crossed: cache for next call
+        if (!bam_copy1(u->daln, b)) break;
+        u->dcache = 1;
+        break;
+      }
+      bam1_t *cp = bam_init1();
+      if (!cp) break;
+      if (!bam_copy1(cp, b)) break;
+      kv_push(bam1_t *, q[i], cp);
+      if (next_xr != group_xr) {
+        group_xr = next_xr;
+      }
+    }
+    n = i + 1;
+  }
+  done:
+		s->nqueue = n;
+    bam_destroy1(b);
+}
+
 static step_t *_loadtaxa(unicorn_t *u,
 												 const unicorn_stat_t *stats,
 												 utax_t *utax)
@@ -564,10 +602,10 @@ static step_t *_loadtaxa(unicorn_t *u,
 	step_t *s = malloc(sizeof(step_t));
 	if (!s) return NULL;
   s->nreads = NULL;
-  s->nrefs = NULL;
-	s->queue = calloc(u->nthreads, sizeof(bamq_t));
-  s->nqueue  = u->nthreads;
-	_loadalns(s->queue, &s->nqueue, u, utax, stats->qsize);
+  s->nrefs  = NULL;
+	s->queue  = calloc(u->nthreads, sizeof(bamq_t));
+  s->nqueue = u->nthreads;
+	_loadalns(s->queue, &s->nqueue, u, stats, utax, stats->qsize);
   if (s->nqueue == 0) {
     if (s->queue) free(s->queue);
     free(s);
@@ -587,7 +625,49 @@ static step_t *_loadtaxa(unicorn_t *u,
 	for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->taxq[i]);
 	s->u = u;
 	s->stats = stats;
+  s->utax = utax;
 	return s;
+}
+
+static uint8_t _keep_taxid(const utax_t *utax,
+                           const unicorn_stat_t *stats,
+                           uint32_t taxid)
+{
+  if (!stats || stats->keeptaxa.n == 0) return 1;
+  return utax_hastaxon(utax, &stats->keeptaxa, taxid);
+}
+
+static uint8_t _keep_tagged_alignment(const utax_t *utax,
+                                      const unicorn_stat_t *stats,
+                                      const bam1_t *b)
+{
+  if (!stats || stats->keeptaxa.n == 0) return 1;
+  if (!utax || !b) return 0;
+  uint8_t *tag = bam_aux_get(b, "XT");
+  uint32_t taxid = tag ? (uint32_t)bam_aux2i(tag) : 0;
+  if (taxid && _keep_taxid(utax, stats, taxid)) return 1;
+  tag = bam_aux_get(b, "XR");
+  taxid = tag ? (uint32_t)bam_aux2i(tag) : 0;
+  return _keep_taxid(utax, stats, taxid);
+}
+
+static uint8_t _aln_passes_tidstats_filters(const unicorn_t *u,
+                                            const unicorn_stat_t *stats,
+                                            const utax_t *utax,
+                                            const bam1_t *b)
+{
+  if (!u || !stats || !b) return 0;
+  if (_unmapped(b)) return 0;
+  if (b->core.tid < 0) return 0;
+  if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) return 0;
+  if (!_ASCHECK((bam1_t *)b, stats->minalnas)) return 0;
+  int32_t dusts = (int32_t)(0.5 + dust(bam_get_seq(b),
+                                       b->core.l_qseq,
+                                       64,
+                                       NULL));
+  if (dusts > stats->maxdust) return 0;
+  if (!_keep_tagged_alignment(utax, stats, b)) return 0;
+  return 1;
 }
 
 static void _statfor(void *data, long i, int tid)
@@ -730,6 +810,9 @@ static int _taxstats_group_range(const bamq_t *q,
 static int _taxstats_flush_group_alignments(bamq_t *q,
                                             uint32_t qstart,
                                             uint32_t qend,
+                                            const unicorn_t *u,
+                                            const unicorn_stat_t *stats,
+                                            const utax_t *utax,
                                             htsFile *ofp,
                                             sam_hdr_t *ohdr)
 {
@@ -737,7 +820,9 @@ static int _taxstats_flush_group_alignments(bamq_t *q,
   for (uint32_t qj = qstart; qj < qend; qj++) {
     bam1_t *b = q->a[qj];
     if (!b) continue;
-    if (ofp && ohdr && sam_write1(ofp, ohdr, b) < 0) return -1;
+    if (ofp && ohdr &&
+        _aln_passes_tidstats_filters(u, stats, utax, b) &&
+        sam_write1(ofp, ohdr, b) < 0) return -1;
     bam_destroy1(b);
     q->a[qj] = NULL;
   }
@@ -793,14 +878,28 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
             }
           }
           /* 3. Handling of alignment records */
-          if (_taxstats_flush_group_alignments(q, qstart, qend, p->ofp, p->ohdr) < 0) {
+          if (_taxstats_flush_group_alignments(q,
+                                               qstart,
+                                               qend,
+                                               p->u,
+                                               stats,
+                                               p->utax,
+                                               p->ofp,
+                                               p->ohdr) < 0) {
             _step_free(s);
             return (void *)1;
           }
           tj++;
         } else {
           /* 3. Handling of alignment records */
-          _taxstats_flush_group_alignments(q, qstart, qend, NULL, NULL);
+          _taxstats_flush_group_alignments(q,
+                                           qstart,
+                                           qend,
+                                           NULL,
+                                           NULL,
+                                           NULL,
+                                           NULL,
+                                           NULL);
         }
       }
     }

@@ -128,6 +128,7 @@ void unicorn_stat_destroy(unicorn_stat_t *stats)
     }
     if (stats->_anihist) floatmap_destroy(stats->_anihist);
 		kv_destroy(stats->_taxorder);
+    kv_destroy(stats->keeptaxa);
     free(stats);
   }
 }
@@ -139,6 +140,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   int32_t  maxdust,
                                   uint8_t  ksize,
 																	uint32_t qsize,
+																	const char *keeptaxa,
                                   uint8_t  flg)
 {
   unicorn_stat_t *stats = calloc(1, sizeof(unicorn_stat_t));
@@ -157,7 +159,18 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
   stats->ksize     = ksize;
 	stats->qsize     = qsize;
 	kv_init(stats->_taxorder);
-  memset(stats->_readlc, 0, 256*sizeof(uint32_t));
+	if (keeptaxa) {
+		kv_init(stats->keeptaxa);
+		char *kt = strdup(keeptaxa);
+		char *token = strtok(kt, ",");
+		while (token) {
+			uint32_t taxid = strtoul(token, NULL, 10);
+			kv_push(uint32_t, stats->keeptaxa, taxid);
+			token = strtok(NULL, ",");
+		}
+		free(kt);
+	}
+	memset(stats->_readlc, 0, 256*sizeof(uint32_t));
   return stats;
 }
 

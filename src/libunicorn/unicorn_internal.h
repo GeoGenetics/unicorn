@@ -290,11 +290,13 @@ typedef struct unicorn_stats_t {
   //Filters
   uint32_t minnreads; // Minimum number of reads to consider
   uint32_t minrefl;   // Minimum reference length to consider
-  float    minmani;    // Minimum mean ANI to consider
+  float    minmani;   // Minimum mean ANI to consider
   int32_t  minalnas;  // Minimum alignment score to consider
   int32_t  maxdust;   // Maximum dust score to consider
+  uint32q_t keeptaxa; // Set of taxids to keep, if empty all taxa are kept
 	uint8_t	 ksize;     // kmer size for complexity estimation
 	uint32_t qsize;     // Queue size for taxstats computation
+
 } unicorn_stat_t;
 
 typedef struct _covstats_t {
@@ -552,6 +554,10 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);
 const char *utax_getname(const utax_t *utax, uint32_t taxid);
 
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret);
+
+uint8_t utax_hastaxon(const utax_t *utax,
+                      const uint32q_t *keeptaxa,
+                      uint32_t taxid);
 
 double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount);
 
