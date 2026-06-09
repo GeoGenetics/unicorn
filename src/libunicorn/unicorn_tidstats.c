@@ -25,8 +25,6 @@ typedef struct step {
   taxstatpq_t *taxq;
   uint64_t *nreads;
   uint64_t *nrefs;
-  u64set_t *treadset;
-  u64set_t *freadset;
   const unicorn_t *u;
   const unicorn_stat_t *stats;
 } step_t;
@@ -522,12 +520,10 @@ static step_t *_step_new(void)
 	step_t *s = malloc(sizeof(step_t));
 	if (!s) return NULL;
 	s->queue  = NULL;
-	s->nqueue = 0;
-	s->taxq   = NULL;
+  s->nqueue = 0;
+  s->taxq   = NULL;
   s->nreads = NULL;
   s->nrefs  = NULL;
-  s->treadset = NULL;
-  s->freadset = NULL;
 	s->u      = NULL;
 	s->stats  = NULL;
 	return s;
@@ -569,8 +565,6 @@ static step_t *_loadtaxa(unicorn_t *u,
 	if (!s) return NULL;
   s->nreads = NULL;
   s->nrefs = NULL;
-  s->treadset = NULL;
-  s->freadset = NULL;
 	s->queue = calloc(u->nthreads, sizeof(bamq_t));
   s->nqueue  = u->nthreads;
 	_loadalns(s->queue, &s->nqueue, u, utax, stats->qsize);
@@ -625,23 +619,7 @@ static void _statfor(void *data, long i, int tid)
       cur->_ntid = prev_xr;
       s->nreads[i] += kh_size(cur->readset);
       s->nrefs[i]  += cur->nrefs;
-      if (s->treadset && cur->readset) {
-        khint_t kr;
-        kh_foreach(cur->readset, kr) {
-          uint64_t qid = kh_key(cur->readset, kr);
-          int absent;
-          u64set_put(s->treadset, qid, &absent);
-        }
-      }
       if (_taxafinalize(cur, s->stats)) {
-        if (s->freadset && cur->readset) {
-          khint_t kr;
-          kh_foreach(cur->readset, kr) {
-            uint64_t qid = kh_key(cur->readset, kr);
-            int absent;
-            u64set_put(s->freadset, qid, &absent);
-          }
-        }
         kv_push(taxstat_t *, *out, cur);
       } else {
         _taxstat_free(cur);
@@ -656,23 +634,7 @@ static void _statfor(void *data, long i, int tid)
     cur->_ntid = prev_xr;
     s->nreads[i] += kh_size(cur->readset);
     s->nrefs[i]  += cur->nrefs;
-    if (s->treadset && cur->readset) {
-      khint_t kr;
-      kh_foreach(cur->readset, kr) {
-        uint64_t qid = kh_key(cur->readset, kr);
-        int absent;
-        u64set_put(s->treadset, qid, &absent);
-      }
-    }
     if (_taxafinalize(cur, s->stats)) {
-      if (s->freadset && cur->readset) {
-        khint_t kr;
-        kh_foreach(cur->readset, kr) {
-          uint64_t qid = kh_key(cur->readset, kr);
-          int absent;
-          u64set_put(s->freadset, qid, &absent);
-        }
-      }
       kv_push(taxstat_t *, *out, cur);
     } else {
       _taxstat_free(cur);
@@ -788,8 +750,6 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
 	if      ( 0 == step ) { //Load alignments
 		step_t *s = _loadtaxa(p->u, p->stats, p->utax);
 		if (!s) return 0;
-    s->treadset = p->treadset;
-    s->freadset = p->freadset;
 		if (p->stats && s->queue) {
 			uint64_t n = 0;
 			for (uint8_t i = 0; i < s->nqueue; i++) {
@@ -824,6 +784,14 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
           /* 2. Printing statistics */
           _printtaxstats(p->u->ofp, *ts, p->utax);
           _taxstats_add_passed_totals(p, stats, ts);
+          if (p->treadset && ts->readset) {
+            khint_t kr;
+            kh_foreach(ts->readset, kr) {
+              uint64_t qid = kh_key(ts->readset, kr);
+              int absent;
+              u64set_put(p->treadset, qid, &absent);
+            }
+          }
           /* 3. Handling of alignment records */
           if (_taxstats_flush_group_alignments(q, qstart, qend, p->ofp, p->ohdr) < 0) {
             _step_free(s);
@@ -847,11 +815,11 @@ static int _sorted_compute(unicorn_t *u,
 {
   int ret = -1;
   if (!u || !stats || !utax) return ret;
-  stats->_nalns = 0;
-  stats->_nreads = 0;
+  stats->_nalns   = 0;
+  stats->_nreads  = 0;
   stats->_nfreads = 0;
-  stats->_nfalns = 0;
-  stats->_nfrefs = 0;
+  stats->_nfalns  = 0;
+  stats->_nfrefs  = 0;
   pipeline_t p = {0};
   p.u = u;
   p.stats = stats;
