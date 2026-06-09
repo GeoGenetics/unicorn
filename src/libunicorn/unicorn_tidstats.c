@@ -14,7 +14,9 @@ typedef struct  pipeline {
 	u64set_t *treadset;
   u64set_t *freadset;
 	htsFile *ofp;
-	sam_hdr_t *ohdr ;
+	sam_hdr_t *ohdr;
+	uint64_t nalns;
+	uint64_t nreads;
 } pipeline_t;
 
 typedef kvec_t(taxstat_t *) taxstatpq_t;
@@ -25,7 +27,9 @@ typedef struct step {
   taxstatpq_t *taxq;
   uint64_t *nreads;
   uint64_t *nrefs;
-  const unicorn_t *u;
+	uint32_t nalns;
+ 	u64set_t *treadset;
+	const unicorn_t *u;
   const unicorn_stat_t *stats;
   const utax_t *utax;
 } step_t;
@@ -514,26 +518,26 @@ static void _step_free(step_t *s)
     }
     free(s->taxq);
   }
-  free(s);
+  if (s->treadset) u64set_destroy(s->treadset);
+	free(s);
 }
 
 static void _loadalns(step_t *s,
-                      uint8_t *n,
                       unicorn_t *u,
                       const unicorn_stat_t *stats,
                       const utax_t *t,
                       uint32_t qsize)
 {
-	bamq_t *q = s->queue;
+	bamq_t *q  = s->queue;
   uint8_t nq = s->nqueue, n = 0;
   bam1_t *b = bam_init1();
   if (!b) return;
+	uint32_t nalns = 0, nreads = 0;
   for (uint8_t i = 0; i < nq; i++) { //Loop over queues
     kv_init(q[i]);
     bam1_t *first = NULL;
     int32_t group_xr = INT32_MIN;
-    // Seed this queue with the first alignment that passes the keeptaxa filter.
-    while (1) {
+    while (1) { // Seed queue with the first alignment.
       first = bam_init1();
       if (!first) goto done;
       if (u->dcache) {
@@ -542,7 +546,8 @@ static void _loadalns(step_t *s,
           goto done;
         }
         u->dcache = 0;
-      } else {
+      }
+			else {
         if (sam_read1(u->_FP, u->hdr, b) < 0) {
           bam_destroy1(first);
           goto done; // EOF
@@ -551,8 +556,12 @@ static void _loadalns(step_t *s,
           bam_destroy1(first);
           goto done;
         }
+				nalns++;
+      	khint_t qid = kh_hash_str(bam_get_qname(first));
+      	int absent;
+      	u64set_put(s->treadset, qid, &absent);
       }
-      if (!_keep_tagged_alignment(t, stats, first)) {
+			if (!_keep_tagged_alignment(t, stats, first)) {
         bam_destroy1(first);
         first = NULL;
         continue;
@@ -562,7 +571,7 @@ static void _loadalns(step_t *s,
       group_xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
       break;
     }
-    // Keep loading until >= LOADALNS_BATCH, then extend until the *current*
+    // Keep loading until >= qsize, then extend until the *current*
     // XR taxid changes. This avoids splitting a taxid group when the initial
     // group is smaller than LOADALNS_BATCH and we spill into the next taxid.
     while (1) {
@@ -571,9 +580,13 @@ static void _loadalns(step_t *s,
         n = i + 1;
         goto done;
       }
-      uint8_t *ntag  = bam_aux_get(b, "XR");
+			nalns++;
+	    khint_t qid = kh_hash_str(bam_get_qname(first));
+      int absent;
+      u64set_put(s->treadset, qid, &absent);
+			if (!_keep_tagged_alignment(t, stats, b)) continue;
+			uint8_t *ntag  = bam_aux_get(b, "XR");
       int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
-      if (!_keep_tagged_alignment(t, stats, b)) continue;
       if (q[i].n >= qsize && next_xr != group_xr) {
         // Batch limit reached and taxid boundary crossed: cache for next call
         if (!bam_copy1(u->daln, b)) break;
@@ -592,20 +605,25 @@ static void _loadalns(step_t *s,
   }
   done:
 		s->nqueue = n;
-    bam_destroy1(b);
+		s->nalns = nalns;
+		//s->nreads = nreads;
+		fprintf(stderr, "[libunicorn::%s] Loaded %u alignments in %u queues\n", __func__, nalns, n);
+		bam_destroy1(b);
 }
 
 static step_t *_loadtaxa(unicorn_t *u,
 												 const unicorn_stat_t *stats,
 												 utax_t *utax)
 {
-	step_t *s = malloc(sizeof(step_t));
+	step_t *s = calloc(1, sizeof(step_t));
 	if (!s) return NULL;
-  s->nreads = NULL;
+  s->nalns  = 0;
+	s->treadset = u64set_init(); //TODO handle error
+	s->nreads = NULL;
   s->nrefs  = NULL;
 	s->queue  = calloc(u->nthreads, sizeof(bamq_t));
   s->nqueue = u->nthreads;
-	_loadalns(s->queue, &s->nqueue, u, stats, utax, stats->qsize);
+	_loadalns(s, u, stats, utax, stats->qsize);
   if (s->nqueue == 0) {
     if (s->queue) free(s->queue);
     free(s);
@@ -623,9 +641,9 @@ static step_t *_loadtaxa(unicorn_t *u,
 		return NULL;
 	}
 	for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->taxq[i]);
-	s->u = u;
+	s->u     = u;
 	s->stats = stats;
-  s->utax = utax;
+  s->utax  = utax;
 	return s;
 }
 
@@ -646,7 +664,7 @@ static uint8_t _keep_tagged_alignment(const utax_t *utax,
   uint8_t *tag = bam_aux_get(b, "XT");
   uint32_t taxid = tag ? (uint32_t)bam_aux2i(tag) : 0;
   if (taxid && _keep_taxid(utax, stats, taxid)) return 1;
-  tag = bam_aux_get(b, "XR");
+  tag = bam_aux_get(b, "XR"); //Fallback to XR if XT not present
   taxid = tag ? (uint32_t)bam_aux2i(tag) : 0;
   return _keep_taxid(utax, stats, taxid);
 }
@@ -674,11 +692,9 @@ static void _statfor(void *data, long i, int tid)
 {
   (void)tid;
   step_t *s = (step_t *)data;
-  if (!s || !s->queue) return;
-  if (i < 0 || i >= (long)s->nqueue) return;
   bamq_t *q = &s->queue[i];
   if ( q->n == 0 ) return;
-  if (!s->taxq) return;
+  if (!s->taxq)    return;
   if (!s->u || !s->stats) return;
   uint8_t ksize = s->stats->ksize;
   genesis_encoder_t enc = genesis_encoderinit(ksize);
@@ -690,7 +706,7 @@ static void _statfor(void *data, long i, int tid)
   }
   taxstatpq_t *out = &s->taxq[i];
   int32_t prev_xr = INT32_MIN;
-  for (uint32_t j = 0; j < q->n; j++) {
+  for (uint32_t j = 0; j < q->n; j++) { //Loop over alignments in queue
     bam1_t *b = q->a[j];
     uint8_t *xtag = bam_aux_get(b, "XR");
     int32_t xr = xtag ? bam_aux2i(xtag) : INT32_MIN;
@@ -835,19 +851,13 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
 	if      ( 0 == step ) { //Load alignments
 		step_t *s = _loadtaxa(p->u, p->stats, p->utax);
 		if (!s) return 0;
-		if (p->stats && s->queue) {
-			uint64_t n = 0;
-			for (uint8_t i = 0; i < s->nqueue; i++) {
-				n += s->queue[i].n;
-			}
-			p->stats->_nalns += n;
-		}
+		p->nalns += s->nalns;
+		p->nreads += kh_size(s->treadset);
     return s;
   } //Load queries
   else if ( 1 == step ) { //Compute statistics
 		step_t *s = (step_t *)in;
-		if (s && s->nqueue)
-      kt_forpool(p->forpool, _statfor, s, s->nqueue);
+    kt_forpool(p->forpool, _statfor, s, s->nqueue);
 		return s;
   }
   else if (2  == step ) { //Write output
@@ -940,9 +950,10 @@ static int _sorted_compute(unicorn_t *u,
 	}
 	kt_pipeline(3, _taxstats_pipeline, &p, 3);
   kt_forpool_destroy(p.forpool);
-  stats->_nreads  = p.treadset ? kh_size(p.treadset) : 0;
+  stats->_nreads  = p.nreads;
   stats->_nfreads = p.freadset ? kh_size(p.freadset) : 0;
-  if (p.treadset) u64set_destroy(p.treadset);
+  stats->_nalns	  = p.nalns;
+	if (p.treadset) u64set_destroy(p.treadset);
   if (p.freadset) u64set_destroy(p.freadset);
 	if (p.ohdr) bam_hdr_destroy(p.ohdr);
 	if (p.ofp && u->outbam) hts_close(p.ofp);
