@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Unicorn LCA Graph Engine</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Unicorn LCA Graph Engine</h1>
+        <p class="subtitle">Taxonomic placement tree from LCA counts and NCBI taxonomy nodes.</p>
+      </div>
+      <button id="renderBtn" class="primary">Render Tree</button>
+      <button id="centerBtn" class="secondary">Center Root</button>
+    </header>
+
+    <main class="app">
+      <section class="controls" aria-label="Input controls">
+        <label>
+          <span>LCA / .bdamage output</span>
+          <input id="lcaFile" type="file" accept=".txt,.tsv,.bdamage,.lca">
+        </label>
+        <label>
+          <span>nodes.dmp</span>
+          <input id="nodesFile" type="file" accept=".dmp,.txt">
+        </label>
+        <label>
+          <span>names.dmp optional</span>
+          <input id="namesFile" type="file" accept=".dmp,.txt">
+        </label>
+        <label>
+          <span>Circle size</span>
+          <select id="countMode">
+            <option value="total">Direct + descendants</option>
+            <option value="direct">Direct only</option>
+          </select>
+        </label>
+        <label>
+          <span>Scale</span>
+          <select id="scaleMode">
+            <option value="sqrt">Sqrt</option>
+            <option value="linear">Linear</option>
+          </select>
+        </label>
+        <label>
+          <span>Minimum subtree reads</span>
+          <input id="minReads" type="number" min="0" step="1" value="0">
+        </label>
+        <label>
+          <span>Search</span>
+          <input id="searchBox" type="search" placeholder="taxid or name">
+        </label>
+      </section>
+
+      <section id="summaryPanel" class="summary" aria-label="Tree summary">
+        <div class="summary-metric"><strong id="readCount">0</strong><span>reads</span></div>
+        <div class="summary-metric"><strong id="taxonCount">0</strong><span>taxa with direct LCA</span></div>
+        <div class="summary-metric"><strong id="visibleCount">0</strong><span>visible nodes</span></div>
+        <div class="summary-metric"><strong id="missingCount">0</strong><span>unplaced taxids</span></div>
+        <div id="summaryResize" class="summary-resize" role="separator" aria-orientation="horizontal" title="Drag to resize summary"></div>
+      </section>
+
+      <section class="workspace">
+        <div id="status" class="status">Load an LCA output file and nodes.dmp to begin.</div>
+        <div id="chartWrap" class="chart-wrap">
+          <svg id="treeSvg" role="img" aria-label="Taxonomic LCA tree"></svg>
+          <div id="tooltip" class="tooltip" hidden></div>
+        </div>
+      </section>
+
+      <section class="table-panel" aria-label="Top LCA placements">
+        <h2>Top direct placements</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Taxid</th>
+              <th>Name</th>
+              <th>Rank</th>
+              <th>Direct reads</th>
+              <th>Subtree reads</th>
+            </tr>
+          </thead>
+          <tbody id="topTable"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="graphengine.js"></script>
+  </body>
+</html>
