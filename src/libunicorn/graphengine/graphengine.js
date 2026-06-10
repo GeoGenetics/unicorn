@@ -9,6 +9,8 @@ const state = {
   collapsed: new Set(),
   missingTaxids: new Set(),
   centerOnNextRender: false,
+  focusTaxid: null,
+  clickTimer: null,
 };
 
 const els = {
@@ -35,7 +37,10 @@ const els = {
 };
 
 els.renderBtn.addEventListener("click", loadAndRender);
-els.centerBtn.addEventListener("click", centerRoot);
+els.centerBtn.addEventListener("click", () => {
+  state.focusTaxid = null;
+  centerRoot();
+});
 els.countMode.addEventListener("change", redraw);
 els.scaleMode.addEventListener("change", redraw);
 els.minReads.addEventListener("input", redraw);
@@ -355,15 +360,19 @@ function renderSvg(nodes, links, search) {
       y: 10,
     }, `${node.direct.toLocaleString()} direct / ${node.total.toLocaleString()} subtree`));
     group.addEventListener("click", () => {
-      if (node.children.length) {
-        if (state.collapsed.has(node.taxid)) {
-          state.collapsed.delete(node.taxid);
-          collapseChildren(node);
-        } else {
-          state.collapsed.add(node.taxid);
-        }
-        redraw();
+      if (state.clickTimer) clearTimeout(state.clickTimer);
+      state.clickTimer = setTimeout(() => {
+        state.clickTimer = null;
+        toggleCollapse(node);
+      }, 220);
+    });
+    group.addEventListener("dblclick", (event) => {
+      event.preventDefault();
+      if (state.clickTimer) {
+        clearTimeout(state.clickTimer);
+        state.clickTimer = null;
       }
+      toggleFocus(node);
     });
     group.addEventListener("mousemove", (event) => showTooltip(event, node));
     group.addEventListener("mouseleave", hideTooltip);
@@ -371,15 +380,51 @@ function renderSvg(nodes, links, search) {
   }
   els.svg.appendChild(nodeLayer);
   if (state.centerOnNextRender) {
-    centerRoot();
+    requestCenterRoot();
     state.centerOnNextRender = false;
   }
 }
 
+function requestCenterRoot() {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(centerRoot);
+  });
+}
+
 function centerRoot() {
-  if (!state.tree || !els.chartWrap) return;
-  els.chartWrap.scrollLeft = Math.max(0, (state.tree.x || 0) - 80);
-  els.chartWrap.scrollTop = Math.max(0, (state.tree.y || 0) - (els.chartWrap.clientHeight / 2));
+  centerNode(state.tree);
+}
+
+function centerNode(node) {
+  if (!node || !els.chartWrap) return;
+  const rootX = node.x || 0;
+  const rootY = node.y || 0;
+  els.chartWrap.scrollTo({
+    left: Math.max(0, rootX - 80),
+    top: Math.max(0, rootY - (els.chartWrap.clientHeight / 2)),
+    behavior: "auto",
+  });
+}
+
+function toggleFocus(node) {
+  if (state.focusTaxid === node.taxid) {
+    state.focusTaxid = null;
+    centerRoot();
+    return;
+  }
+  state.focusTaxid = node.taxid;
+  centerNode(node);
+}
+
+function toggleCollapse(node) {
+  if (!node.children.length) return;
+  if (state.collapsed.has(node.taxid)) {
+    state.collapsed.delete(node.taxid);
+    collapseChildren(node);
+  } else {
+    state.collapsed.add(node.taxid);
+  }
+  redraw();
 }
 
 function collapseChildren(node) {
@@ -475,6 +520,9 @@ function initSummaryResize() {
   els.summaryResize.addEventListener("pointermove", (event) => {
     if (!els.summaryResize.hasPointerCapture(event.pointerId)) return;
     setSummaryHeight(startHeight + event.clientY - startY);
+    requestAnimationFrame(() => {
+      if (state.tree) centerRoot();
+    });
   });
   els.summaryResize.addEventListener("pointerup", (event) => {
     if (els.summaryResize.hasPointerCapture(event.pointerId)) {
