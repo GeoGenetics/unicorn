@@ -522,6 +522,17 @@ static void _step_free(step_t *s)
 	free(s);
 }
 
+static inline uint64_t _hash64str(const char *s)
+{
+  uint64_t h = 14695981039346656037ULL;
+  const unsigned char *p = (const unsigned char *)s;
+  for (; *p; ++p) {
+    h ^= (uint64_t)*p;
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
+
 static void _loadalns(step_t *s,
                       unicorn_t *u,
                       const unicorn_stat_t *stats,
@@ -532,7 +543,7 @@ static void _loadalns(step_t *s,
   uint8_t nq = s->nqueue, n = 0;
   bam1_t *b = bam_init1();
   if (!b) return;
-	uint32_t nalns = 0, nreads = 0;
+	uint32_t nalns = 0;
   for (uint8_t i = 0; i < nq; i++) { //Loop over queues
     kv_init(q[i]);
     bam1_t *first = NULL;
@@ -546,6 +557,10 @@ static void _loadalns(step_t *s,
           goto done;
         }
         u->dcache = 0;
+        //nalns++;
+        //khint_t qid = kh_hash_str(bam_get_qname(first));
+        //int absent;
+        //u64set_put(s->treadset, qid, &absent);
       }
 			else {
         if (sam_read1(u->_FP, u->hdr, b) < 0) {
@@ -557,7 +572,7 @@ static void _loadalns(step_t *s,
           goto done;
         }
 				nalns++;
-      	khint_t qid = kh_hash_str(bam_get_qname(first));
+      	uint64_t qid = _hash64str(bam_get_qname(first));
       	int absent;
       	u64set_put(s->treadset, qid, &absent);
       }
@@ -581,7 +596,7 @@ static void _loadalns(step_t *s,
         goto done;
       }
 			nalns++;
-	    khint_t qid = kh_hash_str(bam_get_qname(first));
+	    uint64_t qid = _hash64str(bam_get_qname(b));
       int absent;
       u64set_put(s->treadset, qid, &absent);
 			if (!_keep_tagged_alignment(t, stats, b)) continue;
@@ -606,7 +621,6 @@ static void _loadalns(step_t *s,
   done:
 		s->nqueue = n;
 		s->nalns = nalns;
-		//s->nreads = nreads;
 		fprintf(stderr, "[libunicorn::%s] Loaded %u alignments in %u queues\n", __func__, nalns, n);
 		bam_destroy1(b);
 }
@@ -848,11 +862,19 @@ static int _taxstats_flush_group_alignments(bamq_t *q,
 static void *_taxstats_pipeline(void *data, int step, void *in)
 {
   pipeline_t *p = (pipeline_t *)data;
-	if      ( 0 == step ) { //Load alignments
+  if      ( 0 == step ) { //Load alignments
 		step_t *s = _loadtaxa(p->u, p->stats, p->utax);
 		if (!s) return 0;
 		p->nalns += s->nalns;
-		p->nreads += kh_size(s->treadset);
+    if (p->treadset && s->treadset) {
+      khint_t kr;
+      kh_foreach(s->treadset, kr) {
+        uint64_t qid = kh_key(s->treadset, kr);
+        int absent;
+        u64set_put(p->treadset, qid, &absent);
+      }
+      p->nreads = kh_size(p->treadset);
+    }
     return s;
   } //Load queries
   else if ( 1 == step ) { //Compute statistics

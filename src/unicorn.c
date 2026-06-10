@@ -66,6 +66,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "ksize",           ko_required_argument, 330 },
 		{ "qsize",           ko_required_argument, 331 },
 		{ "keeptaxa",        ko_required_argument, 332 },
+		{ "outprefix",      ko_required_argument,  333 },
 		{0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -83,7 +84,8 @@ static const char *ERRORS[16] = { 0,
                                   "Memory allocation error",
                                   "BAM not query grouped",
                                   "Bad argument",
-                                  "Bad taxonomy"};
+                                  "Bad taxonomy",
+																  "lca error"};
 
 typedef struct unicorn_opts {
   int  threads;         // Number of threads to use
@@ -124,6 +126,7 @@ typedef struct unicorn_opts {
   char *stat2;         // Second statistics file for comparison
   uint32_t col1;
   uint32_t col2;
+  char *outprefix;
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -438,6 +441,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 				break;
 			case 332: //keeptaxa
 				opts->keeptaxa = strdup(o.arg);
+				break;
+			case 333: //outprefix
+				opts->outprefix = strdup(o.arg);
 				break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
@@ -1038,27 +1044,62 @@ static int unicorn_lca(int argc, char **argv)
   opts.maxdust   = 100;
   opts.qsize = 1024;
 	unicorn_t *u = NULL;
-  FILE *ofp = NULL;
   char *_argv[64] = {0};
   clock_gettime(CLOCK_MONOTONIC, &pstart);
 	if (argc <= 2) goto exit;
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+	if (!opts.ifile || !opts.outprefix) {
+		ret = 2;
+		goto exit;
+	}
 	fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n",
                      __func__, opts.ifile);
 	clock_gettime(CLOCK_MONOTONIC, &start);
   u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, argc, _argv);
-  clock_gettime(CLOCK_MONOTONIC, &stop);
+  if (!unicorn_isqgrouped(u)) {
+		ret = 6;
+		goto exit;
+	}
+	clock_gettime(CLOCK_MONOTONIC, &stop);
 	ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
 	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+	fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	utax = unicorn_loadtaxonomy(opts.acc2tax,
+															opts.names,
+															opts.nodes,
+															opts.rank,
+															&ret);
+	if (ret) goto exit;
+	clock_gettime(CLOCK_MONOTONIC, &stop);
+	ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+
+	fprintf(stderr, "[unicorn::%s] Computing LCA\n", __func__);
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	uint64_t nalns, nreads;
+	ret = unicorn_lcacompute(u, NULL, utax, &nalns, &nreads, opts.outprefix);
+	if (ret) goto exit;
+	clock_gettime(CLOCK_MONOTONIC, &stop);
+	ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+	fprintf(stderr, "\t%lu alignments\n", nalns);
+	fprintf(stderr, "\t%lu reads\n", nreads);
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+
 
 
 
 	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
+	clock_gettime(CLOCK_MONOTONIC, &pstop);
+	ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
+	fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",__func__, (double)ns/1000000000.f);
 	ret = 0;
 	exit:
+	  if (ret)
+      fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
 		if (u) unicorn_destroy(u);
 	  unicorn_freeopts(opts);
 	  return ret;

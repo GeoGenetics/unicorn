@@ -276,3 +276,11 @@ unicorn's alnfilt routines
 
 ****************************************************/
 int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct, uint8_t strictb);
+
+
+/****************************************************
+unicorn's lca routines
+
+
+****************************************************/
+int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nalns, uint64_t *nreads, char *outprefix);

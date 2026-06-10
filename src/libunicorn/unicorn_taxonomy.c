@@ -385,16 +385,14 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 														 const char *rank,
 														 int *ret)
 {
-	*ret = 7;
+	*ret = 8;
 	if (!nodes || !names) return NULL;
 	utax_t *utax = calloc(1, sizeof(utax_t));
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading nodes\n", __func__);
-	if ( tloadnodes(nodes, utax, ret) ) goto exit;
+	if ( tloadnodes(nodes, utax, ret) )                     goto exit;
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);
-	if ( tloadnames(names, utax, ret) ) goto exit;
-	*ret = 7;
-	if (kh_size(utax->nodes.map) != kh_size(utax->namemap))
-		goto exit;
+	if ( tloadnames(names, utax, ret) )                     goto exit;
+	if (kh_size(utax->nodes.map) != kh_size(utax->namemap)) goto exit;
 	utax->numnodes = kh_size(utax->nodes.map);
 	if (acc2tax) {
 		if (VERBOSE) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}

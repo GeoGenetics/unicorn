@@ -613,11 +613,8 @@ void unicorn_printstrq(const char *filename, strq_t accq, utax_t *utax)
 
 uint8_t unicorn_isqgrouped(unicorn_t *u)
 {
-  uint8_t ret = 0;
-  if (!u) return ret;
-  ret |= (u->sorted & QUERYSORTED);
-  ret |= (u->sorted & QUERYGROUPED);
-  return ret;
+  if (!u) return 0;
+  return (u->sorted & (QUERYSORTED | QUERYGROUPED)) ? 1 : 0;
 }
 
 
@@ -736,3 +733,5 @@ double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount)
   if (n >= window) return (200.0 * maxScore) / (window * (window-1)) ;
   return (200.0 * score) / (n * (n+1)) ;
 }
+
+
