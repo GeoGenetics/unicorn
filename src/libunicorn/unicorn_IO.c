@@ -9,6 +9,14 @@
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 
+static float _alignment_score_or_xj(const bam1_t *b)
+{
+  uint8_t *aux = bam_aux_get((bam1_t *)b, "XJ");
+  if (aux) return bam_aux2f(aux);
+  aux = bam_aux_get((bam1_t *)b, "AS");
+  return aux ? (float)bam_aux2i(aux) : 0.0f;
+}
+
 uint8_t unicorn_rewind(unicorn_t *u)
 {
 	uint8_t ret = 1;
@@ -96,6 +104,7 @@ unicorn_t *unicorn_init( int nthreads,
                          const char *ifile,
                          char *outbam,
 												 const char *ofile,
+												 int adnascore,
 												 int argc,
                          char **argv)
 {
@@ -120,6 +129,7 @@ unicorn_t *unicorn_init( int nthreads,
 			if (!u->ofp) goto exit;
 		}
 		else u->ofp = stdout;
+		u->adnascore = adnascore;
 		if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
 		if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
 		if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;
@@ -205,9 +215,8 @@ int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q)
 	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
 		n++;
 		alnscore_t s = {0, 0, 0, 1};
-		uint8_t *aux = bam_aux_get(b, "AS");
 		uint32_t al = bam_endpos(b) - b->core.pos;
-		s.score = aux ? fabsf((float)bam_aux2i(aux)) : 0.0f;
+		s.score = fabsf(_alignment_score_or_xj(b));
 		s.tid = b->core.tid;
 		s.al = al;
 		kv_push(alnscore_t, *q, s);
@@ -242,8 +251,7 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q)
 	while ( kh_eq_str(qname, bam_get_qname(b)) && (l >= 0) ) {
 		n++;
 		alnscore_t s = {0, 0, 0, 1};
-		uint8_t *aux = bam_aux_get(b, "AS");
-		float AS = (float)bam_aux2i(aux);
+		float AS = _alignment_score_or_xj(b);
 		if (AS < minscore) minscore = AS;
 		uint32_t al = bam_endpos(b) - b->core.pos;
 		s.score = AS;

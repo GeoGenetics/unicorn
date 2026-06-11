@@ -66,7 +66,8 @@ static ko_longopt_t unicorn_lopts[] = {
     { "ksize",           ko_required_argument, 330 },
 		{ "qsize",           ko_required_argument, 331 },
 		{ "keeptaxa",        ko_required_argument, 332 },
-		{ "outprefix",      ko_required_argument,  333 },
+		{ "outprefix",       ko_required_argument, 333 },
+		{ "adnascore",       ko_no_argument,       334 },
 		{0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -127,6 +128,7 @@ typedef struct unicorn_opts {
   uint32_t col1;
   uint32_t col2;
   char *outprefix;
+  uint8_t adnascore;
 } unicorn_opt_t;
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
@@ -173,7 +175,9 @@ static void refstats_usage(FILE *fp)
             "       - minreads  <int>  Minimum number of reads per reference [1]\n"\
             "       - minalnas  <int>  Minimum alignment score [-Inf]\n"\
             "       - maxdust   <int>  Maximum alignment dust score [100]\n"\
-            "  --names   <str> Taxonomy nodeid to name mapping file.\n"\
+            "  --adnascore     Recompute alignment score for ancient DNA damage [unset]\n"\
+						"                  New score is stored in costum XJ:f tag.\n"      
+						"  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
             "  --acc2tax <str> Accession to taxid mapping file.\n"\
 						"  Report taxid of reference sequence. Enabled automatically when\n"\
@@ -445,6 +449,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 			case 333: //outprefix
 				opts->outprefix = strdup(o.arg);
 				break;
+			case 334: //adnascore
+				opts->adnascore = 1;
+				break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -480,6 +487,8 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
 		fprintf(fp, "\t--keeptaxa  %s\n", opts->keeptaxa ? opts->keeptaxa : "N/A");
 	}
 	fprintf(fp, "\t--qsize     %d\n", opts->qsize);
+	if (opts->adnascore)
+	fprintf(fp, "\t--adnascore\n");
 	if (opts->withtid) {
     fprintf(fp, "\t--acc2tax %s\n", opts->acc2tax ? opts->acc2tax : "N/A");
     fprintf(fp, "\t--names %s\n", opts->names);
@@ -538,12 +547,13 @@ static int unicorn_refstats(int argc, char **argv)
   unicorn_opt_t opts = {0};
   opts.threads   = 4;
   opts.minnreads = 1;
-  opts.minrefl   = 0;
+  opts.minrefl   = 1;
   opts.minalnas  = INT32_MIN;
   opts.maxdust   = 100;
   opts.ksize     = 17;
   opts.qsize		 = 1024;
 	opts.rank  = strdup("genus");
+	opts.adnascore = 0;
 	unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
   utax_t *utax = NULL;
@@ -567,6 +577,7 @@ static int unicorn_refstats(int argc, char **argv)
                    opts.ifile,
                    opts.outbam ? opts.outbam : NULL,
                    opts.outstat ? opts.outstat : NULL,
+									 opts.adnascore,
 									 argc,
                    _argv);
   if (!u) goto exit;
@@ -720,6 +731,7 @@ static int unicorn_bamstats(int argc, char **argv)
                      fileq.a[i],
                      NULL,
 										 NULL,
+                     opts.adnascore,
                      argc,
                      _argv);
     if (!u) {
@@ -856,6 +868,7 @@ static int unicorn_taxstats(int argc, char **argv)
                      fileq.a[i],
                      obamstr,
 										 opts.outstat ? opts.outstat : NULL,
+                     opts.adnascore,
                      argc,
                      _argv);
     if (obamstr && obamstr != opts.outbam) free(obamstr);
@@ -979,7 +992,7 @@ static int unicorn_alnfilt(int argc, char **argv)
                                                                      opts.ifile);
   fflush(stderr);
   clock_gettime(CLOCK_MONOTONIC, &start);
-  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, argc, _argv);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, argc, _argv);
   if (!u) goto exit;
   ret = 5;
   if (!unicorn_isqgrouped(u)) goto exit;
@@ -1057,7 +1070,7 @@ static int unicorn_lca(int argc, char **argv)
 	fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n",
                      __func__, opts.ifile);
 	clock_gettime(CLOCK_MONOTONIC, &start);
-  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, argc, _argv);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, argc, _argv);
   if (!unicorn_isqgrouped(u)) {
 		ret = 6;
 		goto exit;

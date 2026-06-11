@@ -119,6 +119,7 @@ typedef struct {
   uint8_t dcache; //Last alignment flag
   bam1_t *daln;   //Last alignment read from the file
   values_t values; //bamfile values
+	uint8_t adnascore; //Whether to recompute alignment score for ancient DNA damage
 } unicorn_t;
 
 uint8_t unicorn_isqgrouped(unicorn_t *u);
@@ -456,6 +457,12 @@ uint32_t _udCAMODE(uint32_t *v, uint32_t n);
   Computes ANI of alignment record, stores edit distance (nm) in *NM
 */
 float _ANINM(bam1_t *b, uint32_t *NM);
+
+/*
+  Computes a damage-aware floating point alignment penalty score and stores it
+  in the custom XJ tag.
+*/
+void unicorn_addjscore(bam1_t *b, uint8_t gapo, uint8_t gape);
 
 float _tad80(int32int64map_t *hist);
 double _getentropy(const int32int64map_t *hist, uint64_t t, float *_ne);

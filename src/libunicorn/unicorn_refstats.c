@@ -1,5 +1,8 @@
 #define _XOPEN_SOURCE 700
 #include "unicorn_internal.h"
+
+#define UNICORN_ADNASCORE_GAPO 5
+#define UNICORN_ADNASCORE_GAPE 2
 #include "klib/kthread.h"
 #include "klib/kvec.h"
 
@@ -1039,8 +1042,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   _hdr = sam_hdr_read(u->_FP);
   refmap_t *refmap = (refmap_t *)stats->__map;
   while (sam_read1(u->_FP, _hdr, b) >= 0) {
-    if (_unmapped(b)) continue;
-    if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
+    if (!_aln_passes_refstats_filters(u, stats, b)) continue;
     int32_t tid = b->core.tid;
     khint_t k = refmap_get(refmap, tid);
     if (k == kh_end(refmap)) continue; //Reference not in map
@@ -1051,6 +1053,10 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
     int32_t ntid = kh_val(refmap, k)._ntid; //Get new tid
     b->core.tid = ntid; //Set new tid
     //Write alignment to output file
+			//Add adnascore XJ tag if requested
+    if (u->adnascore) {
+      unicorn_addjscore(b, UNICORN_ADNASCORE_GAPO, UNICORN_ADNASCORE_GAPE);
+    }
     if (sam_write1(ofp, ohdr, b) < 0) goto exit;
   }
   ret = 0;

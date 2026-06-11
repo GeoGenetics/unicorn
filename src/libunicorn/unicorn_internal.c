@@ -1,5 +1,6 @@
 #define _XOPEN_SOURCE 700
 #include <zlib.h>
+#include <ctype.h>
 #include "klib/kseq.h"
 #include "unicorn_internal.h"
 
@@ -610,13 +611,11 @@ void unicorn_printstrq(const char *filename, strq_t accq, utax_t *utax)
   fclose(fp);
 }
 
-
 uint8_t unicorn_isqgrouped(unicorn_t *u)
 {
   if (!u) return 0;
   return (u->sorted & (QUERYSORTED | QUERYGROUPED)) ? 1 : 0;
 }
-
 
 KHASHL_MAP_INIT(static,                        //Scope
                 chrmap_t, strmap,           //type and prefix
@@ -734,4 +733,130 @@ double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount)
   return (200.0 * score) / (n * (n+1)) ;
 }
 
+#define UNICORN_XJ_MISMATCH_PENALTY 1.0f
+#define UNICORN_XJ_DAMAGE_DECAY_LEN 5.0f
 
+static inline char _bam_base_upper(const uint8_t *seq, int32_t qpos)
+{
+  return (char)toupper((unsigned char)seq_nt16_str[bam_seqi(seq, qpos)]);
+}
+
+static inline float _damage_mismatch_penalty(char ref_base,
+                                             char query_base,
+                                             int32_t qpos,
+                                             int32_t qlen)
+{
+  float damage_prob = 0.0f;
+  if (ref_base == 'C' && query_base == 'T') {
+    damage_prob = expf(-(float)qpos / UNICORN_XJ_DAMAGE_DECAY_LEN);
+  }
+  else if (ref_base == 'G' && query_base == 'A') {
+    int32_t dist3 = qlen - qpos - 1;
+    damage_prob = expf(-(float)dist3 / UNICORN_XJ_DAMAGE_DECAY_LEN);
+  }
+  if (damage_prob < 0.0f) damage_prob = 0.0f;
+  if (damage_prob > 1.0f) damage_prob = 1.0f;
+  return UNICORN_XJ_MISMATCH_PENALTY * (1.0f - damage_prob);
+}
+
+void unicorn_addjscore(bam1_t *b, uint8_t gapo, uint8_t gape)
+{
+  if (!b) return;
+  uint8_t *md_aux = bam_aux_get(b, "MD");
+  if (!md_aux) return;
+  const char *md = bam_aux2Z(md_aux);
+  if (!md) return;
+  const uint32_t *cigar = bam_get_cigar(b);
+  const uint8_t *seq = bam_get_seq(b);
+  const int32_t qlen = b->core.l_qseq;
+  const uint32_t ncigar = b->core.n_cigar;
+  int32_t ref_cols = 0;
+  float score = 0.0f;
+  for (uint32_t i = 0; i < ncigar; i++) {
+    const uint32_t op = bam_cigar_op(cigar[i]);
+    const int32_t oplen = (int32_t)bam_cigar_oplen(cigar[i]);
+    switch (op) {
+      case BAM_CMATCH:
+      case BAM_CEQUAL:
+      case BAM_CDIFF:
+      case BAM_CDEL:
+      case BAM_CREF_SKIP:
+        ref_cols += oplen;
+        break;
+      case BAM_CINS:
+        score += (float)gapo + ((float)gape * oplen);
+        break;
+      default:
+        break;
+    }
+  }
+  if (ref_cols < 1) ref_cols = 1;
+  int32_t *ref2q = (int32_t *)malloc((size_t)ref_cols * sizeof(int32_t));
+  if (!ref2q) return;
+  int32_t qpos = 0, ref_idx = 0;
+  for (uint32_t i = 0; i < ncigar; i++) {
+    const uint32_t op = bam_cigar_op(cigar[i]);
+    const int32_t oplen = (int32_t)bam_cigar_oplen(cigar[i]);
+    switch (op) {
+      case BAM_CMATCH:
+      case BAM_CEQUAL:
+      case BAM_CDIFF:
+        for (int32_t k = 0; k < oplen; k++)
+          ref2q[ref_idx++] = qpos++;
+        break;
+      case BAM_CINS:
+      case BAM_CSOFT_CLIP:
+        qpos += oplen;
+        break;
+      case BAM_CDEL:
+        score += (float)gapo + ((float)gape * oplen);
+        for (int32_t k = 0; k < oplen; k++)
+          ref2q[ref_idx++] = -1;
+        break;
+      case BAM_CREF_SKIP:
+        for (int32_t k = 0; k < oplen; k++)
+          ref2q[ref_idx++] = -2;
+        break;
+      default:
+        break;
+    }
+  }
+  ref_idx = 0;
+  while (*md) {
+    if (isdigit((unsigned char)*md)) {
+      int32_t nmatch = 0;
+      while (isdigit((unsigned char)*md)) {
+        nmatch = (nmatch * 10) + (*md - '0');
+        md++;
+      }
+      ref_idx += nmatch;
+      continue;
+    }
+    if (*md == '^') {
+      md++;
+      while (*md && isalpha((unsigned char)*md)) {
+        ref_idx++;
+        md++;
+      }
+      continue;
+    }
+    if (isalpha((unsigned char)*md)) {
+      if (ref_idx >= ref_cols) break;
+      int32_t mqpos = ref2q[ref_idx];
+      if (mqpos >= 0 && mqpos < qlen) {
+        const char ref_base = (char)toupper((unsigned char)*md);
+        const char query_base = _bam_base_upper(seq, mqpos);
+        if (ref_base != 'N' && query_base != 'N')
+          score += _damage_mismatch_penalty(ref_base, query_base, mqpos, qlen);
+      }
+      ref_idx++;
+      md++;
+      continue;
+    }
+    md++;
+  }
+  free(ref2q);
+  uint8_t *xj = bam_aux_get(b, "XJ");
+  if (xj) bam_aux_del(b, xj);
+  bam_aux_append(b, "XJ", 'f', sizeof(float), (uint8_t *)&score);
+}

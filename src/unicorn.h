@@ -74,6 +74,7 @@ unicorn_t *unicorn_init(int threads,
                         const char *ifile,
                         char *prefix,
 												const char *ofile,
+												int adnascore,
                         int argc,
 												char **argv);
 
