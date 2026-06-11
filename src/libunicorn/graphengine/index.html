@@ -12,8 +12,11 @@
         <h1>Unicorn LCA Graph Engine</h1>
         <p class="subtitle">Taxonomic placement tree from LCA counts and NCBI taxonomy nodes.</p>
       </div>
-      <button id="renderBtn" class="primary">Render Tree</button>
-      <button id="centerBtn" class="secondary">Center Root</button>
+      <div class="topbar-actions">
+        <button id="renderBtn" class="primary">Render Tree</button>
+        <button id="centerBtn" class="secondary">Center Root</button>
+        <button id="toggleTableBtn" class="secondary" aria-expanded="false">Show Counts</button>
+      </div>
     </header>
 
     <main class="app">
@@ -53,6 +56,7 @@
           <input id="searchBox" type="search" placeholder="taxid or name">
         </label>
       </section>
+      <div id="controlsResize" class="controls-resize" role="separator" aria-orientation="vertical" title="Drag to resize controls"></div>
 
       <section id="summaryPanel" class="summary" aria-label="Tree summary">
         <div class="summary-metric"><strong id="readCount">0</strong><span>reads</span></div>
@@ -70,7 +74,7 @@
         </div>
       </section>
 
-      <section class="table-panel" aria-label="Top LCA placements">
+      <section id="tablePanel" class="table-panel hidden" aria-label="Top LCA placements" hidden>
         <h2>Top direct placements</h2>
         <table>
           <thead>

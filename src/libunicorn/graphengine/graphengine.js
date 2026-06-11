@@ -19,10 +19,12 @@ const els = {
   namesFile: document.getElementById("namesFile"),
   renderBtn: document.getElementById("renderBtn"),
   centerBtn: document.getElementById("centerBtn"),
+  toggleTableBtn: document.getElementById("toggleTableBtn"),
   countMode: document.getElementById("countMode"),
   scaleMode: document.getElementById("scaleMode"),
   minReads: document.getElementById("minReads"),
   searchBox: document.getElementById("searchBox"),
+  controlsResize: document.getElementById("controlsResize"),
   summaryPanel: document.getElementById("summaryPanel"),
   summaryResize: document.getElementById("summaryResize"),
   status: document.getElementById("status"),
@@ -33,6 +35,7 @@ const els = {
   taxonCount: document.getElementById("taxonCount"),
   visibleCount: document.getElementById("visibleCount"),
   missingCount: document.getElementById("missingCount"),
+  tablePanel: document.getElementById("tablePanel"),
   topTable: document.getElementById("topTable"),
 };
 
@@ -41,11 +44,14 @@ els.centerBtn.addEventListener("click", () => {
   state.focusTaxid = null;
   centerRoot();
 });
+els.toggleTableBtn.addEventListener("click", toggleTablePanel);
 els.countMode.addEventListener("change", redraw);
 els.scaleMode.addEventListener("change", redraw);
 els.minReads.addEventListener("input", redraw);
 els.searchBox.addEventListener("input", redraw);
+initControlsResize();
 initSummaryResize();
+initTablePanel();
 
 async function loadAndRender() {
   if (!els.lcaFile.files[0] || !els.nodesFile.files[0]) {
@@ -506,6 +512,42 @@ function setStatus(message) {
   els.status.textContent = message;
 }
 
+function initControlsResize() {
+  const saved = Number(localStorage.getItem("unicorn.controlsWidth"));
+  if (Number.isFinite(saved) && saved > 0) setControlsWidth(saved);
+  let startX = 0;
+  let startWidth = 0;
+  els.controlsResize.addEventListener("pointerdown", (event) => {
+    startX = event.clientX;
+    startWidth = document.documentElement.style.getPropertyValue("--controls-width")
+      ? Number.parseFloat(document.documentElement.style.getPropertyValue("--controls-width"))
+      : document.querySelector(".controls").getBoundingClientRect().width;
+    els.controlsResize.setPointerCapture(event.pointerId);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+  });
+  els.controlsResize.addEventListener("pointermove", (event) => {
+    if (!els.controlsResize.hasPointerCapture(event.pointerId)) return;
+    setControlsWidth(startWidth + event.clientX - startX);
+  });
+  els.controlsResize.addEventListener("pointerup", (event) => {
+    if (els.controlsResize.hasPointerCapture(event.pointerId)) {
+      els.controlsResize.releasePointerCapture(event.pointerId);
+    }
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+    localStorage.setItem("unicorn.controlsWidth", String(Math.round(document.querySelector(".controls").getBoundingClientRect().width)));
+    requestAnimationFrame(() => {
+      if (state.tree) centerNode(state.focusTaxid ? state.flat.find((n) => n.taxid === state.focusTaxid) || state.tree : state.tree);
+    });
+  });
+}
+
+function setControlsWidth(value) {
+  const width = Math.max(220, Math.min(540, value));
+  document.documentElement.style.setProperty("--controls-width", `${width}px`);
+}
+
 function initSummaryResize() {
   const saved = Number(localStorage.getItem("unicorn.summaryHeight"));
   if (Number.isFinite(saved) && saved > 0) setSummaryHeight(saved);
@@ -536,6 +578,26 @@ function initSummaryResize() {
 function setSummaryHeight(value) {
   const height = Math.max(48, Math.min(180, value));
   els.summaryPanel.style.setProperty("--summary-height", `${height}px`);
+}
+
+function initTablePanel() {
+  const saved = localStorage.getItem("unicorn.tableVisible");
+  setTablePanelVisible(saved === "1");
+}
+
+function toggleTablePanel() {
+  setTablePanelVisible(els.tablePanel.hidden);
+  localStorage.setItem("unicorn.tableVisible", els.tablePanel.hidden ? "0" : "1");
+  requestAnimationFrame(() => {
+    if (state.tree) centerNode(state.focusTaxid ? state.flat.find((n) => n.taxid === state.focusTaxid) || state.tree : state.tree);
+  });
+}
+
+function setTablePanelVisible(visible) {
+  els.tablePanel.hidden = !visible;
+  els.tablePanel.classList.toggle("hidden", !visible);
+  els.toggleTableBtn.textContent = visible ? "Hide Counts" : "Show Counts";
+  els.toggleTableBtn.setAttribute("aria-expanded", visible ? "true" : "false");
 }
 
 function escapeHtml(value) {
