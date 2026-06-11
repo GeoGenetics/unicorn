@@ -1,8 +1,7 @@
-from __future__ import annotations
-
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +27,7 @@ app.add_middleware(
 
 
 @app.get("/ping")
-def ping() -> dict[str, object]:
+def ping() -> Dict[str, Any]:
     return {
         "ok": True,
         "service": "unicorn-graphengine-prototype",
@@ -38,7 +37,7 @@ def ping() -> dict[str, object]:
 
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...)) -> dict[str, object]:
+async def upload(file: UploadFile = File(...)) -> Dict[str, Any]:
     filename = Path(file.filename or "upload.dat").name
     outpath = UPLOAD_DIR / filename
     data = await file.read()
