@@ -128,6 +128,136 @@ h2 {
   font-weight: 700;
 }
 
+.remote-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  background: rgba(37, 95, 117, 0.05);
+}
+
+.remote-panel h2 {
+  font-size: 16px;
+}
+
+.connection-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.connection-state.offline {
+  color: #8f3f35;
+  background: rgba(200, 95, 67, 0.08);
+}
+
+.connection-state.online {
+  color: #1f6a50;
+  background: rgba(95, 140, 111, 0.14);
+}
+
+.command-block {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 240, 0.9);
+}
+
+.command-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.copy-btn {
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.tunnel-command {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid #d7ccb7;
+  background: #fffdf7;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+code {
+  font-family: "SFMono-Regular", "Consolas", monospace;
+  font-size: 0.95em;
+}
+
+.file-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.file-row {
+  display: grid;
+  gap: 8px;
+}
+
+.add-file-btn,
+.remove-file-btn {
+  justify-self: start;
+  min-width: 0;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.source-legend {
+  display: grid;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.legend-swatch {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(29, 37, 40, 0.4);
+  border-radius: 999px;
+}
+
+.legend-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 input,
 select,
 button {
@@ -265,6 +395,10 @@ button {
   cursor: pointer;
 }
 
+.node path {
+  stroke: none;
+}
+
 .node text {
   dominant-baseline: middle;
   font-size: 12px;
@@ -307,6 +441,30 @@ button {
   display: block;
   font-size: 13px;
   margin-bottom: 4px;
+}
+
+.tooltip-breakdown {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.tooltip-breakdown em {
+  font-style: normal;
+  opacity: 0.8;
+}
+
+.tooltip-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tooltip-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
 }
 
 .table-panel {

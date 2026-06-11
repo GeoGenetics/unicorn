@@ -21,9 +21,41 @@
 
     <main class="app">
       <section class="controls" aria-label="Input controls">
+        <section class="remote-panel" aria-label="Remote server connection">
+          <h2>Remote Server</h2>
+          <label>
+            <span>Username</span>
+            <input id="remoteUser" type="text" placeholder="youruser" autocomplete="username">
+          </label>
+          <label>
+            <span>Host</span>
+            <input id="remoteHost" type="text" placeholder="remote-server.example.org">
+          </label>
+          <button id="connectBtn" class="primary" type="button">Test Tunnel</button>
+          <div id="connectionState" class="connection-state offline">Not connected</div>
+          <div class="command-block">
+            <div class="command-head">
+              <span>SSH Tunnel Command</span>
+              <button id="copyTunnelBtn" class="secondary copy-btn" type="button">Copy</button>
+            </div>
+            <pre id="tunnelCommand" class="tunnel-command">ssh -L 8000:localhost:8000 youruser@remote-server</pre>
+          </div>
+          <small id="tunnelHint" class="hint">Open the SSH tunnel first, then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.</small>
+        </section>
         <label>
-          <span>LCA / .bdamage output</span>
-          <input id="lcaFile" type="file" accept=".txt,.tsv,.bdamage,.lca">
+          <span>LCA / .bdamage outputs</span>
+          <div id="lcaInputs" class="file-stack">
+            <div class="file-row">
+              <input class="lca-file-input" type="file" accept=".txt,.tsv,.bdamage,.lca">
+            </div>
+          </div>
+          <button id="addLcaBtn" class="secondary add-file-btn" type="button">+ Add File</button>
+        </label>
+        <label>
+          <span>File containing input file paths optional</span>
+          <input id="lcaListFile" type="file" accept=".txt,.list,.tsv">
+          <button id="clearLcaListBtn" class="secondary add-file-btn" type="button">Clear File List</button>
+          <small class="hint">One path per line. Relative paths resolve from the page location.</small>
         </label>
         <label>
           <span>nodes.dmp</span>
@@ -55,6 +87,7 @@
           <span>Search</span>
           <input id="searchBox" type="search" placeholder="taxid or name">
         </label>
+        <div id="sourceLegend" class="source-legend" hidden></div>
       </section>
       <div id="controlsResize" class="controls-resize" role="separator" aria-orientation="vertical" title="Drag to resize controls"></div>
 

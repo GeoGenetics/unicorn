@@ -4,6 +4,12 @@ const state = {
   nodes: new Map(),
   counts: new Map(),
   names: new Map(),
+  series: [],
+  remote: {
+    user: "",
+    host: "",
+    connected: false,
+  },
   tree: null,
   flat: [],
   collapsed: new Set(),
@@ -14,7 +20,17 @@ const state = {
 };
 
 const els = {
-  lcaFile: document.getElementById("lcaFile"),
+  lcaInputs: document.getElementById("lcaInputs"),
+  lcaListFile: document.getElementById("lcaListFile"),
+  addLcaBtn: document.getElementById("addLcaBtn"),
+  clearLcaListBtn: document.getElementById("clearLcaListBtn"),
+  remoteUser: document.getElementById("remoteUser"),
+  remoteHost: document.getElementById("remoteHost"),
+  connectBtn: document.getElementById("connectBtn"),
+  copyTunnelBtn: document.getElementById("copyTunnelBtn"),
+  connectionState: document.getElementById("connectionState"),
+  tunnelCommand: document.getElementById("tunnelCommand"),
+  tunnelHint: document.getElementById("tunnelHint"),
   nodesFile: document.getElementById("nodesFile"),
   namesFile: document.getElementById("namesFile"),
   renderBtn: document.getElementById("renderBtn"),
@@ -36,10 +52,17 @@ const els = {
   visibleCount: document.getElementById("visibleCount"),
   missingCount: document.getElementById("missingCount"),
   tablePanel: document.getElementById("tablePanel"),
+  sourceLegend: document.getElementById("sourceLegend"),
   topTable: document.getElementById("topTable"),
 };
 
 els.renderBtn.addEventListener("click", loadAndRender);
+els.addLcaBtn.addEventListener("click", addLcaInput);
+els.clearLcaListBtn.addEventListener("click", clearLcaListFile);
+els.connectBtn.addEventListener("click", connectRemote);
+els.copyTunnelBtn.addEventListener("click", copyTunnelCommand);
+els.remoteUser.addEventListener("input", updateTunnelHint);
+els.remoteHost.addEventListener("input", updateTunnelHint);
 els.centerBtn.addEventListener("click", () => {
   state.focusTaxid = null;
   centerRoot();
@@ -52,10 +75,96 @@ els.searchBox.addEventListener("input", redraw);
 initControlsResize();
 initSummaryResize();
 initTablePanel();
+initRemotePanel();
+
+const SOURCE_COLORS = [
+  "#c85f43",
+  "#255f75",
+  "#e2a44e",
+  "#5f8c6f",
+  "#8a5a99",
+  "#d17b2c",
+  "#5d6cc1",
+  "#b24d6d",
+  "#4c9f9b",
+  "#7f6a58",
+];
+
+function initRemotePanel() {
+  const savedUser = localStorage.getItem("unicorn.remoteUser") || "";
+  const savedHost = localStorage.getItem("unicorn.remoteHost") || "";
+  els.remoteUser.value = savedUser;
+  els.remoteHost.value = savedHost;
+  state.remote.user = savedUser;
+  state.remote.host = savedHost;
+  updateTunnelHint();
+  updateConnectionState(false, "Not connected");
+}
+
+async function connectRemote() {
+  const user = els.remoteUser.value.trim();
+  const host = els.remoteHost.value.trim();
+  state.remote.user = user;
+  state.remote.host = host;
+  localStorage.setItem("unicorn.remoteUser", user);
+  localStorage.setItem("unicorn.remoteHost", host);
+  updateTunnelHint();
+
+  if (!user || !host) {
+    updateConnectionState(false, "Enter username and host");
+    setStatus("Enter a remote username and host, open the SSH tunnel, then test the connection.");
+    return;
+  }
+
+  updateConnectionState(false, "Connecting...");
+  setStatus(`Testing local tunnel endpoint for ${user}@${host}...`);
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const response = await fetch("http://localhost:8000/ping", {
+      method: "GET",
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!response.ok) {
+      throw new Error(`Ping returned HTTP ${response.status}`);
+    }
+    updateConnectionState(true, "Connected");
+    setStatus(`Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable.`);
+  } catch (error) {
+    updateConnectionState(false, "Tunnel check failed");
+    setStatus(`Tunnel check failed for ${user}@${host}. Make sure the SSH tunnel is open and the remote HTTP server is running on port 8000.`);
+  }
+}
+
+function updateTunnelHint() {
+  const user = els.remoteUser.value.trim() || "youruser";
+  const host = els.remoteHost.value.trim() || "remote-server";
+  const command = `ssh -L 8000:localhost:8000 ${user}@${host}`;
+  els.tunnelCommand.textContent = command;
+  els.tunnelHint.innerHTML = `Open the SSH tunnel first, then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.`;
+}
+
+function updateConnectionState(connected, message) {
+  state.remote.connected = connected;
+  els.connectionState.textContent = message;
+  els.connectionState.classList.toggle("online", connected);
+  els.connectionState.classList.toggle("offline", !connected);
+}
+
+async function copyTunnelCommand() {
+  const command = els.tunnelCommand.textContent;
+  try {
+    await navigator.clipboard.writeText(command);
+    setStatus("Copied SSH tunnel command to clipboard.");
+  } catch (error) {
+    setStatus("Could not copy tunnel command automatically. You can still copy it manually.");
+  }
+}
 
 async function loadAndRender() {
-  if (!els.lcaFile.files[0] || !els.nodesFile.files[0]) {
-    setStatus("Choose an LCA output file and nodes.dmp.");
+  if (!els.nodesFile.files[0]) {
+    setStatus("Choose one or more LCA output files and nodes.dmp.");
     return;
   }
   try {
@@ -63,25 +172,77 @@ async function loadAndRender() {
     state.collapsed.clear();
     state.missingTaxids.clear();
 
-    const [lcaText, nodesText, namesText] = await Promise.all([
-      readFile(els.lcaFile.files[0]),
+    const [sources, nodesText, namesText] = await Promise.all([
+      loadLcaSources(),
       readFile(els.nodesFile.files[0]),
       els.namesFile.files[0] ? readFile(els.namesFile.files[0]) : Promise.resolve(""),
     ]);
+    if (!sources.length) {
+      setStatus("Choose at least one LCA output file or provide a file list.");
+      return;
+    }
 
     state.nodes = parseNodes(nodesText);
-    const parsed = parseLcaOutput(lcaText);
-    state.counts = parsed.counts;
-    state.names = mergeNames(parsed.names, parseNames(namesText));
-    state.tree = buildTree(state.nodes, state.counts, state.names);
+    const parsedSources = sources.map((source) => ({
+      label: source.name,
+      ...parseLcaOutput(source.text),
+    }));
+    state.series = parsedSources.map((source, index) => ({
+      label: source.label,
+      color: colorForSource(index),
+      counts: source.counts,
+    }));
+    state.counts = aggregateSeriesCounts(state.series);
+    state.names = mergeNames(mergeSourceNames(parsedSources), parseNames(namesText));
+    state.tree = buildTree(state.nodes, state.series, state.names);
     state.centerOnNextRender = true;
+    renderSourceLegend();
 
-    setStatus(`Loaded ${state.nodes.size.toLocaleString()} taxonomy nodes and ${state.counts.size.toLocaleString()} LCA taxa.`);
+    setStatus(`Loaded ${state.nodes.size.toLocaleString()} taxonomy nodes, ${state.series.length.toLocaleString()} input files, and ${state.counts.size.toLocaleString()} LCA taxa.`);
     redraw();
   } catch (error) {
     console.error(error);
     setStatus(`Could not render tree: ${error.message || error}`);
   }
+}
+
+async function loadLcaSources() {
+  const uploads = Array.from(document.querySelectorAll(".lca-file-input"))
+    .map((input) => input.files[0])
+    .filter(Boolean);
+  const uploadedSources = await Promise.all(
+    uploads.map(async (file) => ({
+      name: file.name,
+      text: await readFile(file),
+    })),
+  );
+
+  let listedSources = [];
+  if (els.lcaListFile.files[0]) {
+    const listText = await readFile(els.lcaListFile.files[0]);
+    listedSources = await loadSourcesFromList(listText);
+  }
+  return [...uploadedSources, ...listedSources];
+}
+
+async function loadSourcesFromList(text) {
+  const paths = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  return Promise.all(paths.map(async (path) => ({
+    name: path.split(/[\\/]/).pop() || path,
+    text: await fetchTextPath(path),
+  })));
+}
+
+async function fetchTextPath(path) {
+  const target = new URL(path, window.location.href);
+  const response = await fetch(target.href);
+  if (!response.ok) {
+    throw new Error(`Could not load input file from ${path}`);
+  }
+  return response.text();
 }
 
 function readFile(file) {
@@ -180,7 +341,26 @@ function mergeNames(a, b) {
   return out;
 }
 
-function buildTree(nodes, counts, names) {
+function mergeSourceNames(series) {
+  const names = new Map();
+  for (const source of series) {
+    for (const [taxid, name] of source.names) names.set(taxid, name);
+  }
+  return names;
+}
+
+function aggregateSeriesCounts(series) {
+  const total = new Map();
+  for (const source of series) {
+    for (const [taxid, count] of source.counts) {
+      total.set(taxid, (total.get(taxid) || 0) + count);
+    }
+  }
+  return total;
+}
+
+function buildTree(nodes, series, names) {
+  const counts = aggregateSeriesCounts(series);
   const included = new Set();
   for (const [taxid, count] of counts) {
     if (!count || taxid === 0) continue;
@@ -208,7 +388,9 @@ function buildTree(nodes, counts, names) {
       rank: raw.rank,
       name: names.get(taxid) || String(taxid),
       direct: counts.get(taxid) || 0,
+      directBySource: series.map((source) => source.counts.get(taxid) || 0),
       total: 0,
+      totalBySource: new Array(series.length).fill(0),
       children: [],
       depth: 0,
     });
@@ -229,7 +411,9 @@ function buildTree(nodes, counts, names) {
       rank: "unclassified",
       name: names.get(0) || "unclassified",
       direct: unknown,
+      directBySource: series.map((source) => source.counts.get(0) || 0),
       total: unknown,
+      totalBySource: series.map((source) => source.counts.get(0) || 0),
       children: [],
       depth: 0,
     };
@@ -243,7 +427,9 @@ function buildTree(nodes, counts, names) {
     rank: "synthetic root",
     name: "root",
     direct: 0,
+    directBySource: new Array(series.length).fill(0),
     total: 0,
+    totalBySource: new Array(series.length).fill(0),
     children: roots,
     depth: 0,
   };
@@ -256,9 +442,13 @@ function buildTree(nodes, counts, names) {
 function computeTotals(node, depth) {
   node.depth = depth;
   node.total = node.direct;
+  node.totalBySource = [...node.directBySource];
   for (const child of node.children) {
     computeTotals(child, depth + 1);
     node.total += child.total;
+    for (let i = 0; i < node.totalBySource.length; i++) {
+      node.totalBySource[i] += child.totalBySource[i];
+    }
   }
 }
 
@@ -352,10 +542,7 @@ function renderSvg(nodes, links, search) {
       transform: `translate(${node.x}, ${node.y})`,
     });
     const radius = radiusFor(value, maxValue);
-    group.appendChild(svgEl("circle", {
-      r: radius,
-      fill: fillFor(node),
-    }));
+    renderNodePie(group, node, radius);
     group.appendChild(svgEl("text", {
       x: radius + 8,
       y: -5,
@@ -389,6 +576,62 @@ function renderSvg(nodes, links, search) {
     requestCenterRoot();
     state.centerOnNextRender = false;
   }
+}
+
+function renderNodePie(group, node, radius) {
+  const values = getNodeSeriesValues(node);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) {
+    group.appendChild(svgEl("circle", {
+      r: radius,
+      fill: fillFor(node),
+    }));
+    return;
+  }
+  const origin = -Math.PI / 2;
+  let start = origin;
+  let drawn = 0;
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    if (!value) continue;
+    const fraction = value / total;
+    const end = drawn + fraction >= 0.999999
+      ? origin + (Math.PI * 2)
+      : start + (Math.PI * 2 * fraction);
+    group.appendChild(svgEl("path", {
+      d: pieSlicePath(radius, start, end),
+      fill: state.series[i]?.color || fillFor(node),
+    }));
+    start = end;
+    drawn += fraction;
+  }
+  group.appendChild(svgEl("circle", {
+    r: radius,
+    fill: "none",
+    stroke: "#1f2b2e",
+    "stroke-width": "1.3",
+  }));
+}
+
+function getNodeSeriesValues(node) {
+  return els.countMode.value === "direct" ? node.directBySource : node.totalBySource;
+}
+
+function pieSlicePath(radius, startAngle, endAngle) {
+  if (Math.abs(endAngle - startAngle) >= Math.PI * 2 - 0.0001) {
+    return [
+      `M 0 ${-radius}`,
+      `A ${radius} ${radius} 0 1 1 0 ${radius}`,
+      `A ${radius} ${radius} 0 1 1 0 ${-radius}`,
+      "Z",
+    ].join(" ");
+  }
+  const x1 = Math.cos(startAngle) * radius;
+  const y1 = Math.sin(startAngle) * radius;
+  const x2 = Math.cos(endAngle) * radius;
+  const y2 = Math.sin(endAngle) * radius;
+  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+  return `M 0 0 L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
 }
 
 function requestCenterRoot() {
@@ -459,6 +702,18 @@ function labelFor(node) {
 }
 
 function showTooltip(event, node) {
+  const mode = els.countMode.value === "direct" ? "direct reads" : "subtree reads";
+  const breakdown = getNodeSeriesValues(node)
+    .map((value, index) => ({ value, source: state.series[index] }))
+    .filter((entry) => entry.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .map((entry) => `
+      <div class="tooltip-source">
+        <span class="tooltip-swatch" style="background:${entry.source.color}"></span>
+        <span>${escapeHtml(entry.source.label)}: ${entry.value.toLocaleString()}</span>
+      </div>
+    `)
+    .join("");
   els.tooltip.hidden = false;
   els.tooltip.style.left = `${event.clientX + 14}px`;
   els.tooltip.style.top = `${event.clientY + 14}px`;
@@ -468,7 +723,8 @@ function showTooltip(event, node) {
     rank: ${escapeHtml(node.rank || "NA")}<br>
     direct reads: ${node.direct.toLocaleString()}<br>
     subtree reads: ${node.total.toLocaleString()}<br>
-    children: ${node.children.length.toLocaleString()}
+    children: ${node.children.length.toLocaleString()}<br>
+    ${breakdown ? `<div class="tooltip-breakdown"><em>${mode}</em>${breakdown}</div>` : ""}
   `;
 }
 
@@ -598,6 +854,43 @@ function setTablePanelVisible(visible) {
   els.tablePanel.classList.toggle("hidden", !visible);
   els.toggleTableBtn.textContent = visible ? "Hide Counts" : "Show Counts";
   els.toggleTableBtn.setAttribute("aria-expanded", visible ? "true" : "false");
+}
+
+function addLcaInput() {
+  const row = document.createElement("div");
+  row.className = "file-row";
+  row.innerHTML = `
+    <input class="lca-file-input" type="file" accept=".txt,.tsv,.bdamage,.lca">
+    <button class="secondary remove-file-btn" type="button" aria-label="Remove input file">Remove</button>
+  `;
+  row.querySelector(".remove-file-btn").addEventListener("click", () => {
+    row.remove();
+  });
+  els.lcaInputs.appendChild(row);
+}
+
+function clearLcaListFile() {
+  els.lcaListFile.value = "";
+  setStatus("Cleared input file list selection.");
+}
+
+function colorForSource(index) {
+  return SOURCE_COLORS[index % SOURCE_COLORS.length];
+}
+
+function renderSourceLegend() {
+  if (!state.series.length) {
+    els.sourceLegend.hidden = true;
+    els.sourceLegend.innerHTML = "";
+    return;
+  }
+  els.sourceLegend.hidden = false;
+  els.sourceLegend.innerHTML = state.series.map((source) => `
+    <div class="legend-item">
+      <span class="legend-swatch" style="background:${source.color}"></span>
+      <span class="legend-label">${escapeHtml(source.label)}</span>
+    </div>
+  `).join("");
 }
 
 function escapeHtml(value) {
