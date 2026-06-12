@@ -261,6 +261,7 @@ static void unicorn_freeopts(unicorn_opt_t opts)
   if (opts.filel)   free(opts.filel);
   if (opts.rank)    free(opts.rank);
   if (opts.keeptaxa) free(opts.keeptaxa);
+  if (opts.outprefix) free(opts.outprefix);
 }
 
 static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
@@ -1112,6 +1113,7 @@ static int unicorn_lca(int argc, char **argv)
 	fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",__func__, (double)ns/1000000000.f);
 	ret = 0;
 	exit:
+	  if (utax) unicorn_closetaxonomy(utax);
 	  if (ret)
       fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
 		if (u) unicorn_destroy(u);
