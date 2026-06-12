@@ -19,84 +19,134 @@
       </div>
     </header>
 
-    <main class="app">
-      <section class="controls" aria-label="Input controls">
-        <section class="remote-panel" aria-label="Remote server connection">
-          <h2>Remote Server</h2>
-          <label>
-            <span>Username</span>
-            <input id="remoteUser" type="text" placeholder="youruser" autocomplete="username">
-          </label>
-          <label>
-            <span>Host</span>
-            <input id="remoteHost" type="text" placeholder="remote-server.example.org">
-          </label>
-          <button id="connectBtn" class="primary" type="button">Test Tunnel</button>
-          <button id="uploadBtn" class="secondary" type="button">Upload Loaded Files</button>
-          <div id="connectionState" class="connection-state offline">Not connected</div>
-          <div class="command-block">
-            <div class="command-head">
-              <span>SSH Tunnel Command</span>
-              <button id="copyTunnelBtn" class="secondary copy-btn" type="button">Copy</button>
+    <main id="app" class="app">
+      <aside id="sidebar" class="sidebar" aria-label="Input controls">
+        <section id="controls" class="controls" aria-label="Input controls">
+          <section class="panel-section" aria-label="Remote server section">
+            <div class="panel-section-head">
+              <h2>Remote Server</h2>
+              <button id="toggleRemoteSection" class="secondary compact-btn section-toggle" type="button" aria-expanded="true">Hide</button>
             </div>
-            <pre id="tunnelCommand" class="tunnel-command">ssh -L 8000:localhost:8000 youruser@remote-server</pre>
-          </div>
-          <small id="tunnelHint" class="hint">Open the SSH tunnel first, then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.</small>
+            <div id="remoteSectionBody" class="panel-section-body">
+              <section class="remote-panel" aria-label="Remote server connection">
+                <label>
+                  <span>Username</span>
+                  <input id="remoteUser" type="text" placeholder="youruser" autocomplete="username">
+                </label>
+                <label>
+                  <span>Host</span>
+                  <input id="remoteHost" type="text" placeholder="remote-server.example.org">
+                </label>
+                <button id="connectBtn" class="primary" type="button">Test Tunnel</button>
+                <button id="uploadBtn" class="secondary" type="button">Upload Loaded Files</button>
+                <div id="connectionState" class="connection-state offline">Not connected</div>
+                <div class="command-block">
+                  <div class="command-head">
+                    <span>SSH Tunnel Command</span>
+                    <button id="copyTunnelBtn" class="secondary copy-btn" type="button">Copy</button>
+                  </div>
+                  <pre id="tunnelCommand" class="tunnel-command">ssh -L 8000:localhost:8000 youruser@remote-server</pre>
+                </div>
+                <small id="tunnelHint" class="hint">Open the SSH tunnel first, then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.</small>
+                <section id="remoteDatasetsPanel" class="remote-datasets" aria-label="Remote datasets" hidden>
+                  <div class="remote-datasets-head">
+                    <h3>Remote Datasets</h3>
+                    <button id="remoteRefreshBtn" class="secondary compact-btn" type="button">Refresh</button>
+                  </div>
+                  <div class="remote-dataset-actions">
+                    <button id="remoteSelectAllBtn" class="secondary compact-btn" type="button">Select All</button>
+                    <button id="remoteClearAllBtn" class="secondary compact-btn" type="button">Unselect All</button>
+                  </div>
+                  <div id="remoteDatasetsMeta" class="remote-datasets-meta">0 files selected</div>
+                  <div id="remoteDatasetsList" class="remote-datasets-list"></div>
+                </section>
+              </section>
+            </div>
+          </section>
+
+          <section class="panel-section" aria-label="File loading section">
+            <div class="panel-section-head">
+              <h2>File Loading</h2>
+              <button id="toggleFilesSection" class="secondary compact-btn section-toggle" type="button" aria-expanded="true">Hide</button>
+            </div>
+            <div id="filesSectionBody" class="panel-section-body">
+              <label>
+                <span>LCA / .bdamage outputs</span>
+                <div id="lcaInputs" class="file-stack">
+                  <div class="file-row">
+                    <input class="lca-file-input" type="file" accept=".txt,.tsv,.bdamage,.lca">
+                  </div>
+                </div>
+                <button id="addLcaBtn" class="secondary add-file-btn" type="button">+ Add File</button>
+              </label>
+              <label>
+                <span>File containing input file paths optional</span>
+                <input id="lcaListFile" type="file" accept=".txt,.list,.tsv">
+                <button id="clearLcaListBtn" class="secondary add-file-btn" type="button">Clear File List</button>
+                <small class="hint">One path per line. Relative paths resolve from the page location.</small>
+              </label>
+              <label>
+                <span>nodes.dmp</span>
+                <input id="nodesFile" type="file" accept=".dmp,.txt">
+              </label>
+              <label>
+                <span>names.dmp optional</span>
+                <input id="namesFile" type="file" accept=".dmp,.txt">
+              </label>
+            </div>
+          </section>
+
+          <section class="panel-section" aria-label="Rendering options section">
+            <div class="panel-section-head">
+              <h2>Rendering Options</h2>
+              <button id="toggleOptionsSection" class="secondary compact-btn section-toggle" type="button" aria-expanded="true">Hide</button>
+            </div>
+            <div id="optionsSectionBody" class="panel-section-body">
+              <label>
+                <span>Circle size</span>
+                <select id="countMode">
+                  <option value="total">Direct + descendants</option>
+                  <option value="direct">Direct only</option>
+                </select>
+              </label>
+              <label>
+                <span>Scale</span>
+                <select id="scaleMode">
+                  <option value="sqrt">Sqrt</option>
+                  <option value="linear">Linear</option>
+                </select>
+              </label>
+              <label>
+                <span>Minimum subtree reads</span>
+                <input id="minReads" type="number" min="0" step="1" value="0">
+              </label>
+              <label>
+                <span>Search</span>
+                <input id="searchBox" type="search" placeholder="taxid or name">
+              </label>
+              <div class="selection-tools" aria-label="Selection tools">
+                <span class="selection-tools-label">Selection</span>
+                <div class="selection-tools-actions">
+                  <button id="uncollapseBtn" class="secondary compact-btn" type="button">Uncollapse</button>
+                  <button id="uncollapseTipsBtn" class="secondary compact-btn" type="button">Uncollapse Tips</button>
+                  <button id="selectDescendantsBtn" class="secondary compact-btn" type="button">Select Descendants</button>
+                  <button id="clearSelectionBtn" class="secondary compact-btn" type="button">Clear Selection</button>
+                </div>
+              </div>
+              <div id="sourceLegend" class="source-legend" hidden></div>
+            </div>
+          </section>
         </section>
-        <label>
-          <span>LCA / .bdamage outputs</span>
-          <div id="lcaInputs" class="file-stack">
-            <div class="file-row">
-              <input class="lca-file-input" type="file" accept=".txt,.tsv,.bdamage,.lca">
-            </div>
-          </div>
-          <button id="addLcaBtn" class="secondary add-file-btn" type="button">+ Add File</button>
-        </label>
-        <label>
-          <span>File containing input file paths optional</span>
-          <input id="lcaListFile" type="file" accept=".txt,.list,.tsv">
-          <button id="clearLcaListBtn" class="secondary add-file-btn" type="button">Clear File List</button>
-          <small class="hint">One path per line. Relative paths resolve from the page location.</small>
-        </label>
-        <label>
-          <span>nodes.dmp</span>
-          <input id="nodesFile" type="file" accept=".dmp,.txt">
-        </label>
-        <label>
-          <span>names.dmp optional</span>
-          <input id="namesFile" type="file" accept=".dmp,.txt">
-        </label>
-        <label>
-          <span>Circle size</span>
-          <select id="countMode">
-            <option value="total">Direct + descendants</option>
-            <option value="direct">Direct only</option>
-          </select>
-        </label>
-        <label>
-          <span>Scale</span>
-          <select id="scaleMode">
-            <option value="sqrt">Sqrt</option>
-            <option value="linear">Linear</option>
-          </select>
-        </label>
-        <label>
-          <span>Minimum subtree reads</span>
-          <input id="minReads" type="number" min="0" step="1" value="0">
-        </label>
-        <label>
-          <span>Search</span>
-          <input id="searchBox" type="search" placeholder="taxid or name">
-        </label>
-        <div id="sourceLegend" class="source-legend" hidden></div>
-      </section>
-      <div id="controlsResize" class="controls-resize" role="separator" aria-orientation="vertical" title="Drag to resize controls"></div>
+        <div id="controlsResize" class="controls-resize" role="separator" aria-orientation="vertical" title="Drag to resize controls"></div>
+        <button id="sidebarToggle" class="sidebar-tab" type="button" aria-expanded="true" aria-controls="controls">Hide Panel</button>
+      </aside>
 
       <section id="summaryPanel" class="summary" aria-label="Tree summary">
         <div class="summary-metric"><strong id="readCount">0</strong><span>reads</span></div>
         <div class="summary-metric"><strong id="taxonCount">0</strong><span>taxa with direct LCA</span></div>
         <div class="summary-metric"><strong id="visibleCount">0</strong><span>visible nodes</span></div>
         <div class="summary-metric"><strong id="missingCount">0</strong><span>unplaced taxids</span></div>
+        <div class="summary-metric"><strong id="selectedCount">0</strong><span>selected nodes</span></div>
         <div id="summaryResize" class="summary-resize" role="separator" aria-orientation="horizontal" title="Drag to resize summary"></div>
       </section>
 

@@ -155,7 +155,8 @@ static void unicorn_usage(FILE *fp)
           "  refstats    Compute per reference statistics.\n"\
           "  bamstats    Compute per bam statistics.\n"\
           "  taxstats    Compute per taxid statistics.\n"\
-          "  alnfilt     Filter alignments based on user-defined criteria.\n");
+          "  alnfilt     Filter alignments based on user-defined criteria.\n"\
+				  "  lca         Compute LCA of queries and report taxa counts.\n");
 }
 
 static void refstats_usage(FILE *fp)
@@ -248,6 +249,19 @@ static void alnfilt_usage(FILE *fp)
             "  --maxscore <float>           Maximum absolute alignment score [FLT_MAX]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message.\n");
+}
+
+static void lca_usage(FILE *fp)
+{
+	fprintf(fp, "./unicorn lca [options] -b <in.bam>|<in.sam>\n");
+	fprintf(fp, "Options:\n"\
+						"  -b <str>                     Input bam|sam\n"\
+						"  --outprefix <str>             Prefix for output files [stdout]\n"\
+						"  --names <str>                 Taxonomy names file.\n"\
+						"  --nodes <str>                 Taxonomy nodes file\n"\
+						"  --acc2tax <str>               Accession to taxid mapping file or .khash file.\n"\
+						"  --qsize <int>                 Size of queue for XR sorted input bam files [1024]\n"\
+						"  -h                            Print this help message.\n");
 }
 
 static void unicorn_freeopts(unicorn_opt_t opts)

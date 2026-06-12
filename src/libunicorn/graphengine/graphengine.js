@@ -9,10 +9,13 @@ const state = {
     user: "",
     host: "",
     connected: false,
+    datasets: [],
+    selectedDatasets: new Set(),
   },
   tree: null,
   flat: [],
   collapsed: new Set(),
+  selected: new Set(),
   missingTaxids: new Set(),
   centerOnNextRender: false,
   focusTaxid: null,
@@ -20,6 +23,20 @@ const state = {
 };
 
 const els = {
+  app: document.getElementById("app"),
+  sidebar: document.getElementById("sidebar"),
+  controls: document.getElementById("controls"),
+  sidebarToggle: document.getElementById("sidebarToggle"),
+  toggleRemoteSection: document.getElementById("toggleRemoteSection"),
+  remoteSectionBody: document.getElementById("remoteSectionBody"),
+  toggleFilesSection: document.getElementById("toggleFilesSection"),
+  filesSectionBody: document.getElementById("filesSectionBody"),
+  toggleOptionsSection: document.getElementById("toggleOptionsSection"),
+  optionsSectionBody: document.getElementById("optionsSectionBody"),
+  uncollapseBtn: document.getElementById("uncollapseBtn"),
+  uncollapseTipsBtn: document.getElementById("uncollapseTipsBtn"),
+  selectDescendantsBtn: document.getElementById("selectDescendantsBtn"),
+  clearSelectionBtn: document.getElementById("clearSelectionBtn"),
   lcaInputs: document.getElementById("lcaInputs"),
   lcaListFile: document.getElementById("lcaListFile"),
   addLcaBtn: document.getElementById("addLcaBtn"),
@@ -32,6 +49,12 @@ const els = {
   connectionState: document.getElementById("connectionState"),
   tunnelCommand: document.getElementById("tunnelCommand"),
   tunnelHint: document.getElementById("tunnelHint"),
+  remoteDatasetsPanel: document.getElementById("remoteDatasetsPanel"),
+  remoteRefreshBtn: document.getElementById("remoteRefreshBtn"),
+  remoteSelectAllBtn: document.getElementById("remoteSelectAllBtn"),
+  remoteClearAllBtn: document.getElementById("remoteClearAllBtn"),
+  remoteDatasetsMeta: document.getElementById("remoteDatasetsMeta"),
+  remoteDatasetsList: document.getElementById("remoteDatasetsList"),
   nodesFile: document.getElementById("nodesFile"),
   namesFile: document.getElementById("namesFile"),
   renderBtn: document.getElementById("renderBtn"),
@@ -52,6 +75,7 @@ const els = {
   taxonCount: document.getElementById("taxonCount"),
   visibleCount: document.getElementById("visibleCount"),
   missingCount: document.getElementById("missingCount"),
+  selectedCount: document.getElementById("selectedCount"),
   tablePanel: document.getElementById("tablePanel"),
   sourceLegend: document.getElementById("sourceLegend"),
   topTable: document.getElementById("topTable"),
@@ -63,6 +87,17 @@ els.clearLcaListBtn.addEventListener("click", clearLcaListFile);
 els.connectBtn.addEventListener("click", connectRemote);
 els.uploadBtn.addEventListener("click", uploadLoadedFiles);
 els.copyTunnelBtn.addEventListener("click", copyTunnelCommand);
+els.remoteRefreshBtn.addEventListener("click", async () => {
+  try {
+    await refreshRemoteDatasets();
+    const count = state.remote.datasets.length;
+    setStatus(`Remote dataset list refreshed. ${count.toLocaleString()} file${count === 1 ? "" : "s"} available on the backend.`);
+  } catch (error) {
+    setStatus(`Could not refresh remote datasets: ${error.message || error}`);
+  }
+});
+els.remoteSelectAllBtn.addEventListener("click", selectAllRemoteDatasets);
+els.remoteClearAllBtn.addEventListener("click", clearRemoteDatasets);
 els.remoteUser.addEventListener("input", updateTunnelHint);
 els.remoteHost.addEventListener("input", updateTunnelHint);
 els.centerBtn.addEventListener("click", () => {
@@ -74,9 +109,15 @@ els.countMode.addEventListener("change", redraw);
 els.scaleMode.addEventListener("change", redraw);
 els.minReads.addEventListener("input", redraw);
 els.searchBox.addEventListener("input", redraw);
+els.sidebarToggle.addEventListener("click", toggleSidebar);
+els.uncollapseBtn.addEventListener("click", uncollapseSelected);
+els.uncollapseTipsBtn.addEventListener("click", uncollapseSelectedToTips);
+els.selectDescendantsBtn.addEventListener("click", selectDescendants);
+els.clearSelectionBtn.addEventListener("click", clearSelection);
 initControlsResize();
 initSummaryResize();
 initTablePanel();
+initSidebarPanel();
 initRemotePanel();
 
 const SOURCE_COLORS = [
@@ -101,6 +142,52 @@ function initRemotePanel() {
   state.remote.host = savedHost;
   updateTunnelHint();
   updateConnectionState(false, "Not connected");
+  renderRemoteDatasets();
+}
+
+function initSidebarPanel() {
+  const savedCollapsed = localStorage.getItem("unicorn.sidebarCollapsed") === "true";
+  setSidebarCollapsed(savedCollapsed);
+  initSectionToggle("remoteSection", els.toggleRemoteSection, els.remoteSectionBody);
+  initSectionToggle("filesSection", els.toggleFilesSection, els.filesSectionBody);
+  initSectionToggle("optionsSection", els.toggleOptionsSection, els.optionsSectionBody);
+}
+
+function initSectionToggle(key, button, body) {
+  const collapsed = localStorage.getItem(`unicorn.${key}.collapsed`) === "true";
+  setSectionCollapsed(button, body, collapsed);
+  button.addEventListener("click", () => {
+    const next = button.getAttribute("aria-expanded") !== "true";
+    setSectionCollapsed(button, body, !next);
+    localStorage.setItem(`unicorn.${key}.collapsed`, String(!next));
+  });
+}
+
+function setSectionCollapsed(button, body, collapsed) {
+  const section = button.closest(".panel-section");
+  if (section) section.classList.toggle("collapsed", collapsed);
+  body.hidden = collapsed;
+  button.textContent = collapsed ? "Show" : "Hide";
+  button.setAttribute("aria-expanded", String(!collapsed));
+}
+
+function toggleSidebar() {
+  const collapsed = !els.app.classList.contains("sidebar-collapsed");
+  setSidebarCollapsed(collapsed);
+  localStorage.setItem("unicorn.sidebarCollapsed", String(collapsed));
+  requestAnimationFrame(() => {
+    if (state.tree) {
+      centerNode(state.focusTaxid
+        ? state.flat.find((node) => node.taxid === state.focusTaxid) || state.tree
+        : state.tree);
+    }
+  });
+}
+
+function setSidebarCollapsed(collapsed) {
+  els.app.classList.toggle("sidebar-collapsed", collapsed);
+  els.sidebarToggle.textContent = collapsed ? "Show Panel" : "Hide Panel";
+  els.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
 }
 
 async function connectRemote() {
@@ -132,9 +219,17 @@ async function connectRemote() {
       throw new Error(`Ping returned HTTP ${response.status}`);
     }
     updateConnectionState(true, "Connected");
-    setStatus(`Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable.`);
+    try {
+      await refreshRemoteDatasets({ selectAll: true });
+      setStatus(`Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable and remote datasets are ready to render.`);
+    } catch (error) {
+      setStatus(`Tunnel check succeeded for ${user}@${host}, but the remote dataset list could not be loaded yet. ${error.message || error}`);
+    }
   } catch (error) {
     updateConnectionState(false, "Tunnel check failed");
+    state.remote.datasets = [];
+    state.remote.selectedDatasets.clear();
+    renderRemoteDatasets();
     setStatus(`Tunnel check failed for ${user}@${host}. Make sure the SSH tunnel is open and the remote HTTP server is running on port 8000.`);
   }
 }
@@ -152,6 +247,7 @@ function updateConnectionState(connected, message) {
   els.connectionState.textContent = message;
   els.connectionState.classList.toggle("online", connected);
   els.connectionState.classList.toggle("offline", !connected);
+  els.remoteDatasetsPanel.hidden = !connected;
 }
 
 async function uploadLoadedFiles() {
@@ -191,6 +287,7 @@ async function uploadLoadedFiles() {
       uploaded++;
     }
     setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the remote server for ${user}@${host}.`);
+    await refreshRemoteDatasets();
   } catch (error) {
     setStatus(`Upload stopped after ${uploaded.toLocaleString()} file(s). ${error.message || error}`);
   } finally {
@@ -210,41 +307,39 @@ async function copyTunnelCommand() {
 
 async function loadAndRender() {
   if (!els.nodesFile.files[0]) {
-    setStatus("Choose one or more LCA output files and nodes.dmp.");
+    setStatus("Choose nodes.dmp before rendering.");
     return;
   }
   try {
-    setStatus("Parsing input files...");
+    setStatus(state.remote.connected ? "Fetching remote datasets..." : "Parsing local input files...");
     state.collapsed.clear();
     state.missingTaxids.clear();
 
-    const [sources, nodesText, namesText] = await Promise.all([
-      loadLcaSources(),
+    const [parsedSources, nodesText, namesText] = await Promise.all([
+      state.remote.connected ? loadRemoteSources() : loadLocalSources(),
       readFile(els.nodesFile.files[0]),
       els.namesFile.files[0] ? readFile(els.namesFile.files[0]) : Promise.resolve(""),
     ]);
-    if (!sources.length) {
-      setStatus("Choose at least one LCA output file or provide a file list.");
+    if (!parsedSources.length) {
+      if (state.remote.connected) {
+        setStatus(state.remote.datasets.length
+          ? "No remote datasets are currently selected. Select one or more files in the Remote Datasets panel."
+          : "No remote .bdamage datasets are available to render.");
+      } else {
+        setStatus("Choose at least one LCA output file or provide a file list.");
+      }
       return;
     }
 
     state.nodes = parseNodes(nodesText);
-    const parsedSources = sources.map((source) => ({
-      label: source.name,
-      ...parseLcaOutput(source.text),
-    }));
-    state.series = parsedSources.map((source, index) => ({
-      label: source.label,
-      color: colorForSource(index),
-      counts: source.counts,
-    }));
+    state.series = buildSeries(parsedSources);
     state.counts = aggregateSeriesCounts(state.series);
     state.names = mergeNames(mergeSourceNames(parsedSources), parseNames(namesText));
     state.tree = buildTree(state.nodes, state.series, state.names);
     state.centerOnNextRender = true;
     renderSourceLegend();
 
-    setStatus(`Loaded ${state.nodes.size.toLocaleString()} taxonomy nodes, ${state.series.length.toLocaleString()} input files, and ${state.counts.size.toLocaleString()} LCA taxa.`);
+    setStatus(`Loaded ${state.nodes.size.toLocaleString()} taxonomy nodes, ${state.series.length.toLocaleString()} ${state.remote.connected ? "remote dataset" : "input file"}${state.series.length === 1 ? "" : "s"}, and ${state.counts.size.toLocaleString()} LCA taxa.`);
     redraw();
   } catch (error) {
     console.error(error);
@@ -252,7 +347,7 @@ async function loadAndRender() {
   }
 }
 
-async function loadLcaSources() {
+async function loadLocalSources() {
   const uploads = Array.from(document.querySelectorAll(".lca-file-input"))
     .map((input) => input.files[0])
     .filter(Boolean);
@@ -268,7 +363,10 @@ async function loadLcaSources() {
     const listText = await readFile(els.lcaListFile.files[0]);
     listedSources = await loadSourcesFromList(listText);
   }
-  return [...uploadedSources, ...listedSources];
+  return [...uploadedSources, ...listedSources].map((source) => ({
+    label: source.name,
+    ...parseLcaOutput(source.text),
+  }));
 }
 
 async function loadSourcesFromList(text) {
@@ -289,6 +387,168 @@ async function fetchTextPath(path) {
     throw new Error(`Could not load input file from ${path}`);
   }
   return response.text();
+}
+
+async function loadRemoteSources() {
+  const files = getSelectedRemoteDatasets();
+  if (!files.length) return [];
+
+  const url = new URL("http://localhost:8000/render-data");
+  for (const file of files) {
+    url.searchParams.append("files", file);
+  }
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+  });
+  if (!response.ok) {
+    throw new Error(`Remote render-data request failed with HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
+  return datasets.map((dataset) => ({
+    label: dataset.filename || dataset.id || "remote-dataset",
+    counts: countsArrayToMap(dataset.counts || []),
+    names: countsArrayToNames(dataset.counts || []),
+  }));
+}
+
+async function refreshRemoteDatasets(options = {}) {
+  if (!state.remote.connected) {
+    renderRemoteDatasets();
+    return;
+  }
+
+  const { selectAll = false } = options;
+  const response = await fetch("http://localhost:8000/datasets", {
+    method: "GET",
+  });
+  if (!response.ok) {
+    throw new Error(`Remote datasets request failed with HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
+  const previous = new Set(state.remote.selectedDatasets);
+  const previouslyAllSelected = state.remote.datasets.length > 0
+    && previous.size === state.remote.datasets.length;
+
+  state.remote.datasets = datasets.map((dataset) => ({
+    id: dataset.id || dataset.filename || "",
+    filename: dataset.filename || dataset.id || "remote-dataset",
+    bytes: Number(dataset.bytes || 0),
+    modified_at: dataset.modified_at || "",
+  }));
+
+  if (selectAll || !previous.size || previouslyAllSelected) {
+    state.remote.selectedDatasets = new Set(state.remote.datasets.map((dataset) => dataset.filename));
+  } else {
+    state.remote.selectedDatasets = new Set(
+      state.remote.datasets
+        .map((dataset) => dataset.filename)
+        .filter((filename) => previous.has(filename)),
+    );
+  }
+
+  renderRemoteDatasets();
+}
+
+function renderRemoteDatasets() {
+  els.remoteDatasetsList.innerHTML = "";
+
+  if (!state.remote.connected) {
+    els.remoteDatasetsMeta.textContent = "Connect to browse remote files";
+    return;
+  }
+
+  const datasets = state.remote.datasets;
+  const selected = state.remote.selectedDatasets;
+
+  if (!datasets.length) {
+    els.remoteDatasetsMeta.textContent = "0 files available";
+    const empty = document.createElement("div");
+    empty.className = "remote-datasets-empty";
+    empty.textContent = "No .bdamage datasets found in uploads on the backend.";
+    els.remoteDatasetsList.appendChild(empty);
+    return;
+  }
+
+  els.remoteDatasetsMeta.textContent =
+    `${selected.size.toLocaleString()} of ${datasets.length.toLocaleString()} file${datasets.length === 1 ? "" : "s"} selected`;
+
+  for (const dataset of datasets) {
+    const item = document.createElement("div");
+    item.className = "remote-dataset-item";
+
+    const label = document.createElement("label");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selected.has(dataset.filename);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) state.remote.selectedDatasets.add(dataset.filename);
+      else state.remote.selectedDatasets.delete(dataset.filename);
+      renderRemoteDatasets();
+    });
+
+    const copy = document.createElement("div");
+    copy.className = "remote-dataset-copy";
+
+    const name = document.createElement("div");
+    name.className = "remote-dataset-name";
+    name.textContent = dataset.filename;
+
+    const detail = document.createElement("div");
+    detail.className = "remote-dataset-detail";
+    detail.textContent = formatRemoteDatasetDetail(dataset);
+
+    copy.appendChild(name);
+    copy.appendChild(detail);
+    label.appendChild(checkbox);
+    label.appendChild(copy);
+    item.appendChild(label);
+    els.remoteDatasetsList.appendChild(item);
+  }
+}
+
+function selectAllRemoteDatasets() {
+  state.remote.selectedDatasets = new Set(
+    state.remote.datasets.map((dataset) => dataset.filename),
+  );
+  renderRemoteDatasets();
+}
+
+function clearRemoteDatasets() {
+  state.remote.selectedDatasets.clear();
+  renderRemoteDatasets();
+}
+
+function getSelectedRemoteDatasets() {
+  return state.remote.datasets
+    .map((dataset) => dataset.filename)
+    .filter((filename) => state.remote.selectedDatasets.has(filename));
+}
+
+function formatRemoteDatasetDetail(dataset) {
+  const parts = [];
+  if (dataset.bytes > 0) parts.push(formatBytes(dataset.bytes));
+  if (dataset.modified_at) {
+    const parsed = new Date(dataset.modified_at);
+    parts.push(Number.isNaN(parsed.getTime()) ? dataset.modified_at : parsed.toLocaleString());
+  }
+  return parts.join(" \u2022 ") || "ready";
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const digits = value >= 100 || unit === 0 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
 function readFile(file) {
@@ -391,6 +651,37 @@ function mergeSourceNames(series) {
   const names = new Map();
   for (const source of series) {
     for (const [taxid, name] of source.names) names.set(taxid, name);
+  }
+  return names;
+}
+
+function buildSeries(parsedSources) {
+  return parsedSources.map((source, index) => ({
+    label: source.label,
+    color: colorForSource(index),
+    counts: source.counts,
+    visible: true,
+  }));
+}
+
+function countsArrayToMap(rows) {
+  const counts = new Map();
+  for (const row of rows) {
+    const taxid = Number(row.taxid);
+    const count = Number(row.count);
+    if (!Number.isFinite(taxid) || !Number.isFinite(count)) continue;
+    counts.set(taxid, (counts.get(taxid) || 0) + count);
+  }
+  return counts;
+}
+
+function countsArrayToNames(rows) {
+  const names = new Map();
+  for (const row of rows) {
+    const taxid = Number(row.taxid);
+    const name = typeof row.name === "string" ? cleanName(row.name) : "";
+    if (!Number.isFinite(taxid) || !name || name === "NA") continue;
+    names.set(taxid, name);
   }
   return names;
 }
@@ -505,6 +796,8 @@ function sortTree(node) {
 
 function redraw() {
   if (!state.tree) return;
+  applySeriesVisibility(state.tree);
+  state.counts = aggregateSeriesCounts(getVisibleSeries());
   const minReads = Number(els.minReads.value || 0);
   const search = els.searchBox.value.trim().toLowerCase();
   const visible = [];
@@ -516,10 +809,12 @@ function redraw() {
   renderSvg(visible, links, search);
   renderSummary(visible);
   renderTopTable();
-  setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from ${state.counts.size.toLocaleString()} LCA taxa.`);
+  const activeSeries = getVisibleSeries().length;
+  setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from ${state.counts.size.toLocaleString()} LCA taxa across ${activeSeries.toLocaleString()} active sample${activeSeries === 1 ? "" : "s"}.`);
 }
 
 function collectVisible(node, parent, nodes, links, leaves, minReads) {
+  if (node !== state.tree && node.total <= 0) return false;
   if (node !== state.tree && node.total < minReads && node.direct === 0) return false;
   nodes.push(node);
   if (parent) links.push([parent, node]);
@@ -583,8 +878,9 @@ function renderSvg(nodes, links, search) {
     const value = mode === "direct" ? node.direct : node.total;
     const match = search && (`${node.taxid} ${node.name}`.toLowerCase().includes(search));
     const dim = search && !match;
+    const selected = state.selected.has(node.taxid);
     const group = svgEl("g", {
-      class: `node${match ? " match" : ""}${dim ? " dim" : ""}`,
+      class: `node${match ? " match" : ""}${dim ? " dim" : ""}${selected ? " selected" : ""}`,
       transform: `translate(${node.x}, ${node.y})`,
     });
     const radius = radiusFor(value, maxValue);
@@ -598,7 +894,15 @@ function renderSvg(nodes, links, search) {
       x: radius + 8,
       y: 10,
     }, `${node.direct.toLocaleString()} direct / ${node.total.toLocaleString()} subtree`));
-    group.addEventListener("click", () => {
+    group.addEventListener("click", (event) => {
+      if (event.ctrlKey || event.metaKey) {
+        if (state.clickTimer) {
+          clearTimeout(state.clickTimer);
+          state.clickTimer = null;
+        }
+        toggleSelection(node);
+        return;
+      }
       if (state.clickTimer) clearTimeout(state.clickTimer);
       state.clickTimer = setTimeout(() => {
         state.clickTimer = null;
@@ -660,7 +964,8 @@ function renderNodePie(group, node, radius) {
 }
 
 function getNodeSeriesValues(node) {
-  return els.countMode.value === "direct" ? node.directBySource : node.totalBySource;
+  const values = els.countMode.value === "direct" ? node.directBySource : node.totalBySource;
+  return values.map((value, index) => state.series[index]?.visible ? value : 0);
 }
 
 function pieSlicePath(radius, startAngle, endAngle) {
@@ -720,6 +1025,119 @@ function toggleCollapse(node) {
     state.collapsed.add(node.taxid);
   }
   redraw();
+}
+
+function toggleSelection(node) {
+  if (state.selected.has(node.taxid)) state.selected.delete(node.taxid);
+  else state.selected.add(node.taxid);
+  redraw();
+}
+
+function clearSelection() {
+  if (!state.selected.size) {
+    setStatus("No nodes are currently selected.");
+    return;
+  }
+  state.selected.clear();
+  redraw();
+}
+
+function selectDescendants() {
+  if (!state.selected.size) {
+    setStatus("Select one or more nodes first, then use Select Descendants.");
+    return;
+  }
+
+  const selectedNodes = getSelectedNodes();
+  if (!selectedNodes.length) {
+    setStatus("The current selection could not be resolved in the active tree.");
+    return;
+  }
+
+  for (const node of selectedNodes) {
+    addDescendantsToSelection(node);
+  }
+  redraw();
+}
+
+function addDescendantsToSelection(node) {
+  for (const child of node.children) {
+    state.selected.add(child.taxid);
+    addDescendantsToSelection(child);
+  }
+}
+
+function uncollapseSelected() {
+  if (!state.selected.size) {
+    setStatus("Select one or more nodes first, then use Uncollapse.");
+    return;
+  }
+
+  const selectedNodes = getSelectedNodes();
+  if (!selectedNodes.length) {
+    setStatus("The current selection could not be resolved in the active tree.");
+    return;
+  }
+
+  for (const node of selectedNodes) {
+    state.collapsed.delete(node.taxid);
+    addDescendantsToSelection(node);
+    collapseSubtreeBelow(node);
+  }
+  redraw();
+}
+
+function uncollapseSelectedToTips() {
+  if (!state.selected.size) {
+    setStatus("Select one or more nodes first, then use Uncollapse Tips.");
+    return;
+  }
+
+  const selectedNodes = getSelectedNodes();
+  if (!selectedNodes.length) {
+    setStatus("The current selection could not be resolved in the active tree.");
+    return;
+  }
+
+  for (const node of selectedNodes) {
+    addDescendantsToSelection(node);
+    uncollapseSubtree(node);
+  }
+  redraw();
+}
+
+function collapseSubtreeBelow(node) {
+  for (const child of node.children) {
+    if (child.children.length) state.collapsed.add(child.taxid);
+    collapseSubtreeBelow(child);
+  }
+}
+
+function uncollapseSubtree(node) {
+  state.collapsed.delete(node.taxid);
+  for (const child of node.children) {
+    uncollapseSubtree(child);
+  }
+}
+
+function getSelectedNodes() {
+  if (!state.tree) return [];
+  const nodes = [];
+  const seen = new Set();
+  walkTree(state.tree, (node) => {
+    if (state.selected.has(node.taxid) && !seen.has(node.taxid)) {
+      seen.add(node.taxid);
+      nodes.push(node);
+    }
+  });
+  return nodes;
+}
+
+function walkTree(node, visit) {
+  visit(node);
+  for (const child of node.children) {
+    walkTree(child, visit);
+  }
 }
 
 function collapseChildren(node) {
@@ -785,6 +1203,7 @@ function renderSummary(visible) {
   els.taxonCount.textContent = directTaxa.toLocaleString();
   els.visibleCount.textContent = visible.length.toLocaleString();
   els.missingCount.textContent = state.missingTaxids.size.toLocaleString();
+  els.selectedCount.textContent = state.selected.size.toLocaleString();
 }
 
 function renderTopTable() {
@@ -820,10 +1239,11 @@ function initControlsResize() {
   let startX = 0;
   let startWidth = 0;
   els.controlsResize.addEventListener("pointerdown", (event) => {
+    if (els.app.classList.contains("sidebar-collapsed")) return;
     startX = event.clientX;
     startWidth = document.documentElement.style.getPropertyValue("--controls-width")
       ? Number.parseFloat(document.documentElement.style.getPropertyValue("--controls-width"))
-      : document.querySelector(".controls").getBoundingClientRect().width;
+      : els.controls.getBoundingClientRect().width;
     els.controlsResize.setPointerCapture(event.pointerId);
     document.body.style.userSelect = "none";
     document.body.style.cursor = "col-resize";
@@ -838,7 +1258,7 @@ function initControlsResize() {
     }
     document.body.style.userSelect = "";
     document.body.style.cursor = "";
-    localStorage.setItem("unicorn.controlsWidth", String(Math.round(document.querySelector(".controls").getBoundingClientRect().width)));
+    localStorage.setItem("unicorn.controlsWidth", String(Math.round(els.controls.getBoundingClientRect().width)));
     requestAnimationFrame(() => {
       if (state.tree) centerNode(state.focusTaxid ? state.flat.find((n) => n.taxid === state.focusTaxid) || state.tree : state.tree);
     });
@@ -931,12 +1351,46 @@ function renderSourceLegend() {
     return;
   }
   els.sourceLegend.hidden = false;
-  els.sourceLegend.innerHTML = state.series.map((source) => `
-    <div class="legend-item">
+  els.sourceLegend.innerHTML = state.series.map((source, index) => `
+    <label class="legend-item${source.visible ? "" : " is-muted"}" data-series-index="${index}">
+      <input class="legend-toggle" type="checkbox" ${source.visible ? "checked" : ""} aria-label="Toggle ${escapeHtml(source.label)}">
       <span class="legend-swatch" style="background:${source.color}"></span>
-      <span class="legend-label">${escapeHtml(source.label)}</span>
-    </div>
+      <span class="legend-label" title="${escapeHtml(source.label)}">${escapeHtml(source.label)}</span>
+    </label>
   `).join("");
+
+  els.sourceLegend.querySelectorAll(".legend-item").forEach((item) => {
+    item.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      const index = Number(item.getAttribute("data-series-index"));
+      if (!Number.isInteger(index) || !state.series[index]) return;
+      state.series[index].visible = target.checked;
+      item.classList.toggle("is-muted", !target.checked);
+      redraw();
+    });
+  });
+}
+
+function getVisibleSeries() {
+  return state.series.filter((source) => source.visible);
+}
+
+function applySeriesVisibility(node) {
+  node.direct = sumVisibleValues(node.directBySource);
+  node.total = node.direct;
+  for (const child of node.children) {
+    applySeriesVisibility(child);
+    node.total += child.total;
+  }
+}
+
+function sumVisibleValues(values) {
+  let total = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (state.series[i]?.visible) total += values[i];
+  }
+  return total;
 }
 
 function escapeHtml(value) {
