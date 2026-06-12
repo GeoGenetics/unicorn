@@ -176,7 +176,7 @@ static void refstats_usage(FILE *fp)
             "       - minalnas  <int>  Minimum alignment score [-Inf]\n"\
             "       - maxdust   <int>  Maximum alignment dust score [100]\n"\
             "  --adnascore     Recompute alignment score for ancient DNA damage [unset]\n"\
-						"                  New score is stored in costum XJ:f tag.\n"      
+						"                  New score is stored in costum XJ:f tag.\n"
 						"  --names   <str> Taxonomy nodeid to name mapping file.\n"\
             "  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.\n"\
             "  --acc2tax <str> Accession to taxid mapping file.\n"\
@@ -1067,6 +1067,7 @@ static int unicorn_lca(int argc, char **argv)
 		ret = 2;
 		goto exit;
 	}
+  unicorn_printopts(&opts, stderr, LCA);
 	fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n",
                      __func__, opts.ifile);
 	clock_gettime(CLOCK_MONOTONIC, &start);
