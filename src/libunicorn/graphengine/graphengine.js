@@ -27,6 +27,7 @@ const els = {
   remoteUser: document.getElementById("remoteUser"),
   remoteHost: document.getElementById("remoteHost"),
   connectBtn: document.getElementById("connectBtn"),
+  uploadBtn: document.getElementById("uploadBtn"),
   copyTunnelBtn: document.getElementById("copyTunnelBtn"),
   connectionState: document.getElementById("connectionState"),
   tunnelCommand: document.getElementById("tunnelCommand"),
@@ -60,6 +61,7 @@ els.renderBtn.addEventListener("click", loadAndRender);
 els.addLcaBtn.addEventListener("click", addLcaInput);
 els.clearLcaListBtn.addEventListener("click", clearLcaListFile);
 els.connectBtn.addEventListener("click", connectRemote);
+els.uploadBtn.addEventListener("click", uploadLoadedFiles);
 els.copyTunnelBtn.addEventListener("click", copyTunnelCommand);
 els.remoteUser.addEventListener("input", updateTunnelHint);
 els.remoteHost.addEventListener("input", updateTunnelHint);
@@ -150,6 +152,50 @@ function updateConnectionState(connected, message) {
   els.connectionState.textContent = message;
   els.connectionState.classList.toggle("online", connected);
   els.connectionState.classList.toggle("offline", !connected);
+}
+
+async function uploadLoadedFiles() {
+  const user = els.remoteUser.value.trim();
+  const host = els.remoteHost.value.trim();
+  const localFiles = Array.from(document.querySelectorAll(".lca-file-input"))
+    .map((input) => input.files[0])
+    .filter(Boolean);
+
+  if (!user || !host) {
+    setStatus("Enter a remote username and host before uploading files.");
+    return;
+  }
+  if (!localFiles.length) {
+    setStatus("No local .bdamage/LCA files are currently selected for upload.");
+    return;
+  }
+  if (!state.remote.connected) {
+    setStatus(`Tunnel has not been confirmed for ${user}@${host}. Test the tunnel first, then upload.`);
+    return;
+  }
+
+  els.uploadBtn.disabled = true;
+  setStatus(`Uploading ${localFiles.length.toLocaleString()} local file(s) to ${user}@${host} through the tunnel...`);
+  let uploaded = 0;
+  try {
+    for (const file of localFiles) {
+      const form = new FormData();
+      form.append("file", file, file.name);
+      const response = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: form,
+      });
+      if (!response.ok) {
+        throw new Error(`Upload failed for ${file.name} with HTTP ${response.status}`);
+      }
+      uploaded++;
+    }
+    setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the remote server for ${user}@${host}.`);
+  } catch (error) {
+    setStatus(`Upload stopped after ${uploaded.toLocaleString()} file(s). ${error.message || error}`);
+  } finally {
+    els.uploadBtn.disabled = false;
+  }
 }
 
 async function copyTunnelCommand() {
