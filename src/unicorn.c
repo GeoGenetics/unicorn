@@ -156,7 +156,8 @@ static void unicorn_usage(FILE *fp)
           "  bamstats    Compute per bam statistics.\n"\
           "  taxstats    Compute per taxid statistics.\n"\
           "  alnfilt     Filter alignments based on user-defined criteria.\n"\
-				  "  lca         Compute LCA of queries and report taxa counts.\n");
+				  "  lca         Compute LCA of queries and report taxa counts.\n"\
+					"  alntag      Add unicorn tags to alignment records.\n");
 }
 
 static void refstats_usage(FILE *fp)
@@ -262,6 +263,20 @@ static void lca_usage(FILE *fp)
 						"  --acc2tax <str>               Accession to taxid mapping file or .khash file.\n"\
 						"  --qsize <int>                 Size of queue for XR sorted input bam files [1024]\n"\
 						"  -h                            Print this help message.\n");
+}
+
+static void alntag_usage(FILE *fp)
+{
+	fprintf(fp, "./unicorn alntag [options] -b <in.bam>|<in.sam>\n");
+	fprintf(fp, "Options:\n"\
+						"  -b <str>                     Input bam|sam\n"\
+						"  -o --outbam <str>            Write tagged bam to <str> [stdout]\n"\
+						"  --names <str>                Taxonomy names file.\n"\
+						"  --nodes <str>                Taxonomy nodes file\n"\
+						"  --acc2tax <str>              Accession to taxid mapping file or .khash file.\n"\
+						"  --qsize <int>                Size of queue for XR sorted input bam files [1024]\n"\
+						"  -t, --threads <int>          Number of threads [4]\n"\
+						"  -h                           Print this help message.\n");
 }
 
 static void unicorn_freeopts(unicorn_opt_t opts)
@@ -491,9 +506,12 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
   fprintf(fp, "\t-b %s\n", opts->ifile ? opts->ifile : "N/A");
   fprintf(fp, "\t-o %s\n", opts->outbam ? opts->outbam : "N/A");
   fprintf(fp, "\t-t %d\n", opts->threads);
+	fprintf(fp, "\t--qsize     %d\n", opts->qsize);
+	if ( _f == TAG ) goto taxonomy;
+
   fprintf(fp, "\t-k %d\n", opts->ksize);
 	fprintf(fp, "\t--outstat  %s\n", opts->outstat ? opts->outstat : "/dev/stdout");
-  fprintf(fp, "\t--minrefl %lu\n", opts->minrefl);
+	fprintf(fp, "\t--minrefl %lu\n", opts->minrefl);
   fprintf(fp, "\t--minreads  %d\n", opts->minnreads);
   fprintf(fp, "\t--minalnas  %d\n", opts->minalnas);
   fprintf(fp, "\t--maxdust   %d\n", opts->maxdust);
@@ -501,9 +519,9 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
 		fprintf(fp, "\t--minmani  %f\n", opts->minmani);
 		fprintf(fp, "\t--keeptaxa  %s\n", opts->keeptaxa ? opts->keeptaxa : "N/A");
 	}
-	fprintf(fp, "\t--qsize     %d\n", opts->qsize);
 	if (opts->adnascore)
-	fprintf(fp, "\t--adnascore\n");
+	  fprintf(fp, "\t--adnascore\n");
+	taxonomy:
 	if (opts->withtid) {
     fprintf(fp, "\t--acc2tax %s\n", opts->acc2tax ? opts->acc2tax : "N/A");
     fprintf(fp, "\t--names %s\n", opts->names);
@@ -593,6 +611,7 @@ static int unicorn_refstats(int argc, char **argv)
                    opts.outbam ? opts.outbam : NULL,
                    opts.outstat ? opts.outstat : NULL,
 									 opts.adnascore,
+									 opts.qsize,
 									 argc,
                    _argv);
   if (!u) goto exit;
@@ -747,6 +766,7 @@ static int unicorn_bamstats(int argc, char **argv)
                      NULL,
 										 NULL,
                      opts.adnascore,
+                     opts.qsize,
                      argc,
                      _argv);
     if (!u) {
@@ -884,6 +904,7 @@ static int unicorn_taxstats(int argc, char **argv)
                      obamstr,
 										 opts.outstat ? opts.outstat : NULL,
                      opts.adnascore,
+                     opts.qsize,
                      argc,
                      _argv);
     if (obamstr && obamstr != opts.outbam) free(obamstr);
@@ -1007,7 +1028,7 @@ static int unicorn_alnfilt(int argc, char **argv)
                                                                      opts.ifile);
   fflush(stderr);
   clock_gettime(CLOCK_MONOTONIC, &start);
-  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, argc, _argv);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, opts.qsize, argc, _argv);
   if (!u) goto exit;
   ret = 5;
   if (!unicorn_isqgrouped(u)) goto exit;
@@ -1064,75 +1085,154 @@ static int unicorn_alnfilt(int argc, char **argv)
 static int unicorn_lca(int argc, char **argv)
 {
   int ret = 1;
-	struct timespec start = {0}, stop = {0}, pstart = {0}, pstop = {0};
+  struct timespec start = {0}, stop = {0}, pstart = {0}, pstop = {0};
   uint64_t ns = 0;
   utax_t *utax = NULL;
   unicorn_opt_t opts = {0};
   opts.threads   = 4;
   opts.maxdust   = 100;
   opts.qsize = 1024;
-	unicorn_t *u = NULL;
+  unicorn_t *u = NULL;
   char *_argv[64] = {0};
   clock_gettime(CLOCK_MONOTONIC, &pstart);
-	if (argc <= 2) goto exit;
+  if (argc <= 2) goto exit;
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-	if (!opts.ifile || !opts.outprefix) {
-		ret = 2;
-		goto exit;
-	}
+  if (!opts.ifile || !opts.outprefix) {
+    ret = 2;
+    goto exit;
+  }
   unicorn_printopts(&opts, stderr, LCA);
-	fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n",
+  fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n",
                      __func__, opts.ifile);
-	clock_gettime(CLOCK_MONOTONIC, &start);
-  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, argc, _argv);
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, opts.qsize, argc, _argv);
   if (!unicorn_isqgrouped(u)) {
-		ret = 6;
-		goto exit;
-	}
-	clock_gettime(CLOCK_MONOTONIC, &stop);
-	ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+    ret = 6;
+    goto exit;
+  }
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
-	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
-	fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
-	clock_gettime(CLOCK_MONOTONIC, &start);
-	utax = unicorn_loadtaxonomy(opts.acc2tax,
-															opts.names,
-															opts.nodes,
-															opts.rank,
-															&ret);
-	if (ret) goto exit;
-	clock_gettime(CLOCK_MONOTONIC, &stop);
-	ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-	fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+  fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  utax = unicorn_loadtaxonomy(opts.acc2tax,
+                              opts.names,
+                              opts.nodes,
+                              opts.rank,
+                              &ret);
+  if (ret) goto exit;
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 
-	fprintf(stderr, "[unicorn::%s] Computing LCA\n", __func__);
-	clock_gettime(CLOCK_MONOTONIC, &start);
-	uint64_t nalns, nreads;
-	ret = unicorn_lcacompute(u, NULL, utax, &nalns, &nreads, opts.outprefix);
-	if (ret) goto exit;
-	clock_gettime(CLOCK_MONOTONIC, &stop);
-	ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-	fprintf(stderr, "\t%lu alignments\n", nalns);
-	fprintf(stderr, "\t%lu reads\n", nreads);
+  fprintf(stderr, "[unicorn::%s] Computing LCA\n", __func__);
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  uint64_t nalns, nreads;
+  ret = unicorn_lcacompute(u, NULL, utax, &nalns, &nreads, opts.outprefix);
+  if (ret) goto exit;
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+  fprintf(stderr, "\t%lu alignments\n", nalns);
+  fprintf(stderr, "\t%lu reads\n", nreads);
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 
 
 
 
-	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
-	clock_gettime(CLOCK_MONOTONIC, &pstop);
-	ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
-	fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",__func__, (double)ns/1000000000.f);
-	ret = 0;
-	exit:
-	  if (utax) unicorn_closetaxonomy(utax);
-	  if (ret)
+  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
+  clock_gettime(CLOCK_MONOTONIC, &pstop);
+  ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
+  fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",__func__, (double)ns/1000000000.f);
+  ret = 0;
+  exit:
+    if (utax) unicorn_closetaxonomy(utax);
+    if (ret)
       fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
-		if (u) unicorn_destroy(u);
-	  unicorn_freeopts(opts);
-	  return ret;
+    if (u) unicorn_destroy(u);
+    unicorn_freeopts(opts);
+    return ret;
+}
+
+static int unicorn_alntag(int argc, char **argv)
+{
+  int ret = -1;
+  struct timespec start = {0}, stop = {0}, pstart = {0}, pstop = {0};
+  uint64_t ns = 0;
+  utax_t *utax = NULL;
+  unicorn_opt_t opts = {0};
+  opts.threads   = 4;
+  opts.qsize = 1024;
+  opts.rank	 = strdup("genus");
+	opts.adnascore = 1;
+	unicorn_t *u = NULL;
+  char *_argv[64] = {0};
+  clock_gettime(CLOCK_MONOTONIC, &pstart);
+  if (argc <= 2) goto exit;
+  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
+    _argv[i] = strdup(argv[i]);
+  if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+  if (!opts.ifile || !opts.outbam) {
+    ret = 2;
+    goto exit;
+  }
+  unicorn_printopts(&opts, stderr, TAG);
+  fprintf(stderr, "[unicorn::%s] Loading BAM header from %s\n",
+                     __func__, opts.ifile);
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, opts.qsize, argc, _argv);
+  if (!unicorn_isqgrouped(u)) {
+    ret = 6;
+    goto exit;
+  }
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+  fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+  fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  utax = unicorn_loadtaxonomy(opts.acc2tax,
+                              opts.names,
+                              opts.nodes,
+                              opts.rank,
+                              &ret);
+  if (ret) goto exit;
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+
+  fprintf(stderr, "[unicorn::%s] Retagging alignment records\n", __func__);
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  uint64_t nalns, nreads;
+  ret = unicorn_alntagcompute(u, utax, &nalns, &nreads);
+  if (ret) goto exit;
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+  fprintf(stderr, "\t%lu alignments\n", nalns);
+  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+
+
+
+
+  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
+  clock_gettime(CLOCK_MONOTONIC, &pstop);
+  ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
+  fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",__func__, (double)ns/1000000000.f);
+  ret = 0;
+  exit:
+    if (utax) unicorn_closetaxonomy(utax);
+    if (ret) {
+		   if (1 == ret) {
+				alntag_usage(stderr);
+				ret = 0;
+			 }
+		else fprintf(stderr, "[unicorn::%s] Error: %s %d\n",__func__, ERRORS[ret], ret);
+		}
+    if (u) unicorn_destroy(u);
+    unicorn_freeopts(opts);
+    return ret;
 }
 
 int main(int argc, char **argv)
@@ -1154,7 +1254,10 @@ int main(int argc, char **argv)
     return unicorn_alnfilt(argc, argv);
   } else if (strcmp(argv[1], "lca") == 0) {
     return unicorn_lca(argc, argv);
-  } else {
+  } else if (strcmp(argv[1], "alntag") == 0) {
+		return unicorn_alntag(argc, argv);
+	}
+	else {
     unicorn_usage(stderr);
     return 0;
   }

@@ -75,6 +75,7 @@ unicorn_t *unicorn_init(int threads,
                         char *prefix,
 												const char *ofile,
 												int adnascore,
+												uint32_t qsize,
                         int argc,
 												char **argv);
 
@@ -114,6 +115,7 @@ unicorn's BAM statistic computation interface
 #define REFSTATS 1
 #define TAXSTATS 2
 #define LCA      3
+#define TAG      4
 
 /**
  * @brief unicorn's reference based statistics
@@ -286,3 +288,10 @@ unicorn's lca routines
 
 ****************************************************/
 int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nalns, uint64_t *nreads, char *outprefix);
+
+/****************************************************
+unicorn's alntag routines
+
+
+****************************************************/
+int unicorn_alntagcompute(unicorn_t *u, utax_t *utax, uint64_t *nalns, uint64_t *nreads);

@@ -105,6 +105,7 @@ unicorn_t *unicorn_init( int nthreads,
                          char *outbam,
 												 const char *ofile,
 												 int adnascore,
+												 uint32_t qsize,
 												 int argc,
                          char **argv)
 {
@@ -130,6 +131,7 @@ unicorn_t *unicorn_init( int nthreads,
 		}
 		else u->ofp = stdout;
 		u->adnascore = adnascore;
+		u->qsize = qsize;
 		if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
 		if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
 		if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;

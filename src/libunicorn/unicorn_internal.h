@@ -120,6 +120,7 @@ typedef struct {
   bam1_t *daln;   //Last alignment read from the file
   values_t values; //bamfile values
 	uint8_t adnascore; //Whether to recompute alignment score for ancient DNA damage
+	uint32_t qsize; //Queue size
 } unicorn_t;
 
 uint8_t unicorn_isqgrouped(unicorn_t *u);
