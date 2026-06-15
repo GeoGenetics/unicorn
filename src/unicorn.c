@@ -1224,7 +1224,10 @@ static int unicorn_alntag(int argc, char **argv)
   exit:
     if (utax) unicorn_closetaxonomy(utax);
     if (ret) {
-		   if (1 == ret) {
+		  if (-1 == ret) {
+				alntag_usage(stderr);
+			}
+			else if (1 == ret) {
 				alntag_usage(stderr);
 				ret = 0;
 			 }
