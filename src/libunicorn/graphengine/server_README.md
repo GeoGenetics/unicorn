@@ -6,6 +6,9 @@ It now keeps parsed `.bdamage.txt` datasets in memory on the server side, so the
 API can serve cached dataset models instead of reparsing files for every client
 request.
 
+It also now supports loading taxonomy on the backend from `nodes.dmp` and
+optionally `names.dmp`, and can build the induced tree server-side.
+
 ## What it does
 
 - `GET /ping`
@@ -13,6 +16,8 @@ request.
 - `GET /datasets`
 - `GET /render-data`
 - `GET /model/status`
+- `GET /taxonomy/status`
+- `GET /tree-model`
 
 ## Current server-side model
 
@@ -22,9 +27,13 @@ The backend currently owns:
 - parsed per-dataset direct taxon counts
 - per-dataset taxon-name mappings found in the files
 - cached selections across one or more datasets
+- parsed taxonomy nodes
+- parsed taxonomy names
+- cached server-side induced tree models
 
-The backend does not yet own taxonomy loading or subtree aggregation. That is
-the next step in the server-authoritative roadmap.
+The current frontend is still on the older rendering path: even in remote mode,
+it still fetches full dataset payloads and builds the visible tree in the
+browser. The new backend tree model is in place for the next client transition.
 
 ## Endpoint notes
 
@@ -37,7 +46,16 @@ the next step in the server-authoritative roadmap.
 
 - `GET /model/status?files=a&files=b`
   Returns a backend-facing summary of the in-memory selection model, including
-  total reads, total taxon rows, aggregated direct taxa, and cache status.
+  total reads, total taxon rows, aggregated direct taxa, taxonomy status, tree
+  summary, and cache status.
+
+- `GET /taxonomy/status`
+  Returns backend taxonomy loading status, including file metadata and numbers
+  of parsed nodes and names.
+
+- `GET /tree-model?files=a&files=b`
+  Returns the induced taxonomy tree built on the backend for the requested
+  datasets.
 
 ## Files
 
@@ -116,6 +134,12 @@ And for the current in-memory model:
 
 ```text
 http://localhost:8000/model/status
+```
+
+And for the backend-built tree model:
+
+```text
+http://localhost:8000/tree-model
 ```
 
 ## Good first remote layout

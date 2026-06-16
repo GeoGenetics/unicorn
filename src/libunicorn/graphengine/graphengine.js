@@ -258,9 +258,7 @@ function updateConnectionState(connected, message) {
 async function uploadLoadedFiles() {
   const user = els.remoteUser.value.trim();
   const host = els.remoteHost.value.trim();
-  const localFiles = Array.from(document.querySelectorAll(".lca-file-input"))
-    .map((input) => input.files[0])
-    .filter(Boolean);
+  const localFiles = getLocalRemoteUploadFiles();
 
   if (!user || !host) {
     setStatus("Enter a remote username and host before uploading files.");
@@ -276,25 +274,12 @@ async function uploadLoadedFiles() {
   }
 
   els.uploadBtn.disabled = true;
-  setStatus(`Uploading ${localFiles.length.toLocaleString()} local file(s) to ${user}@${host} through the tunnel...`);
-  let uploaded = 0;
   try {
-    for (const file of localFiles) {
-      const form = new FormData();
-      form.append("file", file, file.name);
-      const response = await fetch("http://localhost:8000/upload", {
-        method: "POST",
-        body: form,
-      });
-      if (!response.ok) {
-        throw new Error(`Upload failed for ${file.name} with HTTP ${response.status}`);
-      }
-      uploaded++;
-    }
+    const uploaded = await uploadFilesToRemote(localFiles);
     setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the remote server for ${user}@${host}.`);
     await refreshRemoteDatasets();
   } catch (error) {
-    setStatus(`Upload stopped after ${uploaded.toLocaleString()} file(s). ${error.message || error}`);
+    setStatus(`Upload stopped. ${error.message || error}`);
   } finally {
     els.uploadBtn.disabled = false;
   }
@@ -311,28 +296,26 @@ async function copyTunnelCommand() {
 }
 
 async function loadAndRender() {
-  if (!els.nodesFile.files[0]) {
+  if (!els.nodesFile.files[0] && !state.remote.connected) {
     setStatus("Choose nodes.dmp before rendering.");
     return;
   }
   try {
-    setStatus(state.remote.connected ? "Fetching remote datasets..." : "Parsing local input files...");
+    setStatus(state.remote.connected ? "Syncing local inputs and fetching remote tree..." : "Parsing local input files...");
     state.collapsed.clear();
     state.missingTaxids.clear();
+    if (state.remote.connected) {
+      await loadAndRenderRemote();
+      return;
+    }
 
     const [parsedSources, nodesText, namesText] = await Promise.all([
-      state.remote.connected ? loadRemoteSources() : loadLocalSources(),
+      loadLocalSources(),
       readFile(els.nodesFile.files[0]),
       els.namesFile.files[0] ? readFile(els.namesFile.files[0]) : Promise.resolve(""),
     ]);
     if (!parsedSources.length) {
-      if (state.remote.connected) {
-        setStatus(state.remote.datasets.length
-          ? "No remote datasets are currently selected. Select one or more files in the Remote Datasets panel."
-          : "No remote .bdamage datasets are available to render.");
-      } else {
-        setStatus("Choose at least one LCA output file or provide a file list.");
-      }
+      setStatus("Choose at least one LCA output file or provide a file list.");
       return;
     }
 
@@ -341,15 +324,95 @@ async function loadAndRender() {
     state.counts = aggregateSeriesCounts(state.series);
     state.names = mergeNames(mergeSourceNames(parsedSources), parseNames(namesText));
     state.tree = buildTree(state.nodes, state.series, state.names);
+    setDefaultCollapsedState(state.tree);
     state.centerOnNextRender = true;
     renderSourceLegend();
 
-    setStatus(`Loaded ${state.nodes.size.toLocaleString()} taxonomy nodes, ${state.series.length.toLocaleString()} ${state.remote.connected ? "remote dataset" : "input file"}${state.series.length === 1 ? "" : "s"}, and ${state.counts.size.toLocaleString()} LCA taxa.`);
+    setStatus(`Loaded ${state.nodes.size.toLocaleString()} taxonomy nodes, ${state.series.length.toLocaleString()} input file${state.series.length === 1 ? "" : "s"}, and ${state.counts.size.toLocaleString()} LCA taxa.`);
     redraw();
   } catch (error) {
     console.error(error);
     setStatus(`Could not render tree: ${error.message || error}`);
   }
+}
+
+function getLocalRemoteUploadFiles() {
+  const files = Array.from(document.querySelectorAll(".lca-file-input"))
+    .map((input) => input.files[0])
+    .filter(Boolean);
+  if (els.nodesFile.files[0]) files.push(els.nodesFile.files[0]);
+  if (els.namesFile.files[0]) files.push(els.namesFile.files[0]);
+  return files;
+}
+
+async function uploadFilesToRemote(files) {
+  let uploaded = 0;
+  for (const file of files) {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const response = await fetch("http://localhost:8000/upload", {
+      method: "POST",
+      body: form,
+    });
+    if (!response.ok) {
+      throw new Error(`Upload failed for ${file.name} with HTTP ${response.status}`);
+    }
+    uploaded++;
+  }
+  return uploaded;
+}
+
+async function loadAndRenderRemote() {
+  const localFiles = getLocalRemoteUploadFiles();
+  if (!els.nodesFile.files[0]) {
+    setStatus("Choose nodes.dmp before rendering a remote tree.");
+    return;
+  }
+  if (localFiles.length) {
+    await uploadFilesToRemote(localFiles);
+    await refreshRemoteDatasets();
+    for (const file of localFiles) {
+      if (file.name.endsWith(".bdamage.txt")) state.remote.selectedDatasets.add(file.name);
+    }
+  }
+
+  const files = getSelectedRemoteDatasets();
+  if (!files.length) {
+    setStatus(state.remote.datasets.length
+      ? "No remote datasets are currently selected. Select one or more files in the Remote Datasets panel."
+      : "No remote .bdamage datasets are available to render.");
+    return;
+  }
+
+  const url = new URL("http://localhost:8000/tree-model");
+  for (const file of files) url.searchParams.append("files", file);
+  if (els.nodesFile.files[0]) url.searchParams.set("nodes_file", els.nodesFile.files[0].name);
+  if (els.namesFile.files[0]) url.searchParams.set("names_file", els.namesFile.files[0].name);
+
+  const response = await fetch(url.toString(), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`Remote tree-model request failed with HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
+  if (!datasets.length || !payload.tree) {
+    setStatus("The remote backend returned no tree to render.");
+    return;
+  }
+
+  state.nodes = new Map();
+  state.names = new Map();
+  state.series = buildSeriesFromRemoteDatasets(datasets, payload.tree);
+  state.tree = buildRemoteTree(payload.tree);
+  state.counts = aggregateSeriesCounts(state.series);
+  state.missingTaxids = new Set(Array.isArray(payload.missing_taxids) ? payload.missing_taxids : []);
+  setDefaultCollapsedState(state.tree);
+  state.centerOnNextRender = true;
+  renderSourceLegend();
+
+  setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} remote dataset${state.series.length === 1 ? "" : "s"} and ${state.counts.size.toLocaleString()} direct taxa.`);
+  redraw();
 }
 
 async function loadLocalSources() {
@@ -416,6 +479,52 @@ async function loadRemoteSources() {
     counts: countsArrayToMap(dataset.counts || []),
     names: countsArrayToNames(dataset.counts || []),
   }));
+}
+
+function buildSeriesFromRemoteDatasets(datasets, treePayload) {
+  const countMaps = datasets.map(() => new Map());
+  const walk = (node) => {
+    const values = Array.isArray(node.direct_by_source) ? node.direct_by_source : [];
+    for (let i = 0; i < countMaps.length; i++) {
+      const value = Number(values[i] || 0);
+      if (value > 0) countMaps[i].set(Number(node.taxid), value);
+    }
+    for (const child of node.children || []) walk(child);
+  };
+  walk(treePayload);
+  return datasets.map((dataset, index) => ({
+    label: dataset.filename || dataset.id || `remote-dataset-${index + 1}`,
+    color: colorForSource(index),
+    counts: countMaps[index],
+    visible: true,
+  }));
+}
+
+function buildRemoteTree(node) {
+  return {
+    taxid: Number(node.taxid),
+    parent: node.parent == null ? null : Number(node.parent),
+    rank: node.rank || "no rank",
+    name: node.name || String(node.taxid),
+    direct: Number(node.direct || 0),
+    directBySource: Array.isArray(node.direct_by_source)
+      ? node.direct_by_source.map((value) => Number(value || 0))
+      : [],
+    total: Number(node.total || 0),
+    totalBySource: Array.isArray(node.total_by_source)
+      ? node.total_by_source.map((value) => Number(value || 0))
+      : [],
+    children: Array.isArray(node.children) ? node.children.map(buildRemoteTree) : [],
+    depth: Number(node.depth || 0),
+  };
+}
+
+function setDefaultCollapsedState(root) {
+  state.collapsed.clear();
+  if (!root) return;
+  for (const child of root.children) {
+    collapseSubtreeBelow(child);
+  }
 }
 
 async function refreshRemoteDatasets(options = {}) {
