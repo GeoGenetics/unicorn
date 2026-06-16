@@ -47,7 +47,7 @@
                   </div>
                   <pre id="tunnelCommand" class="tunnel-command">ssh -L 8000:localhost:8000 youruser@remote-server</pre>
                 </div>
-                <small id="tunnelHint" class="hint">Open the SSH tunnel first, then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.</small>
+                <small id="tunnelHint" class="hint">Open the SSH tunnel, afterwards start unicorn's graph engine server app (python unicorn/src/libunicorn/graphengine/server_app.py), then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.</small>
                 <section id="remoteDatasetsPanel" class="remote-datasets" aria-label="Remote datasets" hidden>
                   <div class="remote-datasets-head">
                     <h3>Remote Datasets</h3>
