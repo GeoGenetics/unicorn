@@ -1,11 +1,43 @@
 # Unicorn Graph Engine Prototype Server
 
-This is the smallest possible remote service for the graph engine prototype.
+This is the backend service for the graph engine prototype.
+
+It now keeps parsed `.bdamage.txt` datasets in memory on the server side, so the
+API can serve cached dataset models instead of reparsing files for every client
+request.
 
 ## What it does
 
 - `GET /ping`
 - `POST /upload`
+- `GET /datasets`
+- `GET /render-data`
+- `GET /model/status`
+
+## Current server-side model
+
+The backend currently owns:
+
+- uploaded `.bdamage.txt` files
+- parsed per-dataset direct taxon counts
+- per-dataset taxon-name mappings found in the files
+- cached selections across one or more datasets
+
+The backend does not yet own taxonomy loading or subtree aggregation. That is
+the next step in the server-authoritative roadmap.
+
+## Endpoint notes
+
+- `GET /datasets`
+  Returns metadata for available uploaded `.bdamage.txt` files.
+
+- `GET /render-data?files=a&files=b`
+  Returns the parsed dataset payloads needed by the current client. This stays
+  compatible with the existing frontend while using the server cache internally.
+
+- `GET /model/status?files=a&files=b`
+  Returns a backend-facing summary of the in-memory selection model, including
+  total reads, total taxon rows, aggregated direct taxa, and cache status.
 
 ## Files
 
@@ -78,6 +110,12 @@ Then your browser app can test:
 
 ```text
 http://localhost:8000/ping
+```
+
+And for the current in-memory model:
+
+```text
+http://localhost:8000/model/status
 ```
 
 ## Good first remote layout

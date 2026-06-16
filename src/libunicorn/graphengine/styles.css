@@ -606,6 +606,11 @@ button {
   overflow: auto;
   min-height: 320px;
   background: linear-gradient(180deg, #fffdf7, #f9f2df);
+  cursor: grab;
+}
+
+.chart-wrap.dragging {
+  cursor: grabbing;
 }
 
 #treeSvg {
@@ -617,6 +622,13 @@ button {
   fill: none;
   stroke: rgba(91, 107, 95, 0.44);
   stroke-width: 1.4;
+}
+
+.node .node-hit {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+  cursor: pointer;
 }
 
 .node circle {

@@ -20,6 +20,10 @@ const state = {
   centerOnNextRender: false,
   focusTaxid: null,
   clickTimer: null,
+  tooltipTimer: null,
+  tooltipNode: null,
+  tooltipPoint: null,
+  suppressClicksUntil: 0,
 };
 
 const els = {
@@ -118,6 +122,7 @@ initControlsResize();
 initSummaryResize();
 initTablePanel();
 initSidebarPanel();
+initChartPan();
 initRemotePanel();
 
 const SOURCE_COLORS = [
@@ -815,7 +820,10 @@ function redraw() {
 
 function collectVisible(node, parent, nodes, links, leaves, minReads) {
   if (node !== state.tree && node.total <= 0) return false;
-  if (node !== state.tree && node.total < minReads && node.direct === 0) return false;
+  // The minimum-read filter is defined on subtree totals, so any node below
+  // the threshold is hidden and its nearest visible ancestor becomes the
+  // rendered collapse point for that branch.
+  if (node !== state.tree && node.total < minReads) return false;
   nodes.push(node);
   if (parent) links.push([parent, node]);
   const collapsed = state.collapsed.has(node.taxid);
@@ -884,6 +892,10 @@ function renderSvg(nodes, links, search) {
       transform: `translate(${node.x}, ${node.y})`,
     });
     const radius = radiusFor(value, maxValue);
+    group.appendChild(svgEl("circle", {
+      class: "node-hit",
+      r: Math.max(radius + 7, 12),
+    }));
     renderNodePie(group, node, radius);
     group.appendChild(svgEl("text", {
       x: radius + 8,
@@ -895,6 +907,7 @@ function renderSvg(nodes, links, search) {
       y: 10,
     }, `${node.direct.toLocaleString()} direct / ${node.total.toLocaleString()} subtree`));
     group.addEventListener("click", (event) => {
+      if (performance.now() < state.suppressClicksUntil) return;
       if (event.ctrlKey || event.metaKey) {
         if (state.clickTimer) {
           clearTimeout(state.clickTimer);
@@ -910,6 +923,7 @@ function renderSvg(nodes, links, search) {
       }, 220);
     });
     group.addEventListener("dblclick", (event) => {
+      if (performance.now() < state.suppressClicksUntil) return;
       event.preventDefault();
       if (state.clickTimer) {
         clearTimeout(state.clickTimer);
@@ -917,7 +931,8 @@ function renderSvg(nodes, links, search) {
       }
       toggleFocus(node);
     });
-    group.addEventListener("mousemove", (event) => showTooltip(event, node));
+    group.addEventListener("mouseenter", (event) => scheduleTooltip(event, node));
+    group.addEventListener("mousemove", (event) => updateTooltipPosition(event));
     group.addEventListener("mouseleave", hideTooltip);
     nodeLayer.appendChild(group);
   }
@@ -1165,6 +1180,28 @@ function labelFor(node) {
   return name.length > 34 ? `${name.slice(0, 31)}...` : name;
 }
 
+function positionTooltip(event) {
+  els.tooltip.style.left = `${event.clientX + 14}px`;
+  els.tooltip.style.top = `${event.clientY + 14}px`;
+}
+
+function scheduleTooltip(event, node) {
+  if (state.tooltipTimer) clearTimeout(state.tooltipTimer);
+  state.tooltipNode = node;
+  state.tooltipPoint = { clientX: event.clientX, clientY: event.clientY };
+  state.tooltipTimer = setTimeout(() => {
+    state.tooltipTimer = null;
+    if (state.tooltipNode !== node) return;
+    showTooltip(state.tooltipPoint || event, node);
+  }, 360);
+}
+
+function updateTooltipPosition(event) {
+  state.tooltipPoint = { clientX: event.clientX, clientY: event.clientY };
+  if (els.tooltip.hidden) return;
+  positionTooltip(event);
+}
+
 function showTooltip(event, node) {
   const mode = els.countMode.value === "direct" ? "direct reads" : "subtree reads";
   const breakdown = getNodeSeriesValues(node)
@@ -1179,8 +1216,7 @@ function showTooltip(event, node) {
     `)
     .join("");
   els.tooltip.hidden = false;
-  els.tooltip.style.left = `${event.clientX + 14}px`;
-  els.tooltip.style.top = `${event.clientY + 14}px`;
+  positionTooltip(event);
   els.tooltip.innerHTML = `
     <strong>${escapeHtml(node.name)}</strong>
     taxid: ${node.taxid}<br>
@@ -1193,6 +1229,12 @@ function showTooltip(event, node) {
 }
 
 function hideTooltip() {
+  if (state.tooltipTimer) {
+    clearTimeout(state.tooltipTimer);
+    state.tooltipTimer = null;
+  }
+  state.tooltipNode = null;
+  state.tooltipPoint = null;
   els.tooltip.hidden = true;
 }
 
@@ -1231,6 +1273,53 @@ function svgEl(name, attrs = {}, text = "") {
 
 function setStatus(message) {
   els.status.textContent = message;
+}
+
+function initChartPan() {
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+  let moved = false;
+
+  els.chartWrap.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    if (event.target.closest(".tooltip")) return;
+    pointerId = event.pointerId;
+    startX = event.clientX;
+    startY = event.clientY;
+    startLeft = els.chartWrap.scrollLeft;
+    startTop = els.chartWrap.scrollTop;
+    moved = false;
+  });
+
+  window.addEventListener("pointermove", (event) => {
+    if (pointerId !== event.pointerId) return;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+      moved = true;
+      hideTooltip();
+      els.chartWrap.classList.add("dragging");
+      document.body.style.userSelect = "none";
+    }
+    if (!moved) return;
+    els.chartWrap.scrollLeft = startLeft - dx;
+    els.chartWrap.scrollTop = startTop - dy;
+  });
+
+  const stopPan = (event) => {
+    if (pointerId !== event.pointerId) return;
+    if (moved) state.suppressClicksUntil = performance.now() + 120;
+    pointerId = null;
+    moved = false;
+    els.chartWrap.classList.remove("dragging");
+    document.body.style.userSelect = "";
+  };
+
+  window.addEventListener("pointerup", stopPan);
+  window.addEventListener("pointercancel", stopPan);
 }
 
 function initControlsResize() {
