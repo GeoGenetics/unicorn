@@ -19,3 +19,6 @@ testing
 conda/*.gz
 figures/
 src/genesisC/*.o
+debug/
+src/libunicorn/graphengine/__pycache__/
+src/libunicorn/graphengine/uploads/
