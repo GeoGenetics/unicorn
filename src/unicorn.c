@@ -261,7 +261,7 @@ static void lca_usage(FILE *fp)
 						"  --outprefix <str>    Prefix for output files [stdout]\n"\
 						"  --names <str>        Taxonomy names file.\n"\
 						"  --nodes <str>        Taxonomy nodes file\n"\
-						"  --acc2tax <str>      Accession to taxid mapping file or .khash file.\n"\
+						"  --acc2tax <str>      Accession to taxid mapping file.\n"\
 						"  --qsize <int>        Size of queue for XR sorted input bam files [1024]\n"\
 						"  -h                   Print this help message.\n");
 }
@@ -1037,17 +1037,8 @@ static int unicorn_alnfilt(int argc, char **argv)
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
-  if (opts.acc2tax && opts.names && opts.nodes) {
-    fprintf(stderr, "[unicorn::%s] Loading taxonomy data\n", __func__);
-    //utax = unicorn_loadtaxonomy(opts.acc2tax,
-    //                            opts.names,
-    //                            opts.nodes,
-    //                            opts.rank,
-    //                            &ret);
-    //if (ret) goto exit;
-  }
   fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
-                  "\tmode           == %s\n"\
+                  "\tmode          == %s\n"\
                   "\tminscore      == %f\n"\
                   "\tmaxscore      == %f\n",
                   __func__, ALNFILT_MODES[opts.alnfiltmode], opts.minscore, opts.maxscore);

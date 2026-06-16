@@ -80,13 +80,21 @@ static uint8_t _keep_tagged_alignment(const utax_t *utax,
   return utax_hastaxon(utax, keeptaxa, taxid);
 }
 
-static inline uint32_t _alignment_taxid(const bam1_t *b)
+static inline uint32_t _alignment_taxid(const bam1_t *b, const unicorn_t *u, const utax_t *utax)
 {
   uint8_t *tag = bam_aux_get(b, "XT");
   uint32_t taxid = tag ? (uint32_t)bam_aux2i(tag) : 0;
   if (taxid) return taxid;
   tag = bam_aux_get(b, "XR");
-  return tag ? (uint32_t)bam_aux2i(tag) : 0;
+  taxid = tag ? (uint32_t)bam_aux2i(tag) : 0;
+  if (taxid) return taxid;
+  if (utax->accmap) {
+		int32_t tid   = b->core.tid;
+	  int absent;
+    taxid = utax_gettaxid(utax, u->hdr->target_name[tid], &absent);
+    return taxid ? taxid : 0;
+	}
+	return 0;
 }
 
 static inline uint32_t _utax_parent(const utax_t *utax, uint32_t taxid)
@@ -342,7 +350,7 @@ static void _statfor(void *data, long i, int tid)
   for (uint32_t j = 0; j < q->n; j++) {
     bam1_t *b = q->a[j];
     const char *qname = bam_get_qname(b);
-    uint32_t taxid = _alignment_taxid(b);
+    uint32_t taxid = _alignment_taxid(b, s->u, utax);
     if (!group_q) {
       group_q = qname;
       cur_lca = taxid;

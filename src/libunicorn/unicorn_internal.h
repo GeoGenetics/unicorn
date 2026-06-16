@@ -557,7 +557,7 @@ typedef struct utax_t {
 	uint32_t nmissing;     // Number of references with missing taxids, for reporting purposes
 } utax_t;
 
-uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);
+uint32_t utax_gettaxid(const utax_t *utax, const char *acc, int *absent);
 
 const char *utax_getname(const utax_t *utax, uint32_t taxid);
 

@@ -447,7 +447,7 @@ uint64_t unicorn_tax_getnumaccs(const utax_t *utax)
 	return utax ? utax->numaccs : 0;
 }
 
-uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent)
+uint32_t utax_gettaxid(const utax_t *utax, const char *acc, int *absent)
 {
 	*absent = 1;
 	uint32_t ret = -1;
