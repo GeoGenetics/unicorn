@@ -256,13 +256,14 @@ static void lca_usage(FILE *fp)
 {
 	fprintf(fp, "./unicorn lca [options] -b <in.bam>|<in.sam>\n");
 	fprintf(fp, "Options:\n"\
-						"  -b <str>                     Input bam|sam\n"\
-						"  --outprefix <str>             Prefix for output files [stdout]\n"\
-						"  --names <str>                 Taxonomy names file.\n"\
-						"  --nodes <str>                 Taxonomy nodes file\n"\
-						"  --acc2tax <str>               Accession to taxid mapping file or .khash file.\n"\
-						"  --qsize <int>                 Size of queue for XR sorted input bam files [1024]\n"\
-						"  -h                            Print this help message.\n");
+						"  -b <str>             Input bam|sam\n"\
+						"  -t, --threads <int>  Number of threads [4]\n"\
+						"  --outprefix <str>    Prefix for output files [stdout]\n"\
+						"  --names <str>        Taxonomy names file.\n"\
+						"  --nodes <str>        Taxonomy nodes file\n"\
+						"  --acc2tax <str>      Accession to taxid mapping file or .khash file.\n"\
+						"  --qsize <int>        Size of queue for XR sorted input bam files [1024]\n"\
+						"  -h                   Print this help message.\n");
 }
 
 static void alntag_usage(FILE *fp)
@@ -508,8 +509,8 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
   fprintf(fp, "\t-t %d\n", opts->threads);
 	fprintf(fp, "\t--qsize     %d\n", opts->qsize);
 	if ( _f == TAG ) goto taxonomy;
-
-  fprintf(fp, "\t-k %d\n", opts->ksize);
+  if ( _f == LCA ) goto taxonomy;
+	fprintf(fp, "\t-k %d\n", opts->ksize);
 	fprintf(fp, "\t--outstat  %s\n", opts->outstat ? opts->outstat : "/dev/stdout");
 	fprintf(fp, "\t--minrefl %lu\n", opts->minrefl);
   fprintf(fp, "\t--minreads  %d\n", opts->minnreads);
@@ -1149,8 +1150,16 @@ static int unicorn_lca(int argc, char **argv)
   ret = 0;
   exit:
     if (utax) unicorn_closetaxonomy(utax);
-    if (ret)
-      fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
+    if (ret) {
+		  if (-1 == ret) {
+				lca_usage(stderr);
+			}
+			else if (1 == ret) {
+				lca_usage(stderr);
+				ret = 0;
+			 }
+		  else fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
+		}
     if (u) unicorn_destroy(u);
     unicorn_freeopts(opts);
     return ret;
