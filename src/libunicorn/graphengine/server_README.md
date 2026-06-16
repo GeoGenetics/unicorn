@@ -19,6 +19,37 @@ optionally `names.dmp`, and can build the induced tree server-side.
 - `GET /taxonomy/status`
 - `GET /tree-model`
 
+## Phase 1 tree semantics
+
+For the new remote tree mode, the backend is the authority for what the client
+is allowed to render.
+
+"API contract" here simply means:
+
+- what parameters the client sends to the backend
+- what JSON fields the backend returns
+- what those fields mean
+
+For the visible tree, the current agreement is:
+
+- the root node is always returned
+- a node is returned if it survives the active filters and lies on the visible
+  expanded frontier
+- `child_count` means the number of children that survive the current filters,
+  not the raw taxonomy child count
+- collapsed nodes still keep their subtree totals
+- in remote mode, the returned tree is the source of truth for expanded state
+
+Filter and selection behavior:
+
+- changing selected dataset files resets expanded state
+- changing taxonomy files resets expanded state
+- changing `min_reads` keeps the current expansion request, but the backend may
+  prune children that no longer pass the filter
+
+This is important because it defines what the client is allowed to cache later.
+We do not want to cache behavior that is still ambiguous.
+
 ## Current server-side model
 
 The backend currently owns:
@@ -56,6 +87,61 @@ browser. The new backend tree model is in place for the next client transition.
 - `GET /tree-model?files=a&files=b`
   Returns the induced taxonomy tree built on the backend for the requested
   datasets.
+
+- `GET /root-view?files=a&files=b`
+  Returns the currently visible tree slice for the requested dataset selection
+  and filters. By default this is the root and its direct visible children.
+
+- `GET /expand-node?taxid=123&files=a&files=b`
+  Returns the updated visible tree slice after expanding the requested node
+  under the current selection and filters.
+
+- `GET /node-tooltip?taxid=123&files=a&files=b`
+  Returns the tooltip payload for one node under the same dataset selection,
+  taxonomy files, and `min_reads` filter as the tree view. This includes node
+  identity, direct and subtree counts, filtered child count, lineage, and
+  per-dataset direct/subtree breakdown.
+
+- `GET /table-view?scope=root&files=a&files=b`
+  Returns table rows for the current root or for one requested subtree under the
+  same dataset selection, taxonomy files, and `min_reads` filter as the tree
+  view. Rows can currently be sorted by `direct` or `subtree`.
+
+## What these new endpoints are for
+
+- `/node-tooltip`
+  This answers: "for this one node, what should the hover panel show under the
+  current tree context?"
+
+- `/table-view`
+  This answers: "for this root or subtree, what ranked rows should the count
+  table show under the current tree context?"
+
+They are meant to use the same selection and filter context as the visible tree
+API, so the client does not have to recompute those derived views locally.
+
+## Error behavior
+
+The newer endpoints now return explicit error payloads with a short `code` and
+human-readable `message`.
+
+Examples:
+
+- `node_not_in_active_tree`
+  The requested taxid does not exist in the current induced tree.
+
+- `node_filtered_out`
+  The requested taxid exists in the current induced tree, but does not pass the
+  current `min_reads` threshold.
+
+- `invalid_scope`
+  The `/table-view` scope is not one of the supported values.
+
+- `invalid_sort`
+  The `/table-view` sort mode is not one of the supported values.
+
+- `missing_taxid`
+  `/table-view` was asked for `scope=node` without providing a `taxid`.
 
 ## Files
 

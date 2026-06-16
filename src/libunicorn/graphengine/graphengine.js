@@ -11,6 +11,10 @@ const state = {
     connected: false,
     datasets: [],
     selectedDatasets: new Set(),
+    expandedTaxids: new Set(),
+    serverTreeActive: false,
+    totalReads: 0,
+    directTaxa: 0,
   },
   tree: null,
   flat: [],
@@ -111,7 +115,7 @@ els.centerBtn.addEventListener("click", () => {
 els.toggleTableBtn.addEventListener("click", toggleTablePanel);
 els.countMode.addEventListener("change", redraw);
 els.scaleMode.addEventListener("change", redraw);
-els.minReads.addEventListener("input", redraw);
+els.minReads.addEventListener("input", handleMinReadsChange);
 els.searchBox.addEventListener("input", redraw);
 els.sidebarToggle.addEventListener("click", toggleSidebar);
 els.uncollapseBtn.addEventListener("click", uncollapseSelected);
@@ -324,6 +328,7 @@ async function loadAndRender() {
     state.counts = aggregateSeriesCounts(state.series);
     state.names = mergeNames(mergeSourceNames(parsedSources), parseNames(namesText));
     state.tree = buildTree(state.nodes, state.series, state.names);
+    state.remote.serverTreeActive = false;
     setDefaultCollapsedState(state.tree);
     state.centerOnNextRender = true;
     renderSourceLegend();
@@ -384,34 +389,16 @@ async function loadAndRenderRemote() {
     return;
   }
 
-  const url = new URL("http://localhost:8000/tree-model");
-  for (const file of files) url.searchParams.append("files", file);
-  if (els.nodesFile.files[0]) url.searchParams.set("nodes_file", els.nodesFile.files[0].name);
-  if (els.namesFile.files[0]) url.searchParams.set("names_file", els.namesFile.files[0].name);
-
-  const response = await fetch(url.toString(), { method: "GET" });
-  if (!response.ok) {
-    throw new Error(`Remote tree-model request failed with HTTP ${response.status}`);
-  }
-
-  const payload = await response.json();
-  const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
-  if (!datasets.length || !payload.tree) {
+  state.remote.expandedTaxids.clear();
+  const payload = await fetchRemoteVisibleTree();
+  if (!payload.tree) {
     setStatus("The remote backend returned no tree to render.");
     return;
   }
 
-  state.nodes = new Map();
-  state.names = new Map();
-  state.series = buildSeriesFromRemoteDatasets(datasets, payload.tree);
-  state.tree = buildRemoteTree(payload.tree);
-  state.counts = aggregateSeriesCounts(state.series);
-  state.missingTaxids = new Set(Array.isArray(payload.missing_taxids) ? payload.missing_taxids : []);
-  setDefaultCollapsedState(state.tree);
+  applyRemoteVisiblePayload(payload);
   state.centerOnNextRender = true;
-  renderSourceLegend();
-
-  setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} remote dataset${state.series.length === 1 ? "" : "s"} and ${state.counts.size.toLocaleString()} direct taxa.`);
+  setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} remote dataset${state.series.length === 1 ? "" : "s"} and ${state.remote.directTaxa.toLocaleString()} direct taxa.`);
   redraw();
 }
 
@@ -514,9 +501,71 @@ function buildRemoteTree(node) {
     totalBySource: Array.isArray(node.total_by_source)
       ? node.total_by_source.map((value) => Number(value || 0))
       : [],
+    childCount: Number(node.child_count || 0),
+    hasChildren: Boolean(node.has_children),
+    expanded: Boolean(node.expanded),
     children: Array.isArray(node.children) ? node.children.map(buildRemoteTree) : [],
     depth: Number(node.depth || 0),
   };
+}
+
+async function handleMinReadsChange() {
+  if (!isRemoteServerTreeMode()) {
+    redraw();
+    return;
+  }
+  try {
+    const payload = await fetchRemoteVisibleTree();
+    applyRemoteVisiblePayload(payload);
+    redraw();
+  } catch (error) {
+    setStatus(`Could not refresh remote tree after changing the read filter: ${error.message || error}`);
+  }
+}
+
+function isRemoteServerTreeMode() {
+  return state.remote.connected && state.remote.serverTreeActive;
+}
+
+function buildRemoteTreeRequestUrl(path, options = {}) {
+  const url = new URL(`http://localhost:8000/${path}`);
+  const files = getSelectedRemoteDatasets();
+  for (const file of files) url.searchParams.append("files", file);
+  if (els.nodesFile.files[0]) url.searchParams.set("nodes_file", els.nodesFile.files[0].name);
+  if (els.namesFile.files[0]) url.searchParams.set("names_file", els.namesFile.files[0].name);
+  url.searchParams.set("min_reads", String(Number(els.minReads.value || 0)));
+  const expandedTaxids = options.expandedTaxids || Array.from(state.remote.expandedTaxids);
+  for (const taxid of expandedTaxids) {
+    url.searchParams.append("expanded", String(taxid));
+  }
+  if (options.taxid != null) {
+    url.searchParams.set("taxid", String(options.taxid));
+  }
+  return url;
+}
+
+async function fetchRemoteVisibleTree(options = {}) {
+  const endpoint = options.taxid != null ? "expand-node" : "root-view";
+  const response = await fetch(buildRemoteTreeRequestUrl(endpoint, options).toString(), { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`Remote ${endpoint} request failed with HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+function applyRemoteVisiblePayload(payload) {
+  const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
+  state.nodes = new Map();
+  state.names = new Map();
+  state.series = buildSeriesFromRemoteDatasets(datasets, payload.tree);
+  state.tree = buildRemoteTree(payload.tree);
+  state.counts = aggregateSeriesCounts(state.series);
+  state.missingTaxids = new Set(Array.isArray(payload.missing_taxids) ? payload.missing_taxids : []);
+  state.remote.expandedTaxids = new Set(Array.isArray(payload.expanded_taxids) ? payload.expanded_taxids.map((value) => Number(value)) : []);
+  state.remote.serverTreeActive = true;
+  state.remote.totalReads = Number(payload.total_reads || 0);
+  state.remote.directTaxa = Number(payload.direct_taxa || 0);
+  renderSourceLegend();
 }
 
 function setDefaultCollapsedState(root) {
@@ -910,15 +959,19 @@ function sortTree(node) {
 
 function redraw() {
   if (!state.tree) return;
-  applySeriesVisibility(state.tree);
-  state.counts = aggregateSeriesCounts(getVisibleSeries());
-  const minReads = Number(els.minReads.value || 0);
+  if (!isRemoteServerTreeMode()) {
+    applySeriesVisibility(state.tree);
+    state.counts = aggregateSeriesCounts(getVisibleSeries());
+  } else {
+    state.counts = collectDirectCountsFromVisibleTree(state.tree);
+  }
+  const minReads = isRemoteServerTreeMode() ? 0 : Number(els.minReads.value || 0);
   const search = els.searchBox.value.trim().toLowerCase();
   const visible = [];
   const links = [];
   const leaves = { count: 0 };
-  collectVisible(state.tree, null, visible, links, leaves, minReads);
-  layoutVisible(state.tree, new Set(visible));
+  collectVisible(state.tree, null, visible, links, leaves, minReads, !isRemoteServerTreeMode());
+  layoutVisible(state.tree, new Set(visible), !isRemoteServerTreeMode());
   state.flat = visible;
   renderSvg(visible, links, search);
   renderSummary(visible);
@@ -927,7 +980,16 @@ function redraw() {
   setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from ${state.counts.size.toLocaleString()} LCA taxa across ${activeSeries.toLocaleString()} active sample${activeSeries === 1 ? "" : "s"}.`);
 }
 
-function collectVisible(node, parent, nodes, links, leaves, minReads) {
+function collectDirectCountsFromVisibleTree(root) {
+  const counts = new Map();
+  if (!root) return counts;
+  walkTree(root, (node) => {
+    if (node.direct > 0) counts.set(node.taxid, node.direct);
+  });
+  return counts;
+}
+
+function collectVisible(node, parent, nodes, links, leaves, minReads, useCollapsedState) {
   if (node !== state.tree && node.total <= 0) return false;
   // The minimum-read filter is defined on subtree totals, so any node below
   // the threshold is hidden and its nearest visible ancestor becomes the
@@ -935,11 +997,11 @@ function collectVisible(node, parent, nodes, links, leaves, minReads) {
   if (node !== state.tree && node.total < minReads) return false;
   nodes.push(node);
   if (parent) links.push([parent, node]);
-  const collapsed = state.collapsed.has(node.taxid);
+  const collapsed = useCollapsedState && state.collapsed.has(node.taxid);
   let visibleChildren = 0;
   if (!collapsed) {
     for (const child of node.children) {
-      if (collectVisible(child, node, nodes, links, leaves, minReads)) visibleChildren++;
+      if (collectVisible(child, node, nodes, links, leaves, minReads, useCollapsedState)) visibleChildren++;
     }
   }
   if (visibleChildren === 0) {
@@ -948,14 +1010,14 @@ function collectVisible(node, parent, nodes, links, leaves, minReads) {
   return true;
 }
 
-function layoutVisible(root, visibleSet) {
+function layoutVisible(root, visibleSet, useCollapsedState) {
   const rowGap = 34;
   const levelGap = 230;
   const top = 42;
   const left = 42;
   const setY = (node) => {
     const children = node.children.filter((child) => visibleSet.has(child));
-    if (state.collapsed.has(node.taxid) || children.length === 0) {
+    if ((useCollapsedState && state.collapsed.has(node.taxid)) || children.length === 0) {
       node.x = left + node.depth * levelGap;
       node.y = top + (node._leaf || 0) * rowGap;
       return node.y;
@@ -1140,8 +1202,32 @@ function toggleFocus(node) {
   centerNode(node);
 }
 
-function toggleCollapse(node) {
-  if (!node.children.length) return;
+async function toggleCollapse(node) {
+  if (!nodeHasChildren(node)) return;
+  if (isRemoteServerTreeMode()) {
+    try {
+      if (node.expanded) {
+        state.remote.expandedTaxids.delete(node.taxid);
+        const payload = await fetchRemoteVisibleTree({
+          expandedTaxids: Array.from(state.remote.expandedTaxids),
+        });
+        applyRemoteVisiblePayload(payload);
+      } else {
+        const nextExpanded = new Set(state.remote.expandedTaxids);
+        nextExpanded.add(node.taxid);
+        const payload = await fetchRemoteVisibleTree({
+          taxid: node.taxid,
+          expandedTaxids: Array.from(state.remote.expandedTaxids),
+        });
+        applyRemoteVisiblePayload(payload);
+        state.remote.expandedTaxids = nextExpanded;
+      }
+      redraw();
+    } catch (error) {
+      setStatus(`Could not update the remote tree view: ${error.message || error}`);
+    }
+    return;
+  }
   if (state.collapsed.has(node.taxid)) {
     state.collapsed.delete(node.taxid);
     collapseChildren(node);
@@ -1232,7 +1318,7 @@ function uncollapseSelectedToTips() {
 
 function collapseSubtreeBelow(node) {
   for (const child of node.children) {
-    if (child.children.length) state.collapsed.add(child.taxid);
+    if (nodeHasChildren(child)) state.collapsed.add(child.taxid);
     collapseSubtreeBelow(child);
   }
 }
@@ -1266,8 +1352,14 @@ function walkTree(node, visit) {
 
 function collapseChildren(node) {
   for (const child of node.children) {
-    if (child.children.length) state.collapsed.add(child.taxid);
+    if (nodeHasChildren(child)) state.collapsed.add(child.taxid);
   }
+}
+
+function nodeHasChildren(node) {
+  if (typeof node.hasChildren === "boolean") return node.hasChildren;
+  if (typeof node.childCount === "number") return node.childCount > 0;
+  return Array.isArray(node.children) && node.children.length > 0;
 }
 
 function radiusFor(value, maxValue) {
@@ -1278,7 +1370,7 @@ function radiusFor(value, maxValue) {
 
 function fillFor(node) {
   if (node.taxid === 0) return "#6f7a80";
-  if (node.direct > 0 && node.children.length > 0) return "#e2a44e";
+  if (node.direct > 0 && nodeHasChildren(node)) return "#e2a44e";
   if (node.direct > 0) return "#c85f43";
   if (node.depth === 0) return "#255f75";
   return "#9cad9f";
@@ -1313,6 +1405,7 @@ function updateTooltipPosition(event) {
 
 function showTooltip(event, node) {
   const mode = els.countMode.value === "direct" ? "direct reads" : "subtree reads";
+  const childCount = typeof node.childCount === "number" ? node.childCount : node.children.length;
   const breakdown = getNodeSeriesValues(node)
     .map((value, index) => ({ value, source: state.series[index] }))
     .filter((entry) => entry.value > 0)
@@ -1332,7 +1425,7 @@ function showTooltip(event, node) {
     rank: ${escapeHtml(node.rank || "NA")}<br>
     direct reads: ${node.direct.toLocaleString()}<br>
     subtree reads: ${node.total.toLocaleString()}<br>
-    children: ${node.children.length.toLocaleString()}<br>
+    children: ${childCount.toLocaleString()}<br>
     ${breakdown ? `<div class="tooltip-breakdown"><em>${mode}</em>${breakdown}</div>` : ""}
   `;
 }
@@ -1348,8 +1441,12 @@ function hideTooltip() {
 }
 
 function renderSummary(visible) {
-  const totalReads = state.tree ? state.tree.total : 0;
-  const directTaxa = Array.from(state.counts.values()).filter((v) => v > 0).length;
+  const totalReads = isRemoteServerTreeMode()
+    ? state.remote.totalReads
+    : (state.tree ? state.tree.total : 0);
+  const directTaxa = isRemoteServerTreeMode()
+    ? state.remote.directTaxa
+    : Array.from(state.counts.values()).filter((v) => v > 0).length;
   els.readCount.textContent = totalReads.toLocaleString();
   els.taxonCount.textContent = directTaxa.toLocaleString();
   els.visibleCount.textContent = visible.length.toLocaleString();

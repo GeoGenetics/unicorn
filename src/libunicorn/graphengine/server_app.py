@@ -185,6 +185,20 @@ class TreeNodeModel:
             "children": [child.to_payload() for child in self.children],
         }
 
+    def has_taxid(self, taxid: int) -> bool:
+        if self.taxid == taxid:
+            return True
+        return any(child.has_taxid(taxid) for child in self.children)
+
+    def find_taxid(self, taxid: int) -> Optional["TreeNodeModel"]:
+        if self.taxid == taxid:
+            return self
+        for child in self.children:
+            found = child.find_taxid(taxid)
+            if found is not None:
+                return found
+        return None
+
 
 @dataclass
 class SelectionModel:
@@ -582,6 +596,52 @@ class GraphEngineStore:
                 "cached_selections": [list(key) for key in sorted(self._selection_cache.keys())],
             }
 
+    def build_visible_tree_payload(
+        self,
+        tree: TreeModel,
+        expanded_taxids: set[int],
+        min_reads: int,
+    ) -> Tuple[Dict[str, Any], List[int]]:
+        threshold = max(0, min_reads)
+        active_expanded_taxids: set[int] = set()
+
+        def build_node_payload(node: TreeNodeModel, force_expanded: bool = False) -> Optional[Dict[str, Any]]:
+            if node is not tree.root and node.total < threshold:
+                return None
+            eligible_children = [
+                child for child in node.children
+                if child.total >= threshold
+            ]
+            expanded = force_expanded or node.taxid in expanded_taxids
+            if not force_expanded and expanded and eligible_children:
+                active_expanded_taxids.add(node.taxid)
+            visible_children = []
+            if expanded:
+                for child in eligible_children:
+                    payload = build_node_payload(child, force_expanded=False)
+                    if payload is not None:
+                        visible_children.append(payload)
+            return {
+                "taxid": node.taxid,
+                "parent": node.parent,
+                "rank": node.rank,
+                "name": node.name,
+                "direct": node.direct,
+                "direct_by_source": node.direct_by_source,
+                "total": node.total,
+                "total_by_source": node.total_by_source,
+                "depth": node.depth,
+                "child_count": len(eligible_children),
+                "has_children": bool(eligible_children),
+                "expanded": expanded,
+                "children": visible_children,
+            }
+
+        payload = build_node_payload(tree.root, force_expanded=True)
+        if payload is None:
+            raise HTTPException(status_code=500, detail="Could not build visible tree payload.")
+        return payload, sorted(active_expanded_taxids)
+
 
 STORE = GraphEngineStore()
 
@@ -727,6 +787,329 @@ def tree_model(
         "tree": tree.root.to_payload(),
         "missing_taxids": tree.missing_taxids,
         "cache": STORE.cache_status(),
+    }
+
+
+def _resolve_selection_and_tree(
+    files: Optional[List[str]],
+    nodes_file: Optional[str],
+    names_file: Optional[str],
+) -> Tuple[SelectionModel, TaxonomyModel, TreeModel]:
+    available = STORE.list_files()
+    requested = _normalize_requested_files(files)
+    selected_names = requested if requested else sorted(path.name for path in available)
+    if not selected_names:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "No datasets selected for tree rendering."},
+        )
+    selection = STORE.build_selection(selected_names)
+    taxonomy = STORE.get_or_load_taxonomy(nodes_name=nodes_file, names_name=names_file)
+    tree = STORE.build_tree_model(selection, taxonomy)
+    return selection, taxonomy, tree
+
+
+def _response_context(
+    selection: SelectionModel,
+    taxonomy: TaxonomyModel,
+    min_reads: int,
+    expanded_taxids: List[int],
+) -> Dict[str, Any]:
+    return {
+        "dataset_names": list(selection.dataset_names),
+        "nodes_file": taxonomy.nodes_fileinfo.name,
+        "names_file": taxonomy.names_fileinfo.name if taxonomy.names_fileinfo else None,
+        "min_reads": min_reads,
+        "expanded_taxids": expanded_taxids,
+    }
+
+
+def _error_detail(
+    message: str,
+    *,
+    code: str,
+    request_context: Optional[Dict[str, Any]] = None,
+    **extra: Any,
+) -> Dict[str, Any]:
+    detail: Dict[str, Any] = {
+        "message": message,
+        "code": code,
+    }
+    if request_context is not None:
+        detail["request_context"] = request_context
+    detail.update(extra)
+    return detail
+
+
+def _node_passes_filter(node: TreeNodeModel, tree: TreeModel, min_reads: int) -> bool:
+    return node is tree.root or node.total >= max(0, min_reads)
+
+
+def _filtered_child_count(node: TreeNodeModel, min_reads: int) -> int:
+    threshold = max(0, min_reads)
+    return sum(1 for child in node.children if child.total >= threshold)
+
+
+def _build_lineage(node: TreeNodeModel, tree: TreeModel) -> List[Dict[str, Any]]:
+    lineage: List[Dict[str, Any]] = []
+    current: Optional[TreeNodeModel] = node
+    while current is not None:
+        lineage.append(
+            {
+                "taxid": current.taxid,
+                "name": current.name,
+                "rank": current.rank,
+            }
+        )
+        if current is tree.root or current.parent is None:
+            break
+        current = tree.root.find_taxid(current.parent)
+    lineage.reverse()
+    return lineage
+
+
+def _dataset_breakdown(selection: SelectionModel, node: TreeNodeModel) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for index, dataset in enumerate(selection.datasets):
+        rows.append(
+            {
+                "dataset": dataset.fileinfo.name,
+                "direct": node.direct_by_source[index] if index < len(node.direct_by_source) else 0,
+                "subtree": node.total_by_source[index] if index < len(node.total_by_source) else 0,
+            }
+        )
+    return rows
+
+
+def _resolve_node_in_context(
+    tree: TreeModel,
+    taxid: int,
+    min_reads: int,
+    request_context: Dict[str, Any],
+) -> TreeNodeModel:
+    node = tree.root.find_taxid(taxid)
+    if node is None:
+        raise HTTPException(
+            status_code=404,
+            detail=_error_detail(
+                "Requested node is not present in the active tree.",
+                code="node_not_in_active_tree",
+                request_context=request_context,
+                taxid=taxid,
+            ),
+        )
+    if not _node_passes_filter(node, tree, min_reads):
+        raise HTTPException(
+            status_code=409,
+            detail=_error_detail(
+                "Requested node exists in the active tree but is filtered out by the current min_reads threshold.",
+                code="node_filtered_out",
+                request_context=request_context,
+                taxid=taxid,
+                node_subtree_reads=node.total,
+                min_reads=min_reads,
+            ),
+        )
+    return node
+
+
+def _table_rows_for_subtree(
+    node: TreeNodeModel,
+    min_reads: int,
+    sort_by: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    threshold = max(0, min_reads)
+    rows: List[Dict[str, Any]] = []
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if current is not node and current.total < threshold:
+            continue
+        if current.direct > 0:
+            rows.append(
+                {
+                    "taxid": current.taxid,
+                    "name": current.name,
+                    "rank": current.rank,
+                    "depth": current.depth,
+                    "direct": current.direct,
+                    "subtree": current.total,
+                    "child_count": _filtered_child_count(current, min_reads),
+                }
+            )
+        stack.extend(reversed(current.children))
+
+    sort_key = "direct" if sort_by == "direct" else "subtree"
+    rows.sort(key=lambda row: (-int(row[sort_key]), -int(row["direct"]), str(row["name"])))
+    return rows[:limit]
+
+
+@app.get("/root-view")
+def root_view(
+    files: Optional[List[str]] = Query(default=None),
+    nodes_file: Optional[str] = Query(default=None),
+    names_file: Optional[str] = Query(default=None),
+    min_reads: int = Query(default=0, ge=0),
+    expanded: Optional[List[int]] = Query(default=None),
+) -> Dict[str, Any]:
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    requested_expanded_taxids = set(expanded or [])
+    visible_tree, active_expanded_taxids = STORE.build_visible_tree_payload(
+        tree,
+        expanded_taxids=requested_expanded_taxids,
+        min_reads=min_reads,
+    )
+    return {
+        "ok": True,
+        "datasets": [dataset.to_summary_payload() for dataset in selection.datasets],
+        "taxonomy": taxonomy.to_status_payload(),
+        "tree": visible_tree,
+        "missing_taxids": tree.missing_taxids,
+        "expanded_taxids": active_expanded_taxids,
+        "min_reads": min_reads,
+        "total_reads": selection.total_reads,
+        "direct_taxa": len(selection.direct_counts),
+        "request_context": _response_context(selection, taxonomy, min_reads, active_expanded_taxids),
+        "cache": STORE.cache_status(),
+    }
+
+
+@app.get("/expand-node")
+def expand_node(
+    taxid: int = Query(...),
+    files: Optional[List[str]] = Query(default=None),
+    nodes_file: Optional[str] = Query(default=None),
+    names_file: Optional[str] = Query(default=None),
+    min_reads: int = Query(default=0, ge=0),
+    expanded: Optional[List[int]] = Query(default=None),
+) -> Dict[str, Any]:
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    request_context = _response_context(selection, taxonomy, min_reads, sorted(set(expanded or [])))
+    if not tree.root.has_taxid(taxid):
+        raise HTTPException(
+            status_code=404,
+            detail=_error_detail(
+                "Requested node is not present in the active tree.",
+                code="node_not_in_active_tree",
+                request_context=request_context,
+                taxid=taxid,
+            ),
+        )
+    requested_expanded_taxids = set(expanded or [])
+    requested_expanded_taxids.add(taxid)
+    visible_tree, active_expanded_taxids = STORE.build_visible_tree_payload(
+        tree,
+        expanded_taxids=requested_expanded_taxids,
+        min_reads=min_reads,
+    )
+    return {
+        "ok": True,
+        "datasets": [dataset.to_summary_payload() for dataset in selection.datasets],
+        "taxonomy": taxonomy.to_status_payload(),
+        "tree": visible_tree,
+        "missing_taxids": tree.missing_taxids,
+        "expanded_taxids": active_expanded_taxids,
+        "min_reads": min_reads,
+        "total_reads": selection.total_reads,
+        "direct_taxa": len(selection.direct_counts),
+        "request_context": _response_context(selection, taxonomy, min_reads, active_expanded_taxids),
+        "cache": STORE.cache_status(),
+    }
+
+
+@app.get("/node-tooltip")
+def node_tooltip(
+    taxid: int = Query(...),
+    files: Optional[List[str]] = Query(default=None),
+    nodes_file: Optional[str] = Query(default=None),
+    names_file: Optional[str] = Query(default=None),
+    min_reads: int = Query(default=0, ge=0),
+) -> Dict[str, Any]:
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    request_context = _response_context(selection, taxonomy, min_reads, [])
+    node = _resolve_node_in_context(tree, taxid, min_reads, request_context)
+    return {
+        "ok": True,
+        "node": {
+            "taxid": node.taxid,
+            "name": node.name,
+            "rank": node.rank,
+            "parent": node.parent,
+            "depth": node.depth,
+            "direct": node.direct,
+            "subtree": node.total,
+            "child_count": _filtered_child_count(node, min_reads),
+            "lineage": _build_lineage(node, tree),
+            "datasets": _dataset_breakdown(selection, node),
+        },
+        "request_context": request_context,
+    }
+
+
+@app.get("/table-view")
+def table_view(
+    scope: str = Query(default="root"),
+    taxid: Optional[int] = Query(default=None),
+    files: Optional[List[str]] = Query(default=None),
+    nodes_file: Optional[str] = Query(default=None),
+    names_file: Optional[str] = Query(default=None),
+    min_reads: int = Query(default=0, ge=0),
+    sort: str = Query(default="direct"),
+    limit: int = Query(default=40, ge=1, le=1000),
+) -> Dict[str, Any]:
+    if scope not in {"root", "node"}:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "scope must be either 'root' or 'node'.",
+                code="invalid_scope",
+                scope=scope,
+            ),
+        )
+    if sort not in {"direct", "subtree"}:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "sort must be either 'direct' or 'subtree'.",
+                code="invalid_sort",
+                sort=sort,
+            ),
+        )
+
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    request_context = _response_context(selection, taxonomy, min_reads, [])
+    target = tree.root
+    if scope == "node":
+        if taxid is None:
+            raise HTTPException(
+                status_code=400,
+                detail=_error_detail(
+                    "taxid is required when scope='node'.",
+                    code="missing_taxid",
+                    request_context=request_context,
+                    scope=scope,
+                ),
+            )
+        target = _resolve_node_in_context(tree, taxid, min_reads, request_context)
+
+    rows = _table_rows_for_subtree(target, min_reads=min_reads, sort_by=sort, limit=limit)
+    return {
+        "ok": True,
+        "scope": scope,
+        "target": {
+            "taxid": target.taxid,
+            "name": target.name,
+            "rank": target.rank,
+            "direct": target.direct,
+            "subtree": target.total,
+            "child_count": _filtered_child_count(target, min_reads),
+        },
+        "sort": sort,
+        "limit": limit,
+        "row_count": len(rows),
+        "rows": rows,
+        "request_context": request_context,
     }
 
 
