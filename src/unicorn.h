@@ -287,7 +287,7 @@ unicorn's lca routines
 
 
 ****************************************************/
-int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nalns, uint64_t *nreads, char *outprefix);
+int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nalns, uint64_t *nreads, char *outprefix, uint8_t mmm);
 
 /****************************************************
 unicorn's alntag routines

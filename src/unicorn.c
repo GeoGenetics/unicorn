@@ -68,6 +68,7 @@ static ko_longopt_t unicorn_lopts[] = {
 		{ "keeptaxa",        ko_required_argument, 332 },
 		{ "outprefix",       ko_required_argument, 333 },
 		{ "adnascore",       ko_no_argument,       334 },
+		{ "mmm",             ko_required_argument, 335 },
 		{0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -122,7 +123,9 @@ typedef struct unicorn_opts {
   uint8_t strict_score_bounds; // Remove query if absolute score out of bounds at any alignment
   int32_t minalnas;     // Minimum alignment score
   int32_t maxdust;      // Maximum dust score
-  //statcmp
+  //lca
+	uint8_t mmm;         //mismatch matrix length
+	//statcmp
   char *stat1;         // First statistics file for comparison
   char *stat2;         // Second statistics file for comparison
   uint32_t col1;
@@ -263,6 +266,7 @@ static void lca_usage(FILE *fp)
 						"  --nodes <str>        Taxonomy nodes file\n"\
 						"  --acc2tax <str>      Accession to taxid mapping file.\n"\
 						"  --qsize <int>        Size of queue for XR sorted input bam files [1024]\n"\
+						"  --mmm <int>          Track per-taxid mismatch counts within <int> bases of each read end [15]\n"\
 						"  -h                   Print this help message.\n");
 }
 
@@ -482,6 +486,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 				break;
 			case 334: //adnascore
 				opts->adnascore = 1;
+				break;
+			case 335: //mmm
+				opts->mmm = strtoul(o.arg, NULL, 10);
 				break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
@@ -1084,7 +1091,8 @@ static int unicorn_lca(int argc, char **argv)
   opts.threads   = 4;
   opts.maxdust   = 100;
   opts.qsize = 1024;
-  unicorn_t *u = NULL;
+  opts.mmm = 15;
+	unicorn_t *u = NULL;
   char *_argv[64] = {0};
   clock_gettime(CLOCK_MONOTONIC, &pstart);
   if (argc <= 2) goto exit;
@@ -1123,7 +1131,7 @@ static int unicorn_lca(int argc, char **argv)
   fprintf(stderr, "[unicorn::%s] Computing LCA\n", __func__);
   clock_gettime(CLOCK_MONOTONIC, &start);
   uint64_t nalns, nreads;
-  ret = unicorn_lcacompute(u, NULL, utax, &nalns, &nreads, opts.outprefix);
+  ret = unicorn_lcacompute(u, NULL, utax, &nalns, &nreads, opts.outprefix, opts.mmm);
   if (ret) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);

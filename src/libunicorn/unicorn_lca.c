@@ -26,11 +26,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 #define _XOPEN_SOURCE 700
+#include <ctype.h>
 #include "unicorn_internal.h"
 
 typedef struct taxa {
   uint32_t taxid;
 	uint64_t count;
+	uint64_t *mmm;
 } taxa_t;
 
 KHASHL_MAP_INIT(static,
@@ -44,6 +46,7 @@ KHASHL_MAP_INIT(static,
 typedef struct step {
   bamq_t *queue;
 	uint8_t nqueue;
+  uint8_t mmm;
 	uint32_t nalns;
 	uint32_t nreads;
   unicorn_t *u;
@@ -57,6 +60,7 @@ typedef struct pipeline {
   utax_t *utax;
   uint32q_t *keeptaxa;
   FILE *ofp;
+  uint8_t mmm;
 	uint32_t qsize;
   void *forpool;
   char *last_q;
@@ -64,6 +68,100 @@ typedef struct pipeline {
 	uint64_t nreads;
 	uint32map_t *taxamap;
 } pipeline_t;
+
+#define UNICORN_LCA_MMM_BASES 4
+#define UNICORN_LCA_MMM_ROWS (UNICORN_LCA_MMM_BASES * UNICORN_LCA_MMM_BASES)
+
+static inline size_t _mmm_cells(uint8_t mmm)
+{
+  return mmm ? (size_t)UNICORN_LCA_MMM_ROWS * (size_t)mmm * 2u : 0u;
+}
+
+static inline int _mmm_base_index(char base)
+{
+  switch (toupper((unsigned char)base)) {
+    case 'A': return 0;
+    case 'C': return 1;
+    case 'G': return 2;
+    case 'T': return 3;
+    default: return -1;
+  }
+}
+
+static inline size_t _mmm_offset(uint8_t mmm, uint8_t side, uint8_t pos, uint8_t pair)
+{
+  return (((size_t)side * (size_t)mmm) + (size_t)pos) * (size_t)UNICORN_LCA_MMM_ROWS + (size_t)pair;
+}
+
+static uint64_t *_mmm_alloc(uint8_t mmm)
+{
+  size_t cells = _mmm_cells(mmm);
+  if (!cells) return NULL;
+  return (uint64_t *)calloc(cells, sizeof(uint64_t));
+}
+
+static char *_base64_encode_bytes(const uint8_t *src, size_t nsrc)
+{
+  static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  char *dst;
+  size_t ndst;
+  size_t i, j;
+  if (!src || !nsrc) {
+    dst = (char *)calloc(1, 1);
+    return dst;
+  }
+  ndst = ((nsrc + 2u) / 3u) * 4u;
+  dst = (char *)malloc(ndst + 1u);
+  if (!dst) return NULL;
+  for (i = 0, j = 0; i + 2u < nsrc; i += 3u) {
+    uint32_t v = ((uint32_t)src[i] << 16) | ((uint32_t)src[i + 1u] << 8) | (uint32_t)src[i + 2u];
+    dst[j++] = B64[(v >> 18) & 0x3f];
+    dst[j++] = B64[(v >> 12) & 0x3f];
+    dst[j++] = B64[(v >> 6) & 0x3f];
+    dst[j++] = B64[v & 0x3f];
+  }
+  if (i < nsrc) {
+    uint32_t v = (uint32_t)src[i] << 16;
+    dst[j++] = B64[(v >> 18) & 0x3f];
+    if (i + 1u < nsrc) {
+      v |= (uint32_t)src[i + 1u] << 8;
+      dst[j++] = B64[(v >> 12) & 0x3f];
+      dst[j++] = B64[(v >> 6) & 0x3f];
+      dst[j++] = '=';
+    } else {
+      dst[j++] = B64[(v >> 12) & 0x3f];
+      dst[j++] = '=';
+      dst[j++] = '=';
+    }
+  }
+  dst[j] = '\0';
+  return dst;
+}
+
+static void _taxamap_destroy_with_values(uint32map_t *taxamap)
+{
+  if (!taxamap) return;
+  khint_t k;
+  kh_foreach(taxamap, k) {
+    taxa_t t = kh_val(taxamap, k);
+    free(t.mmm);
+  }
+  uint32map_destroy(taxamap);
+}
+
+static khint_t _taxamap_touch(uint32map_t *taxamap, uint32_t taxid, uint8_t mmm)
+{
+  if (!taxamap || !taxid) return kh_end(taxamap);
+  int absent = 0;
+  khint_t k = uint32map_put(taxamap, taxid, &absent);
+  if (k == kh_end(taxamap)) return k;
+  if (absent) {
+    kh_val(taxamap, k).taxid = taxid;
+    kh_val(taxamap, k).count = 0;
+    kh_val(taxamap, k).mmm = _mmm_alloc(mmm);
+  }
+  return k;
+}
 
 static uint8_t _keep_tagged_alignment(const utax_t *utax,
                                       const uint32q_t *keeptaxa,
@@ -148,17 +246,180 @@ static uint32_t _utax_lca_pair(const utax_t *utax, uint32_t taxid1, uint32_t tax
   return a == b ? a : 0;
 }
 
-static void _taxamap_add(uint32map_t *taxamap, uint32_t taxid)
+static void _taxamap_add(uint32map_t *taxamap, uint32_t taxid, uint8_t mmm)
 {
-  if (!taxamap || !taxid) return;
-  int absent = 0;
-  khint_t k = uint32map_put(taxamap, taxid, &absent);
+  khint_t k = _taxamap_touch(taxamap, taxid, mmm);
   if (k == kh_end(taxamap)) return;
-  if (absent) {
-    kh_val(taxamap, k).taxid = taxid;
-    kh_val(taxamap, k).count = 1;
-  } else {
-    kh_val(taxamap, k).count++;
+  kh_val(taxamap, k).count++;
+}
+
+static void _taxamap_add_mismatch(uint32map_t *taxamap,
+                                  uint32_t taxid,
+                                  uint8_t mmm,
+                                  uint8_t side,
+                                  uint8_t pos,
+                                  char ref_base,
+                                  char query_base)
+{
+  int ref_idx, query_idx;
+  uint8_t pair;
+  khint_t k;
+  if (!taxamap || !taxid || !mmm) return;
+  if (side > 1 || pos >= mmm) return;
+  ref_idx = _mmm_base_index(ref_base);
+  query_idx = _mmm_base_index(query_base);
+  if (ref_idx < 0 || query_idx < 0) return;
+  pair = (uint8_t)(ref_idx * UNICORN_LCA_MMM_BASES + query_idx);
+  k = _taxamap_touch(taxamap, taxid, mmm);
+  if (k == kh_end(taxamap) || !kh_val(taxamap, k).mmm) return;
+  kh_val(taxamap, k).mmm[_mmm_offset(mmm, side, pos, pair)]++;
+}
+
+static void _taxamap_merge(uint32map_t *dst, const uint32map_t *src, uint8_t mmm)
+{
+  khint_t ks;
+  size_t cells = _mmm_cells(mmm);
+  if (!dst || !src) return;
+  kh_foreach(src, ks) {
+    const taxa_t src_taxa = kh_val(src, ks);
+    khint_t kd = _taxamap_touch(dst, src_taxa.taxid, mmm);
+    if (kd == kh_end(dst)) continue;
+    kh_val(dst, kd).count += src_taxa.count;
+    if (cells && src_taxa.mmm && kh_val(dst, kd).mmm) {
+      for (size_t i = 0; i < cells; i++) {
+        kh_val(dst, kd).mmm[i] += src_taxa.mmm[i];
+      }
+    }
+  }
+}
+
+static void _taxamap_add_alignment_mismatches(uint32map_t *taxamap,
+                                              uint32_t taxid,
+                                              uint8_t mmm,
+                                              const bam1_t *b)
+{
+  const uint32_t *cigar;
+  const uint8_t *seq;
+  const char *md;
+  int32_t *ref2q = NULL;
+  int32_t qpos = 0, ref_idx = 0, ref_cols = 0, qlen;
+  uint32_t ncigar;
+  if (!taxamap || !taxid || !mmm || !b) return;
+  {
+    uint8_t *md_aux = bam_aux_get((bam1_t *)b, "MD");
+    if (!md_aux) return;
+    md = bam_aux2Z(md_aux);
+    if (!md) return;
+  }
+  cigar = bam_get_cigar((bam1_t *)b);
+  seq = bam_get_seq((bam1_t *)b);
+  qlen = b->core.l_qseq;
+  ncigar = b->core.n_cigar;
+  if (!cigar || !seq || qlen <= 0 || !ncigar) return;
+  for (uint32_t i = 0; i < ncigar; i++) {
+    const uint32_t op = bam_cigar_op(cigar[i]);
+    const int32_t oplen = (int32_t)bam_cigar_oplen(cigar[i]);
+    switch (op) {
+      case BAM_CMATCH:
+      case BAM_CEQUAL:
+      case BAM_CDIFF:
+      case BAM_CDEL:
+      case BAM_CREF_SKIP:
+        ref_cols += oplen;
+        break;
+      default:
+        break;
+    }
+  }
+  if (ref_cols <= 0) return;
+  ref2q = (int32_t *)malloc((size_t)ref_cols * sizeof(int32_t));
+  if (!ref2q) return;
+  for (uint32_t i = 0; i < ncigar; i++) {
+    const uint32_t op = bam_cigar_op(cigar[i]);
+    const int32_t oplen = (int32_t)bam_cigar_oplen(cigar[i]);
+    switch (op) {
+      case BAM_CMATCH:
+      case BAM_CEQUAL:
+      case BAM_CDIFF:
+        for (int32_t k = 0; k < oplen; k++) ref2q[ref_idx++] = qpos++;
+        break;
+      case BAM_CINS:
+      case BAM_CSOFT_CLIP:
+        qpos += oplen;
+        break;
+      case BAM_CDEL:
+        for (int32_t k = 0; k < oplen; k++) ref2q[ref_idx++] = -1;
+        break;
+      case BAM_CREF_SKIP:
+        for (int32_t k = 0; k < oplen; k++) ref2q[ref_idx++] = -2;
+        break;
+      default:
+        break;
+    }
+  }
+  ref_idx = 0;
+  while (*md) {
+    if (isdigit((unsigned char)*md)) {
+      int32_t nmatch = 0;
+      while (isdigit((unsigned char)*md)) {
+        nmatch = (nmatch * 10) + (*md - '0');
+        md++;
+      }
+      ref_idx += nmatch;
+      continue;
+    }
+    if (*md == '^') {
+      md++;
+      while (*md && isalpha((unsigned char)*md)) {
+        ref_idx++;
+        md++;
+      }
+      continue;
+    }
+    if (isalpha((unsigned char)*md)) {
+      if (ref_idx >= ref_cols) break;
+      qpos = ref2q[ref_idx];
+      if (qpos >= 0 && qpos < qlen) {
+        const char ref_base = (char)toupper((unsigned char)*md);
+        const char query_base = (char)toupper((unsigned char)seq_nt16_str[bam_seqi(seq, qpos)]);
+        if (ref_base != 'N' && query_base != 'N') {
+          if (qpos < mmm) {
+            _taxamap_add_mismatch(taxamap, taxid, mmm, 0, (uint8_t)qpos, ref_base, query_base);
+          }
+          {
+            int32_t dist3 = qlen - qpos - 1;
+            if (dist3 >= 0 && dist3 < mmm) {
+              _taxamap_add_mismatch(taxamap, taxid, mmm, 1, (uint8_t)dist3, ref_base, query_base);
+            }
+          }
+        }
+      }
+      ref_idx++;
+      md++;
+      continue;
+    }
+    md++;
+  }
+  free(ref2q);
+}
+
+static void _write_mmm_output(FILE *fp, const uint32map_t *taxamap, const utax_t *utax, uint8_t mmm)
+{
+  khint_t k;
+  const size_t nbytes = _mmm_cells(mmm) * sizeof(uint64_t);
+  if (!fp || !taxamap || !utax || !mmm) return;
+  fprintf(fp, "#taxid\tcount\tname\tmmm_base64\n");
+  kh_foreach(taxamap, k) {
+    const taxa_t t = kh_val(taxamap, k);
+    const char *name = utax_getname(utax, t.taxid);
+    char *encoded = _base64_encode_bytes((const uint8_t *)t.mmm, nbytes);
+    fprintf(fp,
+            "%u\t%lu\t\"%s\"\t%s\n",
+            t.taxid,
+            t.count,
+            name ? name : "NA",
+            encoded ? encoded : "");
+    free(encoded);
   }
 }
 
@@ -288,7 +549,7 @@ static void _step_free(step_t *s)
   if (s->taxamaps) {
     for (uint8_t i = 0; i < s->nqueue; i++) {
       if (s->taxamaps[i]) {
-        uint32map_destroy(s->taxamaps[i]);
+        _taxamap_destroy_with_values(s->taxamaps[i]);
       }
     }
     free(s->taxamaps);
@@ -299,6 +560,7 @@ static void _step_free(step_t *s)
 static step_t *_qnameload(unicorn_t *u,
                           utax_t *utax,
                           uint32q_t *keeptaxa,
+                          uint8_t mmm,
                           uint32_t qsize,
                           char **last_q)
 {
@@ -333,6 +595,7 @@ static step_t *_qnameload(unicorn_t *u,
 	}
 	s->u     = u;
   s->utax  = utax;
+  s->mmm   = mmm;
 	return s;
 }
 
@@ -346,6 +609,7 @@ static void _statfor(void *data, long i, int tid)
   uint32map_t *taxamap = s->taxamaps[i];
 	if (!q || q->n == 0 || !lcas || !utax) return;
   const char *group_q = NULL;
+  uint32_t group_start = 0;
   uint32_t cur_lca = 0;
   for (uint32_t j = 0; j < q->n; j++) {
     bam1_t *b = q->a[j];
@@ -353,13 +617,19 @@ static void _statfor(void *data, long i, int tid)
     uint32_t taxid = _alignment_taxid(b, s->u, utax);
     if (!group_q) {
       group_q = qname;
+      group_start = j;
       cur_lca = taxid;
       continue;
     }
     if (strcmp(group_q, qname) != 0) {
       kv_push(uint32_t, *lcas, cur_lca);
-      _taxamap_add(taxamap, cur_lca);
+      _taxamap_add(taxamap, cur_lca, s->mmm);
+      for (uint32_t jj = group_start; jj < j; jj++) {
+        bam1_t *bb = q->a[jj];
+        _taxamap_add_alignment_mismatches(taxamap, cur_lca, s->mmm, bb);
+      }
       group_q = qname;
+      group_start = j;
       cur_lca = taxid;
       continue;
     }
@@ -367,7 +637,10 @@ static void _statfor(void *data, long i, int tid)
   }
   if (group_q) {
     kv_push(uint32_t, *lcas, cur_lca);
-    _taxamap_add(taxamap, cur_lca);
+    _taxamap_add(taxamap, cur_lca, s->mmm);
+    for (uint32_t jj = group_start; jj < q->n; jj++) {
+      _taxamap_add_alignment_mismatches(taxamap, cur_lca, s->mmm, q->a[jj]);
+    }
   }
 }
 
@@ -375,7 +648,7 @@ static void *_lca_pipeline(void *data, int step, void *in)
 {
 	pipeline_t *p = (pipeline_t *)data;
 	if (step == 0) {
-		step_t *s = _qnameload(p->u, p->utax, p->keeptaxa, p->qsize, &p->last_q);
+		step_t *s = _qnameload(p->u, p->utax, p->keeptaxa, p->mmm, p->qsize, &p->last_q);
     if (!s) return NULL;
 		p->nalns  += s->nalns;
 		p->nreads += s->nreads;
@@ -410,18 +683,7 @@ static void *_lca_pipeline(void *data, int step, void *in)
               }
             }
             if (taxamap && p->taxamap) {
-              khint_t kq;
-              kh_foreach(taxamap, kq) {
-                taxa_t t = kh_val(taxamap, kq);
-                int absent = 0;
-                khint_t kg = uint32map_put(p->taxamap, t.taxid, &absent);
-                if (kg == kh_end(p->taxamap)) continue;
-                if (absent) {
-                  kh_val(p->taxamap, kg) = t;
-                } else {
-                  kh_val(p->taxamap, kg).count += t.count;
-                }
-              }
+              _taxamap_merge(p->taxamap, taxamap, p->mmm);
             }
           }
         }
@@ -430,7 +692,7 @@ static void *_lca_pipeline(void *data, int step, void *in)
 	return 0;
 }
 
-int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nalns, uint64_t *nreads, char *outprefix)
+int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nalns, uint64_t *nreads, char *outprefix, uint8_t mmm)
 {
 	pipeline_t p = {0};
 	uint32q_t keepq;
@@ -443,7 +705,8 @@ int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nal
 	p.u = u;
 	p.utax = utax;
   p.keeptaxa = &keepq;
-	p.qsize = 1000;
+  p.mmm = mmm;
+	p.qsize = u->qsize ? u->qsize : 1000;
 	p.forpool = kt_forpool_init(u->nthreads);
 	p.ofp = lcafp;
 	p.taxamap = uint32map_init();
@@ -451,7 +714,7 @@ int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nal
 	kt_pipeline(3, _lca_pipeline, &p, 3);
 	*nalns = p.nalns;
 	*nreads = p.nreads;
-  if (p.taxamap && p.utax) {
+	if (p.taxamap && p.utax) {
     snprintf(BUFF,256, "%s.bdamage.txt", outprefix);
 		FILE *taxafp = fopen(BUFF, "w");
 		khint_t k;
@@ -465,10 +728,19 @@ int unicorn_lcacompute(unicorn_t *u, char *keeptaxa, utax_t *utax, uint64_t *nal
               name ? name : "NA");
     }
     fclose(taxafp);
+    if (p.mmm) {
+      memset(BUFF, 0, 256);
+      snprintf(BUFF,256, "%s.mmm.txt", outprefix);
+      FILE *mmmfp = fopen(BUFF, "w");
+      if (mmmfp) {
+        _write_mmm_output(mmmfp, p.taxamap, p.utax, p.mmm);
+        fclose(mmmfp);
+      }
+    }
 	}
 	fclose(lcafp);
 	kt_forpool_destroy(p.forpool);
-	uint32map_destroy(p.taxamap);
+	_taxamap_destroy_with_values(p.taxamap);
   free(p.last_q);
 	return 0;
 }
