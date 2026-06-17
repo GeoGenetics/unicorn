@@ -110,9 +110,8 @@ browser. The new backend tree model is in place for the next client transition.
 - `GET /subtree-report?taxid=123&files=a&files=b`
   Returns a richer subtree-focused report for one node under the same dataset
   selection, taxonomy files, and `min_reads` filter as the tree view. The
-  payload currently includes target-node summary, per-dataset totals, top
-  immediate children, top descendants, and a small child-by-dataset count
-  matrix.
+  payload currently includes a compact target summary, a per-dataset direct-read
+  summary, and a child-by-dataset direct count matrix.
 
 ## What these new endpoints are for
 

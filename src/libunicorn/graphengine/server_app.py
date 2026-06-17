@@ -1150,15 +1150,6 @@ def subtree_report(
     request_context = _response_context(selection, taxonomy, min_reads, [])
     node = _resolve_node_in_context(tree, taxid, min_reads, request_context)
 
-    top_descendants = _table_rows_for_subtree(
-        node,
-        min_reads=min_reads,
-        sort_by="subtree",
-        limit=descendant_limit,
-    )
-    # The first row returned for a subtree is often the selected node itself.
-    if top_descendants and int(top_descendants[0]["taxid"]) == node.taxid:
-        top_descendants = top_descendants[1:]
     top_children = _top_children_rows(node, min_reads=min_reads, limit=descendant_limit)
     matrix_rows = top_children[:matrix_limit]
     matrix = []
@@ -1171,8 +1162,14 @@ def subtree_report(
                 "taxid": child.taxid,
                 "name": child.name,
                 "rank": child.rank,
-                "subtree": child.total,
-                "datasets": _dataset_breakdown(selection, child),
+                "direct": child.direct,
+                "datasets": [
+                    {
+                        "dataset": dataset.fileinfo.name,
+                        "direct": child.direct_by_source[index] if index < len(child.direct_by_source) else 0,
+                    }
+                    for index, dataset in enumerate(selection.datasets)
+                ],
             }
         )
 
@@ -1186,13 +1183,17 @@ def subtree_report(
                 "depth": node.depth,
                 "parent": node.parent,
                 "direct": node.direct,
-                "subtree": node.total,
                 "child_count": _filtered_child_count(node, min_reads),
-                "lineage": _build_lineage(node, tree),
-                "datasets": _dataset_breakdown(selection, node),
             },
-            "top_descendants": top_descendants,
-            "top_children": top_children,
+            "per_dataset_summary": {
+                "rows": [
+                    {
+                        "dataset": dataset.fileinfo.name,
+                        "direct": node.direct_by_source[index] if index < len(node.direct_by_source) else 0,
+                    }
+                    for index, dataset in enumerate(selection.datasets)
+                ]
+            },
             "matrix": {
                 "rows": matrix,
                 "dataset_names": [dataset.fileinfo.name for dataset in selection.datasets],

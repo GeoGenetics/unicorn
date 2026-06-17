@@ -117,10 +117,26 @@
                   <option value="linear">Linear</option>
                 </select>
               </label>
-              <label>
-                <span>Minimum subtree reads</span>
-                <input id="minReads" type="number" min="0" step="1" value="0">
-              </label>
+              <div class="minreads-control">
+                <div class="minreads-head">
+                  <span>Minimum subtree reads</span>
+                  <strong id="minReadsValue">0</strong>
+                </div>
+                <input id="minReads" type="range" min="0" max="1000" step="1" value="0">
+                <div class="minreads-scale">
+                  <label>
+                    <span>Scale</span>
+                    <select id="minReadsScale">
+                      <option value="linear">Linear</option>
+                      <option value="log">Log</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Max</span>
+                    <input id="minReadsMax" type="number" min="1" step="1" value="1000">
+                  </label>
+                </div>
+              </div>
               <label>
                 <span>Search</span>
                 <input id="searchBox" type="search" placeholder="taxid or name">
@@ -161,9 +177,13 @@
       </section>
 
       <section id="tablePanel" class="table-panel hidden" aria-label="Top LCA placements" hidden>
-        <h2 id="tablePanelTitle">Top direct placements</h2>
+        <div class="table-panel-head">
+          <h2 id="tablePanelTitle">Top direct placements</h2>
+          <button id="exportMatrixBtn" class="secondary compact-btn" type="button" hidden>Export Matrix</button>
+        </div>
+        <div id="tableResize" class="table-resize" role="separator" aria-orientation="horizontal" title="Drag to resize report"></div>
         <div id="subtreeReport" class="subtree-report" hidden></div>
-        <table>
+        <table id="topTableWrap">
           <thead>
             <tr>
               <th>Taxid</th>
