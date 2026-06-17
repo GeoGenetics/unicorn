@@ -69,6 +69,23 @@ def _resolve_taxonomy_paths(
     return nodes_path, names_path
 
 
+def _raise_filesystem_http_error(path: Path, *, operation: str, file_role: str) -> None:
+    try:
+        path_text = str(path)
+    except Exception:
+        path_text = path.name
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "message": f"Backend could not {operation} {file_role} because the file is not readable.",
+            "code": "backend_file_not_readable",
+            "file_role": file_role,
+            "path": path_text,
+            "filename": path.name,
+        },
+    )
+
+
 @dataclass(frozen=True)
 class FileInfo:
     name: str
@@ -77,7 +94,10 @@ class FileInfo:
 
     @classmethod
     def from_path(cls, path: Path) -> "FileInfo":
-        stat = path.stat()
+        try:
+            stat = path.stat()
+        except PermissionError:
+            _raise_filesystem_http_error(path, operation="stat", file_role="backend file")
         return cls(
             name=path.name,
             size=stat.st_size,
@@ -264,33 +284,36 @@ class GraphEngineStore:
         counts_payload: List[Dict[str, Any]] = []
         total_reads = 0
         total_taxa = 0
-        with path.open("r", encoding="utf-8") as handle:
-            for raw_line in handle:
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split("\t")
-                if len(parts) < 2:
-                    continue
-                try:
-                    taxid = int(parts[0])
-                    count = int(parts[1])
-                except ValueError:
-                    continue
-                name = _clean_name("\t".join(parts[2:])) if len(parts) > 2 else ""
-                clean_name = name or "NA"
-                counts_map[taxid] = counts_map.get(taxid, 0) + count
-                if clean_name != "NA" and taxid not in names_map:
-                    names_map[taxid] = clean_name
-                counts_payload.append(
-                    {
-                        "taxid": taxid,
-                        "count": count,
-                        "name": clean_name,
-                    }
-                )
-                total_reads += count
-                total_taxa += 1
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split("\t")
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        taxid = int(parts[0])
+                        count = int(parts[1])
+                    except ValueError:
+                        continue
+                    name = _clean_name("\t".join(parts[2:])) if len(parts) > 2 else ""
+                    clean_name = name or "NA"
+                    counts_map[taxid] = counts_map.get(taxid, 0) + count
+                    if clean_name != "NA" and taxid not in names_map:
+                        names_map[taxid] = clean_name
+                    counts_payload.append(
+                        {
+                            "taxid": taxid,
+                            "count": count,
+                            "name": clean_name,
+                        }
+                    )
+                    total_reads += count
+                    total_taxa += 1
+        except PermissionError:
+            _raise_filesystem_http_error(path, operation="read", file_role="dataset file")
         return DatasetModel(
             fileinfo=fileinfo,
             counts_map=counts_map,
@@ -302,45 +325,51 @@ class GraphEngineStore:
 
     def _parse_nodes(self, path: Path) -> Dict[int, TaxonomyNode]:
         nodes: Dict[int, TaxonomyNode] = {}
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            for raw_line in handle:
-                line = raw_line.strip()
-                if not line:
-                    continue
-                parts = [part.strip() for part in line.split("|")]
-                if len(parts) < 2:
-                    continue
-                try:
-                    taxid = int(parts[0])
-                    parent = int(parts[1])
-                except ValueError:
-                    continue
-                rank = parts[2] if len(parts) > 2 and parts[2] else "no rank"
-                nodes[taxid] = TaxonomyNode(taxid=taxid, parent=parent, rank=rank)
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    parts = [part.strip() for part in line.split("|")]
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        taxid = int(parts[0])
+                        parent = int(parts[1])
+                    except ValueError:
+                        continue
+                    rank = parts[2] if len(parts) > 2 and parts[2] else "no rank"
+                    nodes[taxid] = TaxonomyNode(taxid=taxid, parent=parent, rank=rank)
+        except PermissionError:
+            _raise_filesystem_http_error(path, operation="read", file_role="taxonomy nodes file")
         return nodes
 
     def _parse_names(self, path: Optional[Path]) -> Dict[int, str]:
         names: Dict[int, str] = {}
         if not path or not path.exists():
             return names
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            for raw_line in handle:
-                line = raw_line.strip()
-                if not line:
-                    continue
-                parts = [part.strip() for part in line.split("|")]
-                if len(parts) < 2:
-                    continue
-                try:
-                    taxid = int(parts[0])
-                except ValueError:
-                    continue
-                name = parts[1]
-                cls = parts[3] if len(parts) > 3 else ""
-                if not name:
-                    continue
-                if cls == "scientific name" or taxid not in names:
-                    names[taxid] = name
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for raw_line in handle:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    parts = [part.strip() for part in line.split("|")]
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        taxid = int(parts[0])
+                    except ValueError:
+                        continue
+                    name = parts[1]
+                    cls = parts[3] if len(parts) > 3 else ""
+                    if not name:
+                        continue
+                    if cls == "scientific name" or taxid not in names:
+                        names[taxid] = name
+        except PermissionError:
+            _raise_filesystem_http_error(path, operation="read", file_role="taxonomy names file")
         return names
 
     def _prune_stale_caches(self, available_names: set[str]) -> None:

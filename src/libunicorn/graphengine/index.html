@@ -169,6 +169,20 @@
               </div>
             </div>
           </section>
+
+          <section class="panel-section" aria-label="Client log section">
+            <div class="panel-section-head">
+              <h2>Client Log</h2>
+              <button id="toggleLogSection" class="secondary compact-btn section-toggle" type="button" aria-expanded="false">Show</button>
+            </div>
+            <div id="logSectionBody" class="panel-section-body" hidden>
+              <div class="client-log-head">
+                <div id="clientLogMeta" class="client-log-meta">No client log entries yet</div>
+                <button id="clearClientLogBtn" class="secondary compact-btn" type="button">Clear Log</button>
+              </div>
+              <div id="clientLog" class="client-log" aria-live="polite"></div>
+            </div>
+          </section>
         </section>
         <div id="controlsResize" class="controls-resize" role="separator" aria-orientation="vertical" title="Drag to resize controls"></div>
         <button id="sidebarToggle" class="sidebar-tab" type="button" aria-expanded="true" aria-controls="controls">Hide Panel</button>

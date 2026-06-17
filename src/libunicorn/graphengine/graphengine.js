@@ -5,6 +5,7 @@ const state = {
   counts: new Map(),
   names: new Map(),
   series: [],
+  clientLog: [],
   remote: {
     user: "",
     host: "",
@@ -49,6 +50,8 @@ const els = {
   optionsSectionBody: document.getElementById("optionsSectionBody"),
   toggleReportsSection: document.getElementById("toggleReportsSection"),
   reportsSectionBody: document.getElementById("reportsSectionBody"),
+  toggleLogSection: document.getElementById("toggleLogSection"),
+  logSectionBody: document.getElementById("logSectionBody"),
   uncollapseBtn: document.getElementById("uncollapseBtn"),
   uncollapseTipsBtn: document.getElementById("uncollapseTipsBtn"),
   subtreeReportBtn: document.getElementById("subtreeReportBtn"),
@@ -105,6 +108,9 @@ const els = {
   sourceLegend: document.getElementById("sourceLegend"),
   topTableWrap: document.getElementById("topTableWrap"),
   topTable: document.getElementById("topTable"),
+  clientLogMeta: document.getElementById("clientLogMeta"),
+  clientLog: document.getElementById("clientLog"),
+  clearClientLogBtn: document.getElementById("clearClientLogBtn"),
 };
 
 els.renderBtn.addEventListener("click", loadAndRender);
@@ -156,6 +162,9 @@ els.clearSelectionBtn.addEventListener("click", clearSelection);
 if (els.exportMatrixBtn) {
   els.exportMatrixBtn.addEventListener("click", exportCurrentSubtreeMatrix);
 }
+if (els.clearClientLogBtn) {
+  els.clearClientLogBtn.addEventListener("click", clearClientLog);
+}
 initControlsResize();
 initSummaryResize();
 initTablePanel();
@@ -190,6 +199,7 @@ function initRemotePanel() {
   updateConnectionState(false, "Not connected");
   renderRemoteDatasets();
   updateRenderAvailability();
+  renderClientLog();
 }
 
 function initFileInputs() {
@@ -340,6 +350,7 @@ function initSidebarPanel() {
   initSectionToggle("filesSection", els.toggleFilesSection, els.filesSectionBody);
   initSectionToggle("optionsSection", els.toggleOptionsSection, els.optionsSectionBody);
   initSectionToggle("reportsSection", els.toggleReportsSection, els.reportsSectionBody);
+  initSectionToggle("logSection", els.toggleLogSection, els.logSectionBody);
 }
 
 function initSectionToggle(key, button, body) {
@@ -396,6 +407,7 @@ async function connectRemote() {
 
   updateConnectionState(false, "Connecting...");
   setStatus(`Testing local tunnel endpoint for ${user}@${host}...`);
+  addClientLog("info", "tunnel", `Testing tunnel endpoint for ${user}@${host}.`, "GET http://localhost:8000/ping");
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2500);
@@ -410,10 +422,17 @@ async function connectRemote() {
     const ping = await response.json();
     updateRemoteServerStatus(ping);
     updateConnectionState(true, "Connected");
+    addClientLog(
+      "success",
+      "tunnel",
+      `Tunnel check succeeded for ${user}@${host}.`,
+      `backend taxonomy: nodes=${ping?.taxonomy?.nodes_file || "missing"}, names=${ping?.taxonomy?.names_file || "missing"}`,
+    );
     try {
       await refreshRemoteDatasets({ selectAll: true });
       setStatus(remoteConnectionReadyMessage(user, host));
     } catch (error) {
+      addClientLog("error", "datasets", `Remote dataset refresh failed after tunnel check.`, errorToDetail(error));
       setStatus(`Tunnel check succeeded for ${user}@${host}, but the remote dataset list could not be loaded yet. ${error.message || error}`);
     }
   } catch (error) {
@@ -422,6 +441,7 @@ async function connectRemote() {
     state.remote.selectedDatasets.clear();
     updateRemoteServerStatus(null);
     renderRemoteDatasets();
+    addClientLog("error", "tunnel", `Tunnel check failed for ${user}@${host}.`, errorToDetail(error));
     setStatus(`Tunnel check failed for ${user}@${host}. Make sure the SSH tunnel is open and the remote HTTP server is running on port 8000.`);
   }
 }
@@ -466,12 +486,20 @@ async function uploadLoadedFiles() {
   }
 
   els.uploadBtn.disabled = true;
+  addClientLog(
+    "info",
+    "upload",
+    `Uploading ${localFiles.length.toLocaleString()} local file${localFiles.length === 1 ? "" : "s"} to the backend.`,
+    localFiles.map((file) => file.name).join("\n"),
+  );
   try {
     const uploaded = await uploadFilesToRemote(localFiles);
     await refreshRemoteServerStatus();
     await refreshRemoteDatasets();
+    addClientLog("success", "upload", `Uploaded ${uploaded.toLocaleString()} file(s) successfully.`);
     setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the remote server for ${user}@${host}.`);
   } catch (error) {
+    addClientLog("error", "upload", "Upload stopped.", errorToDetail(error));
     setStatus(`Upload stopped. ${error.message || error}`);
   } finally {
     els.uploadBtn.disabled = false;
@@ -531,6 +559,7 @@ async function loadAndRender() {
     redraw();
   } catch (error) {
     console.error(error);
+    addClientLog("error", state.remote.connected ? "tree" : "local", "Could not render tree.", errorToDetail(error));
     setStatus(`Could not render tree: ${error.message || error}`);
   }
 }
@@ -553,13 +582,22 @@ async function uploadFilesToRemote(files) {
   for (const file of files) {
     const form = new FormData();
     form.append("file", file, file.name);
-    const response = await fetch("http://localhost:8000/upload", {
-      method: "POST",
-      body: form,
-    });
+    addClientLog("info", "upload", `Uploading file ${file.name}.`);
+    let response;
+    try {
+      response = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: form,
+      });
+    } catch (error) {
+      addClientLog("error", "upload", `Upload fetch failed for ${file.name}.`, errorToDetail(error));
+      throw error;
+    }
     if (!response.ok) {
+      addClientLog("error", "upload", `Upload failed for ${file.name}.`, `HTTP ${response.status}`);
       throw new Error(`Upload failed for ${file.name} with HTTP ${response.status}`);
     }
+    addClientLog("success", "upload", `Upload finished for ${file.name}.`);
     uploaded++;
   }
   return uploaded;
@@ -586,14 +624,22 @@ async function loadAndRenderRemote() {
   }
 
   state.remote.expandedTaxids.clear();
+  addClientLog(
+    "info",
+    "tree",
+    `Requesting remote root tree view for ${files.length.toLocaleString()} dataset${files.length === 1 ? "" : "s"}.`,
+    files.join("\n"),
+  );
   const payload = await fetchRemoteVisibleTree();
   if (!payload.tree) {
+    addClientLog("error", "tree", "The remote backend returned no tree payload.");
     setStatus("The remote backend returned no tree to render.");
     return;
   }
 
   applyRemoteVisiblePayload(payload);
   state.centerOnNextRender = true;
+  addClientLog("success", "tree", `Loaded backend tree with ${Number(payload.direct_taxa || 0).toLocaleString()} direct taxa.`);
   setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} remote dataset${state.series.length === 1 ? "" : "s"} and ${state.remote.directTaxa.toLocaleString()} direct taxa.`);
   redraw();
 }
@@ -760,13 +806,23 @@ function buildRemoteContextUrl(path, options = {}) {
 
 async function fetchRemoteVisibleTree(options = {}) {
   const endpoint = options.taxid != null ? "expand-node" : "root-view";
-  const response = await fetch(buildRemoteContextUrl(endpoint, {
+  const url = buildRemoteContextUrl(endpoint, {
     expandedTaxids: options.expandedTaxids || Array.from(state.remote.expandedTaxids),
     query: options.taxid != null ? { taxid: options.taxid } : {},
-  }).toString(), { method: "GET" });
+  }).toString();
+  addClientLog("info", "tree", `GET /${endpoint}`, url);
+  let response;
+  try {
+    response = await fetch(url, { method: "GET" });
+  } catch (error) {
+    addClientLog("error", "tree", `Remote ${endpoint} fetch failed.`, errorToDetail(error));
+    throw error;
+  }
   if (!response.ok) {
+    addClientLog("error", "tree", `Remote ${endpoint} request failed.`, `HTTP ${response.status}`);
     throw new Error(`Remote ${endpoint} request failed with HTTP ${response.status}`);
   }
+  addClientLog("success", "tree", `Remote ${endpoint} request succeeded.`);
   return response.json();
 }
 
@@ -826,11 +882,20 @@ async function fetchRemoteRankReport(taxids) {
 }
 
 async function fetchRemoteFullTreeModel() {
-  const response = await fetch(buildRemoteContextUrl("tree-model").toString(), { method: "GET" });
+  addClientLog("info", "tree", "GET /tree-model");
+  let response;
+  try {
+    response = await fetch(buildRemoteContextUrl("tree-model").toString(), { method: "GET" });
+  } catch (error) {
+    addClientLog("error", "tree", "Remote tree-model fetch failed.", errorToDetail(error));
+    throw error;
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    addClientLog("error", "tree", "Remote tree-model request failed.", payload?.detail?.message || `HTTP ${response.status}`);
     throw new Error(payload?.detail?.message || `Remote tree-model request failed with HTTP ${response.status}`);
   }
+  addClientLog("success", "tree", "Remote tree-model request succeeded.");
   return payload;
 }
 
@@ -865,10 +930,18 @@ async function refreshRemoteDatasets(options = {}) {
   }
 
   const { selectAll = false } = options;
-  const response = await fetch("http://localhost:8000/datasets", {
-    method: "GET",
-  });
+  addClientLog("info", "datasets", "Refreshing remote dataset list.", "GET http://localhost:8000/datasets");
+  let response;
+  try {
+    response = await fetch("http://localhost:8000/datasets", {
+      method: "GET",
+    });
+  } catch (error) {
+    addClientLog("error", "datasets", "Remote datasets fetch failed.", errorToDetail(error));
+    throw error;
+  }
   if (!response.ok) {
+    addClientLog("error", "datasets", "Remote datasets request failed.", `HTTP ${response.status}`);
     throw new Error(`Remote datasets request failed with HTTP ${response.status}`);
   }
 
@@ -896,6 +969,7 @@ async function refreshRemoteDatasets(options = {}) {
   }
 
   renderRemoteDatasets();
+  addClientLog("success", "datasets", `Loaded ${state.remote.datasets.length.toLocaleString()} remote dataset${state.remote.datasets.length === 1 ? "" : "s"}.`);
 }
 
 function renderRemoteDatasets() {
@@ -2361,6 +2435,70 @@ function svgEl(name, attrs = {}, text = "") {
 
 function setStatus(message) {
   els.status.textContent = message;
+}
+
+function addClientLog(level, stage, message, detail = "") {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level: String(level || "info"),
+    stage: String(stage || "general"),
+    message: String(message || ""),
+    detail: String(detail || ""),
+  };
+  state.clientLog.unshift(entry);
+  if (state.clientLog.length > 200) {
+    state.clientLog.length = 200;
+  }
+  renderClientLog();
+}
+
+function clearClientLog() {
+  state.clientLog = [];
+  renderClientLog();
+  setStatus("Cleared client log.");
+}
+
+function renderClientLog() {
+  if (!els.clientLog || !els.clientLogMeta) return;
+  const entries = state.clientLog;
+  els.clientLogMeta.textContent = entries.length
+    ? `${entries.length.toLocaleString()} recent client event${entries.length === 1 ? "" : "s"}`
+    : "No client log entries yet";
+  if (!entries.length) {
+    els.clientLog.innerHTML = `<div class="remote-datasets-empty">Client-side upload, dataset, and tree requests will appear here.</div>`;
+    return;
+  }
+  els.clientLog.innerHTML = entries.map((entry) => `
+    <div class="client-log-entry">
+      <div class="client-log-entry-head">
+        <div class="client-log-badges">
+          <span class="client-log-badge stage-${escapeHtml(entry.stage)}">${escapeHtml(entry.stage)}</span>
+          <span class="client-log-badge level-${escapeHtml(entry.level)}">${escapeHtml(entry.level)}</span>
+        </div>
+        <span class="client-log-time">${escapeHtml(formatLogTime(entry.timestamp))}</span>
+      </div>
+      <div class="client-log-message">${escapeHtml(entry.message)}</div>
+      ${entry.detail ? `<pre class="client-log-detail">${escapeHtml(entry.detail)}</pre>` : ""}
+    </div>
+  `).join("");
+}
+
+function formatLogTime(timestamp) {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return timestamp;
+  return parsed.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function errorToDetail(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  const message = error.message || String(error);
+  const stack = typeof error.stack === "string" ? error.stack : "";
+  return stack && !stack.startsWith(message) ? `${message}\n${stack}` : message;
 }
 
 function initChartPan() {

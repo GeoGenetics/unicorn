@@ -446,6 +446,128 @@ code {
   padding-top: 6px;
 }
 
+.client-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.client-log-meta {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.client-log {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.client-log-entry {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid #d7ccb7;
+  background: #fffdf7;
+}
+
+.client-log-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.client-log-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.client-log-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: rgba(37, 95, 117, 0.08);
+  color: var(--ink);
+}
+
+.client-log-badge.stage-upload {
+  background: rgba(200, 95, 67, 0.12);
+}
+
+.client-log-badge.stage-datasets {
+  background: rgba(95, 140, 111, 0.14);
+}
+
+.client-log-badge.stage-tree {
+  background: rgba(37, 95, 117, 0.12);
+}
+
+.client-log-badge.stage-tunnel {
+  background: rgba(138, 90, 153, 0.12);
+}
+
+.client-log-badge.level-error {
+  color: #8f3f35;
+  border-color: rgba(143, 63, 53, 0.28);
+  background: rgba(200, 95, 67, 0.16);
+}
+
+.client-log-badge.level-success {
+  color: #1f6a50;
+  border-color: rgba(31, 106, 80, 0.24);
+  background: rgba(95, 140, 111, 0.18);
+}
+
+.client-log-badge.level-info {
+  color: #255f75;
+  border-color: rgba(37, 95, 117, 0.22);
+  background: rgba(37, 95, 117, 0.1);
+}
+
+.client-log-time {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.client-log-message {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.client-log-detail {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid #e1d7c6;
+  background: rgba(255, 250, 240, 0.9);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .legend-item {
   display: flex;
   align-items: center;
