@@ -136,6 +136,7 @@ initTablePanel();
 initSidebarPanel();
 initChartPan();
 initRemotePanel();
+initFileInputs();
 
 const SOURCE_COLORS = [
   "#c85f43",
@@ -160,6 +161,35 @@ function initRemotePanel() {
   updateTunnelHint();
   updateConnectionState(false, "Not connected");
   renderRemoteDatasets();
+}
+
+function initFileInputs() {
+  ensureFileRowControls();
+}
+
+function ensureFileRowControls() {
+  els.lcaInputs.querySelectorAll(".file-row").forEach((row) => {
+    let removeBtn = row.querySelector(".remove-file-btn");
+    if (!removeBtn) {
+      removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "secondary remove-file-btn";
+      removeBtn.setAttribute("aria-label", "Remove input file");
+      removeBtn.textContent = "Remove";
+      row.appendChild(removeBtn);
+    }
+    if (removeBtn.dataset.bound === "1") return;
+    removeBtn.dataset.bound = "1";
+    removeBtn.addEventListener("click", () => {
+      const inputs = els.lcaInputs.querySelectorAll(".file-row");
+      if (inputs.length <= 1) {
+        const fileInput = row.querySelector(".lca-file-input");
+        if (fileInput) fileInput.value = "";
+        return;
+      }
+      row.remove();
+    });
+  });
 }
 
 function initSidebarPanel() {
@@ -256,7 +286,7 @@ function updateTunnelHint() {
   const host = els.remoteHost.value.trim() || "remote-server";
   const command = `ssh -L 8000:localhost:8000 ${user}@${host}`;
   els.tunnelCommand.textContent = command;
-  els.tunnelHint.innerHTML = `Open the SSH tunnel first, then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.`;
+  els.tunnelHint.innerHTML = `Open the SSH tunnel, afterwards start unicorn's graph engine server app (python unicorn/src/libunicorn/graphengine/server_app.py), then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.`;
 }
 
 function updateConnectionState(connected, message) {
@@ -1993,10 +2023,8 @@ function addLcaInput() {
     <input class="lca-file-input" type="file" accept=".txt,.tsv,.bdamage,.lca">
     <button class="secondary remove-file-btn" type="button" aria-label="Remove input file">Remove</button>
   `;
-  row.querySelector(".remove-file-btn").addEventListener("click", () => {
-    row.remove();
-  });
   els.lcaInputs.appendChild(row);
+  ensureFileRowControls();
 }
 
 function clearLcaListFile() {
