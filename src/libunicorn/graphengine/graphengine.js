@@ -11,6 +11,8 @@ const state = {
     connected: false,
     datasets: [],
     selectedDatasets: new Set(),
+    backendNodesFile: "",
+    backendNamesFile: "",
     expandedTaxids: new Set(),
     serverTreeActive: false,
     totalReads: 0,
@@ -187,10 +189,18 @@ function initRemotePanel() {
   updateTunnelHint();
   updateConnectionState(false, "Not connected");
   renderRemoteDatasets();
+  updateRenderAvailability();
 }
 
 function initFileInputs() {
   ensureFileRowControls();
+  els.nodesFile.addEventListener("change", updateRenderAvailability);
+  els.namesFile.addEventListener("change", updateRenderAvailability);
+  els.lcaInputs.addEventListener("change", (event) => {
+    if (event.target && event.target.matches(".lca-file-input")) {
+      updateRenderAvailability();
+    }
+  });
 }
 
 function initMinReadsControls() {
@@ -397,10 +407,12 @@ async function connectRemote() {
     if (!response.ok) {
       throw new Error(`Ping returned HTTP ${response.status}`);
     }
+    const ping = await response.json();
+    updateRemoteServerStatus(ping);
     updateConnectionState(true, "Connected");
     try {
       await refreshRemoteDatasets({ selectAll: true });
-      setStatus(`Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable and remote datasets are ready to render.`);
+      setStatus(remoteConnectionReadyMessage(user, host));
     } catch (error) {
       setStatus(`Tunnel check succeeded for ${user}@${host}, but the remote dataset list could not be loaded yet. ${error.message || error}`);
     }
@@ -408,6 +420,7 @@ async function connectRemote() {
     updateConnectionState(false, "Tunnel check failed");
     state.remote.datasets = [];
     state.remote.selectedDatasets.clear();
+    updateRemoteServerStatus(null);
     renderRemoteDatasets();
     setStatus(`Tunnel check failed for ${user}@${host}. Make sure the SSH tunnel is open and the remote HTTP server is running on port 8000.`);
   }
@@ -423,10 +436,15 @@ function updateTunnelHint() {
 
 function updateConnectionState(connected, message) {
   state.remote.connected = connected;
+  if (!connected) {
+    state.remote.backendNodesFile = "";
+    state.remote.backendNamesFile = "";
+  }
   els.connectionState.textContent = message;
   els.connectionState.classList.toggle("online", connected);
   els.connectionState.classList.toggle("offline", !connected);
   els.remoteDatasetsPanel.hidden = !connected;
+  updateRenderAvailability();
 }
 
 async function uploadLoadedFiles() {
@@ -450,8 +468,9 @@ async function uploadLoadedFiles() {
   els.uploadBtn.disabled = true;
   try {
     const uploaded = await uploadFilesToRemote(localFiles);
-    setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the remote server for ${user}@${host}.`);
+    await refreshRemoteServerStatus();
     await refreshRemoteDatasets();
+    setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the remote server for ${user}@${host}.`);
   } catch (error) {
     setStatus(`Upload stopped. ${error.message || error}`);
   } finally {
@@ -470,8 +489,12 @@ async function copyTunnelCommand() {
 }
 
 async function loadAndRender() {
-  if (!els.nodesFile.files[0] && !state.remote.connected) {
+  if (!state.remote.connected && !els.nodesFile.files[0]) {
     setStatus("Choose nodes.dmp before rendering.");
+    return;
+  }
+  if (state.remote.connected && !canRenderRemoteTree()) {
+    setStatus(remoteRenderUnavailableMessage());
     return;
   }
   try {
@@ -513,12 +536,16 @@ async function loadAndRender() {
 }
 
 function getLocalRemoteUploadFiles() {
-  const files = Array.from(document.querySelectorAll(".lca-file-input"))
-    .map((input) => input.files[0])
-    .filter(Boolean);
+  const files = getLocalRemoteDatasetUploadFiles();
   if (els.nodesFile.files[0]) files.push(els.nodesFile.files[0]);
   if (els.namesFile.files[0]) files.push(els.namesFile.files[0]);
   return files;
+}
+
+function getLocalRemoteDatasetUploadFiles() {
+  return Array.from(document.querySelectorAll(".lca-file-input"))
+    .map((input) => input.files[0])
+    .filter(Boolean);
 }
 
 async function uploadFilesToRemote(files) {
@@ -540,12 +567,9 @@ async function uploadFilesToRemote(files) {
 
 async function loadAndRenderRemote() {
   const localFiles = getLocalRemoteUploadFiles();
-  if (!els.nodesFile.files[0]) {
-    setStatus("Choose nodes.dmp before rendering a remote tree.");
-    return;
-  }
   if (localFiles.length) {
     await uploadFilesToRemote(localFiles);
+    await refreshRemoteServerStatus();
     await refreshRemoteDatasets();
     for (const file of localFiles) {
       if (file.name.endsWith(".bdamage.txt")) state.remote.selectedDatasets.add(file.name);
@@ -879,6 +903,7 @@ function renderRemoteDatasets() {
 
   if (!state.remote.connected) {
     els.remoteDatasetsMeta.textContent = "Connect to browse remote files";
+    updateRenderAvailability();
     return;
   }
 
@@ -891,6 +916,7 @@ function renderRemoteDatasets() {
     empty.className = "remote-datasets-empty";
     empty.textContent = "No .bdamage datasets found in uploads on the backend.";
     els.remoteDatasetsList.appendChild(empty);
+    updateRenderAvailability();
     return;
   }
 
@@ -929,6 +955,8 @@ function renderRemoteDatasets() {
     item.appendChild(label);
     els.remoteDatasetsList.appendChild(item);
   }
+
+  updateRenderAvailability();
 }
 
 function selectAllRemoteDatasets() {
@@ -941,6 +969,85 @@ function selectAllRemoteDatasets() {
 function clearRemoteDatasets() {
   state.remote.selectedDatasets.clear();
   renderRemoteDatasets();
+}
+
+function hasLocalRemoteTaxonomyOverride() {
+  return Boolean(els.nodesFile.files[0]);
+}
+
+function hasRemoteBackendTaxonomy() {
+  return Boolean(state.remote.backendNodesFile);
+}
+
+function canRenderRemoteTree() {
+  return state.remote.connected
+    && (getSelectedRemoteDatasets().length > 0 || getLocalRemoteDatasetUploadFiles().length > 0)
+    && (hasLocalRemoteTaxonomyOverride() || hasRemoteBackendTaxonomy());
+}
+
+function remoteRenderUnavailableMessage() {
+  if (!state.remote.connected) {
+    return "Connect to the backend before rendering a remote tree.";
+  }
+  if (!getSelectedRemoteDatasets().length) {
+    if (getLocalRemoteDatasetUploadFiles().length > 0) {
+      return "Remote render is ready to upload your selected local datasets, but taxonomy must still be available locally or on the backend.";
+    }
+    return state.remote.datasets.length
+      ? "Select one or more remote datasets before rendering."
+      : "No remote .bdamage datasets are available to render.";
+  }
+  return "Remote taxonomy is not ready yet. Upload or select nodes.dmp on the client, or place nodes.dmp in the backend uploads directory.";
+}
+
+function remoteConnectionReadyMessage(user, host) {
+  const selected = getSelectedRemoteDatasets().length;
+  const pendingUploads = getLocalRemoteDatasetUploadFiles().length;
+  const datasetLabel = selected === 1 ? "dataset" : "datasets";
+  if (canRenderRemoteTree()) {
+    const taxonomySource = hasLocalRemoteTaxonomyOverride()
+      ? `local taxonomy override (${els.nodesFile.files[0].name}${els.namesFile.files[0] ? `, ${els.namesFile.files[0].name}` : ""})`
+      : `backend taxonomy (${state.remote.backendNodesFile}${state.remote.backendNamesFile ? `, ${state.remote.backendNamesFile}` : ""})`;
+    if (selected > 0) {
+      return `Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable, ${selected.toLocaleString()} ${datasetLabel} ${selected === 1 ? "is" : "are"} selected, and ${taxonomySource} is ready for rendering.`;
+    }
+    return `Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable, ${pendingUploads.toLocaleString()} local dataset${pendingUploads === 1 ? "" : "s"} ${pendingUploads === 1 ? "is" : "are"} queued for upload, and ${taxonomySource} is ready for rendering.`;
+  }
+  if (pendingUploads > 0) {
+    return `Tunnel check succeeded for ${user}@${host}. Local datasets are queued for upload, but remote rendering is waiting for taxonomy. Upload or select nodes.dmp to enable Render Tree.`;
+  }
+  if (selected > 0) {
+    return `Tunnel check succeeded for ${user}@${host}. Remote datasets are visible, but remote rendering is waiting for taxonomy. Upload or select nodes.dmp to enable Render Tree.`;
+  }
+  return `Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable; choose one or more datasets to enable Render Tree.`;
+}
+
+function updateRemoteServerStatus(ping) {
+  state.remote.backendNodesFile = String(ping?.taxonomy?.nodes_file || "");
+  state.remote.backendNamesFile = String(ping?.taxonomy?.names_file || "");
+  updateRenderAvailability();
+}
+
+async function refreshRemoteServerStatus() {
+  if (!state.remote.connected) {
+    updateRemoteServerStatus(null);
+    return null;
+  }
+  const response = await fetch("http://localhost:8000/ping", { method: "GET" });
+  if (!response.ok) {
+    throw new Error(`Remote ping request failed with HTTP ${response.status}`);
+  }
+  const payload = await response.json();
+  updateRemoteServerStatus(payload);
+  return payload;
+}
+
+function updateRenderAvailability() {
+  if (state.remote.connected) {
+    els.renderBtn.disabled = !canRenderRemoteTree();
+    return;
+  }
+  els.renderBtn.disabled = !els.nodesFile.files[0];
 }
 
 function getSelectedRemoteDatasets() {
