@@ -17,7 +17,7 @@ const state = {
     directTaxa: 0,
     tooltipRequestId: 0,
     tableRequestId: 0,
-    currentSubtreeReport: null,
+    currentReport: null,
   },
   tree: null,
   flat: [],
@@ -45,9 +45,12 @@ const els = {
   filesSectionBody: document.getElementById("filesSectionBody"),
   toggleOptionsSection: document.getElementById("toggleOptionsSection"),
   optionsSectionBody: document.getElementById("optionsSectionBody"),
+  toggleReportsSection: document.getElementById("toggleReportsSection"),
+  reportsSectionBody: document.getElementById("reportsSectionBody"),
   uncollapseBtn: document.getElementById("uncollapseBtn"),
   uncollapseTipsBtn: document.getElementById("uncollapseTipsBtn"),
   subtreeReportBtn: document.getElementById("subtreeReportBtn"),
+  rankReportBtn: document.getElementById("rankReportBtn"),
   selectDescendantsBtn: document.getElementById("selectDescendantsBtn"),
   clearSelectionBtn: document.getElementById("clearSelectionBtn"),
   lcaInputs: document.getElementById("lcaInputs"),
@@ -142,6 +145,9 @@ els.uncollapseBtn.addEventListener("click", uncollapseSelected);
 els.uncollapseTipsBtn.addEventListener("click", uncollapseSelectedToTips);
 if (els.subtreeReportBtn) {
   els.subtreeReportBtn.addEventListener("click", openSelectedSubtreeReport);
+}
+if (els.rankReportBtn) {
+  els.rankReportBtn.addEventListener("click", openSelectedRankReport);
 }
 els.selectDescendantsBtn.addEventListener("click", selectDescendants);
 els.clearSelectionBtn.addEventListener("click", clearSelection);
@@ -323,6 +329,7 @@ function initSidebarPanel() {
   initSectionToggle("remoteSection", els.toggleRemoteSection, els.remoteSectionBody);
   initSectionToggle("filesSection", els.toggleFilesSection, els.filesSectionBody);
   initSectionToggle("optionsSection", els.toggleOptionsSection, els.optionsSectionBody);
+  initSectionToggle("reportsSection", els.toggleReportsSection, els.reportsSectionBody);
 }
 
 function initSectionToggle(key, button, body) {
@@ -777,6 +784,19 @@ async function fetchRemoteSubtreeReport(taxid, options = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(payload?.detail?.message || `Remote subtree-report request failed with HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function fetchRemoteRankReport(taxids) {
+  const url = buildRemoteContextUrl("rank-report");
+  for (const taxid of taxids) {
+    url.searchParams.append("taxids", String(taxid));
+  }
+  const response = await fetch(url.toString(), { method: "GET" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.detail?.message || `Remote rank-report request failed with HTTP ${response.status}`);
   }
   return payload;
 }
@@ -1799,7 +1819,7 @@ function renderSummary(visible) {
 
 function renderTopTable() {
   if (isRemoteServerTreeMode()) {
-    if (state.remote.currentSubtreeReport?.target?.taxid != null) {
+    if (state.remote.currentReport) {
       renderCurrentRemoteSubtreeReport();
       return;
     }
@@ -1824,7 +1844,7 @@ function renderTopTable() {
 }
 
 function clearSubtreeReportView() {
-  state.remote.currentSubtreeReport = null;
+  state.remote.currentReport = null;
   if (els.subtreeReport) {
     els.subtreeReport.hidden = true;
     els.subtreeReport.innerHTML = "";
@@ -1881,11 +1901,58 @@ async function openSelectedSubtreeReport() {
   }
 }
 
+async function openSelectedRankReport() {
+  if (!isRemoteServerTreeMode()) {
+    setStatus("Rank reports are currently available in remote backend mode.");
+    return;
+  }
+  const selectedNodes = getSelectedNodes();
+  if (!selectedNodes.length) {
+    setStatus("Select one or more nodes first, then use Rank Report.");
+    return;
+  }
+  const taxids = selectedNodes.map((node) => node.taxid);
+  setTablePanelVisible(true);
+  const requestId = ++state.remote.tableRequestId;
+  if (!els.subtreeReport || !els.tablePanelTitle) {
+    setStatus("Rank report UI is not available in the current HTML shell. Try a hard refresh.");
+    return;
+  }
+  els.tablePanelTitle.textContent = `Rank report (${taxids.length} selected)`;
+  els.subtreeReport.hidden = false;
+  els.subtreeReport.innerHTML = `<div class="subtree-report-card">Loading rank report for ${taxids.length} selected node(s)...</div>`;
+  els.topTable.innerHTML = "";
+  try {
+    const payload = await fetchRemoteRankReport(taxids);
+    if (requestId !== state.remote.tableRequestId) return;
+    renderRankReport(payload.report || null, taxids);
+  } catch (error) {
+    if (requestId !== state.remote.tableRequestId) return;
+    els.subtreeReport.hidden = false;
+    els.subtreeReport.innerHTML = `
+      <div class="subtree-report-card">
+        ${escapeHtml(error.message || "Could not load rank report.")}
+      </div>
+    `;
+    els.topTable.innerHTML = "";
+  }
+}
+
 async function refreshCurrentRemoteSubtreeReportIfNeeded() {
-  const taxid = state.remote.currentSubtreeReport?.target?.taxid;
-  if (!isRemoteServerTreeMode() || taxid == null) return;
-  const payload = await fetchRemoteSubtreeReport(taxid);
-  renderSubtreeReport(payload.report || null);
+  if (!isRemoteServerTreeMode() || !state.remote.currentReport) return;
+  if (state.remote.currentReport.type === "subtree") {
+    const taxid = state.remote.currentReport.report?.target?.taxid;
+    if (taxid == null) return;
+    const payload = await fetchRemoteSubtreeReport(taxid);
+    renderSubtreeReport(payload.report || null);
+    return;
+  }
+  if (state.remote.currentReport.type === "rank") {
+    const taxids = Array.isArray(state.remote.currentReport.taxids) ? state.remote.currentReport.taxids : [];
+    if (!taxids.length) return;
+    const payload = await fetchRemoteRankReport(taxids);
+    renderRankReport(payload.report || null, taxids);
+  }
 }
 
 function renderCurrentRemoteSubtreeReport() {
@@ -1902,7 +1969,7 @@ function renderSubtreeReport(report) {
     els.topTable.innerHTML = "";
     return;
   }
-  state.remote.currentSubtreeReport = report;
+  state.remote.currentReport = { type: "subtree", report };
   const target = report.target;
   els.tablePanelTitle.textContent = `Subtree report: ${target.name}`;
   if (els.exportMatrixBtn) {
@@ -1931,6 +1998,75 @@ function renderSubtreeReport(report) {
         ${renderSubtreeMatrix(report.matrix || {})}
       </div>
     </div>
+  `;
+}
+
+function renderRankReport(report, taxids) {
+  if (!els.subtreeReport || !els.tablePanelTitle) return;
+  if (!report || !report.summary) {
+    els.subtreeReport.hidden = false;
+    els.subtreeReport.innerHTML = `<div class="subtree-report-card">No rank report was returned by the backend.</div>`;
+    els.topTable.innerHTML = "";
+    return;
+  }
+  state.remote.currentReport = {
+    type: "rank",
+    report,
+    taxids: Array.isArray(taxids) ? [...taxids] : [],
+  };
+  els.tablePanelTitle.textContent = `Rank report (${report.summary.selected_node_count} selected)`;
+  if (els.exportMatrixBtn) {
+    els.exportMatrixBtn.hidden = false;
+  }
+  if (els.topTableWrap) {
+    els.topTableWrap.hidden = true;
+  }
+  els.subtreeReport.hidden = false;
+  els.subtreeReport.innerHTML = `
+    <div class="subtree-report-card">
+      <h3>Selected-node direct-read count matrix by rank</h3>
+      <div class="subtree-report-meta">
+        <span>selected nodes: ${Number(report.summary.selected_node_count || 0).toLocaleString()}</span>
+        <span>total direct reads: ${Number(report.summary.total_direct || 0).toLocaleString()}</span>
+        <span>ranks: ${Array.isArray(report.rows) ? report.rows.length.toLocaleString() : "0"}</span>
+      </div>
+    </div>
+    <div class="subtree-report-card subtree-report-matrix">
+      <h3>Rank-by-dataset direct count matrix</h3>
+      ${renderRankMatrix(report)}
+    </div>
+  `;
+}
+
+function renderRankMatrix(report) {
+  const rows = Array.isArray(report.rows) ? report.rows : [];
+  const datasetNames = Array.isArray(report.summary?.dataset_names) ? report.summary.dataset_names : [];
+  if (!rows.length || !datasetNames.length) {
+    return `<div class="subtree-report-empty">No rank-matrix rows available for the current selection.</div>`;
+  }
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Nodes</th>
+          <th>Total direct</th>
+          ${datasetNames.map((name) => `<th>${escapeHtml(name)}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.rank || "no rank")}</td>
+            <td>${Number(row.node_count || 0).toLocaleString()}</td>
+            <td>${Number(row.direct || 0).toLocaleString()}</td>
+            ${(Array.isArray(row.datasets) ? row.datasets : []).map((entry) => `
+              <td>${Number(entry.direct || 0).toLocaleString()}</td>
+            `).join("")}
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
   `;
 }
 
@@ -1991,7 +2127,16 @@ function renderSubtreeMatrix(matrix) {
 }
 
 function exportCurrentSubtreeMatrix() {
-  const report = state.remote.currentSubtreeReport;
+  const active = state.remote.currentReport;
+  if (!active) {
+    setStatus("No report matrix is currently available to export.");
+    return;
+  }
+  if (active.type === "rank") {
+    exportCurrentRankMatrix(active.report);
+    return;
+  }
+  const report = active.report;
   const matrix = report?.matrix;
   const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
   const datasetNames = Array.isArray(matrix?.dataset_names) ? matrix.dataset_names : [];
@@ -2024,6 +2169,39 @@ function exportCurrentSubtreeMatrix() {
   anchor.remove();
   URL.revokeObjectURL(url);
   setStatus(`Exported direct count matrix for ${report.target?.name || "selected subtree"}.`);
+}
+
+function exportCurrentRankMatrix(report) {
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  const datasetNames = Array.isArray(report?.summary?.dataset_names) ? report.summary.dataset_names : [];
+  if (!rows.length || !datasetNames.length) {
+    setStatus("No rank count matrix is currently available to export.");
+    return;
+  }
+  const header = ["rank", "node_count", "total_direct", ...datasetNames];
+  const lines = [header.join("\t")];
+  for (const row of rows) {
+    const values = [
+      String(row.rank ?? ""),
+      String(Number(row.node_count || 0)),
+      String(Number(row.direct || 0)),
+      ...datasetNames.map((_, index) => {
+        const entry = Array.isArray(row.datasets) ? row.datasets[index] : null;
+        return String(Number(entry?.direct || 0));
+      }),
+    ];
+    lines.push(values.join("\t"));
+  }
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/tab-separated-values;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `selected_nodes_rank_direct_matrix.tsv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  setStatus("Exported rank-by-dataset direct count matrix.");
 }
 
 async function renderRemoteTopTable() {
@@ -2085,6 +2263,16 @@ function initChartPan() {
   let startLeft = 0;
   let startTop = 0;
   let moved = false;
+
+  els.chartWrap.addEventListener("click", (event) => {
+    if (performance.now() < state.suppressClicksUntil) return;
+    if (!(event.ctrlKey || event.metaKey)) return;
+    if (event.target.closest(".node")) return;
+    if (!state.selected.size) return;
+    event.preventDefault();
+    state.selected.clear();
+    redraw();
+  });
 
   els.chartWrap.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;

@@ -968,6 +968,23 @@ def _top_children_rows(
     return rows[:limit]
 
 
+def _normalize_taxids(values: Optional[List[int]]) -> List[int]:
+    if not values:
+        return []
+    out: List[int] = []
+    seen: set[int] = set()
+    for value in values:
+        try:
+            taxid = int(value)
+        except (TypeError, ValueError):
+            continue
+        if taxid in seen:
+            continue
+        seen.add(taxid)
+        out.append(taxid)
+    return out
+
+
 @app.get("/root-view")
 def root_view(
     files: Optional[List[str]] = Query(default=None),
@@ -1199,6 +1216,72 @@ def subtree_report(
                 "dataset_names": [dataset.fileinfo.name for dataset in selection.datasets],
                 "row_count": len(matrix),
             },
+        },
+        "request_context": request_context,
+    }
+
+
+@app.get("/rank-report")
+def rank_report(
+    taxids: Optional[List[int]] = Query(default=None),
+    files: Optional[List[str]] = Query(default=None),
+    nodes_file: Optional[str] = Query(default=None),
+    names_file: Optional[str] = Query(default=None),
+    min_reads: int = Query(default=0, ge=0),
+) -> Dict[str, Any]:
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    request_context = _response_context(selection, taxonomy, min_reads, [])
+    requested_taxids = _normalize_taxids(taxids)
+    if not requested_taxids:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "At least one taxid is required for a rank report.",
+                code="missing_taxids",
+                request_context=request_context,
+            ),
+        )
+
+    selected_nodes = [
+        _resolve_node_in_context(tree, taxid, min_reads, request_context)
+        for taxid in requested_taxids
+    ]
+
+    by_rank: Dict[str, Dict[str, Any]] = {}
+    for node in selected_nodes:
+        rank = node.rank or "no rank"
+        slot = by_rank.setdefault(
+            rank,
+            {
+                "rank": rank,
+                "direct": 0,
+                "node_count": 0,
+                "datasets": [
+                    {"dataset": dataset.fileinfo.name, "direct": 0}
+                    for dataset in selection.datasets
+                ],
+            },
+        )
+        slot["direct"] += node.direct
+        slot["node_count"] += 1
+        for index, entry in enumerate(slot["datasets"]):
+            entry["direct"] += node.direct_by_source[index] if index < len(node.direct_by_source) else 0
+
+    rows = sorted(
+        by_rank.values(),
+        key=lambda row: (-int(row["direct"]), str(row["rank"])),
+    )
+
+    return {
+        "ok": True,
+        "report": {
+            "summary": {
+                "selected_taxids": requested_taxids,
+                "selected_node_count": len(selected_nodes),
+                "dataset_names": [dataset.fileinfo.name for dataset in selection.datasets],
+                "total_direct": sum(int(node.direct) for node in selected_nodes),
+            },
+            "rows": rows,
         },
         "request_context": request_context,
     }

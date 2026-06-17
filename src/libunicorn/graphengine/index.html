@@ -144,7 +144,6 @@
               <div class="selection-tools" aria-label="Selection tools">
                 <span class="selection-tools-label">Selection</span>
                 <div class="selection-tools-actions">
-                  <button id="subtreeReportBtn" class="secondary compact-btn" type="button">Subtree Report</button>
                   <button id="uncollapseBtn" class="secondary compact-btn" type="button">Uncollapse</button>
                   <button id="uncollapseTipsBtn" class="secondary compact-btn" type="button">Uncollapse Tips</button>
                   <button id="selectDescendantsBtn" class="secondary compact-btn" type="button">Select Descendants</button>
@@ -152,6 +151,22 @@
                 </div>
               </div>
               <div id="sourceLegend" class="source-legend" hidden></div>
+            </div>
+          </section>
+
+          <section class="panel-section" aria-label="Reports section">
+            <div class="panel-section-head">
+              <h2>Reports</h2>
+              <button id="toggleReportsSection" class="secondary compact-btn section-toggle" type="button" aria-expanded="true">Hide</button>
+            </div>
+            <div id="reportsSectionBody" class="panel-section-body">
+              <div class="selection-tools" aria-label="Report tools">
+                <span class="selection-tools-label">Reports</span>
+                <div class="selection-tools-actions">
+                  <button id="subtreeReportBtn" class="secondary compact-btn" type="button">Subtree Report</button>
+                  <button id="rankReportBtn" class="secondary compact-btn" type="button">Rank Report</button>
+                </div>
+              </div>
             </div>
           </section>
         </section>
