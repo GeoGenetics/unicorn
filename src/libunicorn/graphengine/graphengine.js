@@ -45,6 +45,7 @@ const els = {
   optionsSectionBody: document.getElementById("optionsSectionBody"),
   uncollapseBtn: document.getElementById("uncollapseBtn"),
   uncollapseTipsBtn: document.getElementById("uncollapseTipsBtn"),
+  subtreeReportBtn: document.getElementById("subtreeReportBtn"),
   selectDescendantsBtn: document.getElementById("selectDescendantsBtn"),
   clearSelectionBtn: document.getElementById("clearSelectionBtn"),
   lcaInputs: document.getElementById("lcaInputs"),
@@ -87,6 +88,8 @@ const els = {
   missingCount: document.getElementById("missingCount"),
   selectedCount: document.getElementById("selectedCount"),
   tablePanel: document.getElementById("tablePanel"),
+  tablePanelTitle: document.getElementById("tablePanelTitle") || document.querySelector("#tablePanel h2"),
+  subtreeReport: document.getElementById("subtreeReport"),
   sourceLegend: document.getElementById("sourceLegend"),
   topTable: document.getElementById("topTable"),
 };
@@ -122,6 +125,9 @@ els.searchBox.addEventListener("input", redraw);
 els.sidebarToggle.addEventListener("click", toggleSidebar);
 els.uncollapseBtn.addEventListener("click", uncollapseSelected);
 els.uncollapseTipsBtn.addEventListener("click", uncollapseSelectedToTips);
+if (els.subtreeReportBtn) {
+  els.subtreeReportBtn.addEventListener("click", openSelectedSubtreeReport);
+}
 els.selectDescendantsBtn.addEventListener("click", selectDescendants);
 els.clearSelectionBtn.addEventListener("click", clearSelection);
 initControlsResize();
@@ -381,6 +387,7 @@ async function loadAndRenderRemote() {
     for (const file of localFiles) {
       if (file.name.endsWith(".bdamage.txt")) state.remote.selectedDatasets.add(file.name);
     }
+    clearRemoteDatasetInputs();
   }
 
   const files = getSelectedRemoteDatasets();
@@ -402,6 +409,15 @@ async function loadAndRenderRemote() {
   state.centerOnNextRender = true;
   setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} remote dataset${state.series.length === 1 ? "" : "s"} and ${state.remote.directTaxa.toLocaleString()} direct taxa.`);
   redraw();
+}
+
+function clearRemoteDatasetInputs() {
+  document.querySelectorAll(".lca-file-input").forEach((input) => {
+    input.value = "";
+  });
+  if (els.lcaListFile) {
+    els.lcaListFile.value = "";
+  }
 }
 
 async function loadLocalSources() {
@@ -583,6 +599,21 @@ async function fetchRemoteTableView(options = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(payload?.detail?.message || `Remote table-view request failed with HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function fetchRemoteSubtreeReport(taxid, options = {}) {
+  const response = await fetch(buildRemoteContextUrl("subtree-report", {
+    query: {
+      taxid,
+      descendant_limit: options.descendantLimit || 25,
+      matrix_limit: options.matrixLimit || 12,
+    },
+  }).toString(), { method: "GET" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.detail?.message || `Remote subtree-report request failed with HTTP ${response.status}`);
   }
   return payload;
 }
@@ -1283,6 +1314,7 @@ function clearSelection() {
     return;
   }
   state.selected.clear();
+  clearSubtreeReportView();
   redraw();
 }
 
@@ -1545,9 +1577,11 @@ function renderSummary(visible) {
 
 function renderTopTable() {
   if (isRemoteServerTreeMode()) {
+    clearSubtreeReportView();
     renderRemoteTopTable();
     return;
   }
+  clearSubtreeReportView();
   const rows = state.flat
     .filter((node) => node.direct > 0)
     .sort((a, b) => b.direct - a.direct)
@@ -1561,6 +1595,207 @@ function renderTopTable() {
       <td>${node.total.toLocaleString()}</td>
     </tr>
   `).join("");
+}
+
+function clearSubtreeReportView() {
+  if (els.subtreeReport) {
+    els.subtreeReport.hidden = true;
+    els.subtreeReport.innerHTML = "";
+  }
+  if (els.tablePanelTitle) {
+    els.tablePanelTitle.textContent = "Top direct placements";
+  }
+}
+
+async function openSelectedSubtreeReport() {
+  if (!isRemoteServerTreeMode()) {
+    setStatus("Subtree reports are currently available in remote backend mode.");
+    return;
+  }
+  const selectedNodes = getSelectedNodes();
+  if (!selectedNodes.length) {
+    setStatus("Select one node first, then use Subtree Report.");
+    return;
+  }
+  if (selectedNodes.length > 1) {
+    setStatus("Select exactly one node for a subtree report.");
+    return;
+  }
+  const target = selectedNodes[0];
+  setTablePanelVisible(true);
+  const requestId = ++state.remote.tableRequestId;
+  if (!els.subtreeReport || !els.tablePanelTitle) {
+    setStatus("Subtree report UI is not available in the current HTML shell. Try a hard refresh.");
+    return;
+  }
+  els.tablePanelTitle.textContent = `Subtree report: ${target.name}`;
+  els.subtreeReport.hidden = false;
+  els.subtreeReport.innerHTML = `<div class="subtree-report-card">Loading subtree report for ${escapeHtml(target.name)}...</div>`;
+  els.topTable.innerHTML = "";
+  try {
+    const payload = await fetchRemoteSubtreeReport(target.taxid);
+    if (requestId !== state.remote.tableRequestId) return;
+    renderSubtreeReport(payload.report || null);
+  } catch (error) {
+    if (requestId !== state.remote.tableRequestId) return;
+    els.subtreeReport.hidden = false;
+    els.subtreeReport.innerHTML = `
+      <div class="subtree-report-card">
+        ${escapeHtml(error.message || "Could not load subtree report.")}
+      </div>
+    `;
+    els.topTable.innerHTML = "";
+  }
+}
+
+function renderSubtreeReport(report) {
+  if (!els.subtreeReport || !els.tablePanelTitle) return;
+  if (!report || !report.target) {
+    els.subtreeReport.hidden = false;
+    els.subtreeReport.innerHTML = `<div class="subtree-report-card">No subtree report was returned by the backend.</div>`;
+    els.topTable.innerHTML = "";
+    return;
+  }
+  const target = report.target;
+  els.tablePanelTitle.textContent = `Subtree report: ${target.name}`;
+  els.subtreeReport.hidden = false;
+  els.subtreeReport.innerHTML = `
+    <div class="subtree-report-card">
+      <h3>${escapeHtml(target.name)} (${target.taxid})</h3>
+      <div class="subtree-report-meta">
+        <span>rank: ${escapeHtml(target.rank || "NA")}</span>
+        <span>direct: ${Number(target.direct || 0).toLocaleString()}</span>
+        <span>subtree: ${Number(target.subtree || 0).toLocaleString()}</span>
+        <span>children: ${Number(target.child_count || 0).toLocaleString()}</span>
+      </div>
+      <div class="subtree-report-lineage">${renderLineage(report.target.lineage || [])}</div>
+    </div>
+    <div class="subtree-report-grid">
+      <div class="subtree-report-card">
+        <h3>Per-dataset summary</h3>
+        ${renderDatasetBreakdownTable(target.datasets || [])}
+      </div>
+      <div class="subtree-report-card">
+        <h3>Top immediate children</h3>
+        ${renderCompactRowsTable(report.top_children || [], "No child nodes passed the current filters.")}
+      </div>
+    </div>
+    <div class="subtree-report-card subtree-report-matrix">
+      <h3>Top-child count matrix</h3>
+      ${renderSubtreeMatrix(report.matrix || {})}
+    </div>
+  `;
+
+  const descendants = Array.isArray(report.top_descendants) ? report.top_descendants : [];
+  els.topTable.innerHTML = descendants.map((row) => `
+    <tr>
+      <td>${Number(row.taxid).toLocaleString()}</td>
+      <td>${escapeHtml(row.name || "")}</td>
+      <td>${escapeHtml(row.rank || "NA")}</td>
+      <td>${Number(row.direct || 0).toLocaleString()}</td>
+      <td>${Number(row.subtree || 0).toLocaleString()}</td>
+    </tr>
+  `).join("");
+  if (!descendants.length) {
+    els.topTable.innerHTML = `
+      <tr>
+        <td colspan="5">No descendant rows passed the current server filters.</td>
+      </tr>
+    `;
+  }
+}
+
+function renderLineage(lineage) {
+  if (!Array.isArray(lineage) || !lineage.length) {
+    return `<span class="subtree-report-empty">No lineage available.</span>`;
+  }
+  return lineage
+    .map((node) => `${escapeHtml(node.name || String(node.taxid))} (${Number(node.taxid).toLocaleString()})`)
+    .join(" -> ");
+}
+
+function renderDatasetBreakdownTable(rows) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return `<div class="subtree-report-empty">No per-dataset summary available.</div>`;
+  }
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Dataset</th>
+          <th>Direct</th>
+          <th>Subtree</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.dataset || "")}</td>
+            <td>${Number(row.direct || 0).toLocaleString()}</td>
+            <td>${Number(row.subtree || 0).toLocaleString()}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderCompactRowsTable(rows, emptyMessage) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return `<div class="subtree-report-empty">${escapeHtml(emptyMessage)}</div>`;
+  }
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Rank</th>
+          <th>Direct</th>
+          <th>Subtree</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.name || "")}</td>
+            <td>${escapeHtml(row.rank || "NA")}</td>
+            <td>${Number(row.direct || 0).toLocaleString()}</td>
+            <td>${Number(row.subtree || 0).toLocaleString()}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderSubtreeMatrix(matrix) {
+  const rows = Array.isArray(matrix.rows) ? matrix.rows : [];
+  const datasetNames = Array.isArray(matrix.dataset_names) ? matrix.dataset_names : [];
+  if (!rows.length || !datasetNames.length) {
+    return `<div class="subtree-report-empty">No count matrix rows available for this subtree.</div>`;
+  }
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Node</th>
+          <th>Rank</th>
+          ${datasetNames.map((name) => `<th>${escapeHtml(name)}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row) => `
+          <tr>
+            <td>${escapeHtml(row.name || "")}</td>
+            <td>${escapeHtml(row.rank || "NA")}</td>
+            ${(Array.isArray(row.datasets) ? row.datasets : []).map((entry) => `
+              <td>${Number(entry.subtree || 0).toLocaleString()}</td>
+            `).join("")}
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
 }
 
 async function renderRemoteTopTable() {

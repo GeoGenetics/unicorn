@@ -945,6 +945,29 @@ def _table_rows_for_subtree(
     return rows[:limit]
 
 
+def _top_children_rows(
+    node: TreeNodeModel,
+    min_reads: int,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    threshold = max(0, min_reads)
+    rows = [
+        {
+            "taxid": child.taxid,
+            "name": child.name,
+            "rank": child.rank,
+            "depth": child.depth,
+            "direct": child.direct,
+            "subtree": child.total,
+            "child_count": _filtered_child_count(child, min_reads),
+        }
+        for child in node.children
+        if child.total >= threshold
+    ]
+    rows.sort(key=lambda row: (-int(row["subtree"]), -int(row["direct"]), str(row["name"])))
+    return rows[:limit]
+
+
 @app.get("/root-view")
 def root_view(
     files: Optional[List[str]] = Query(default=None),
@@ -1109,6 +1132,73 @@ def table_view(
         "limit": limit,
         "row_count": len(rows),
         "rows": rows,
+        "request_context": request_context,
+    }
+
+
+@app.get("/subtree-report")
+def subtree_report(
+    taxid: int = Query(...),
+    files: Optional[List[str]] = Query(default=None),
+    nodes_file: Optional[str] = Query(default=None),
+    names_file: Optional[str] = Query(default=None),
+    min_reads: int = Query(default=0, ge=0),
+    descendant_limit: int = Query(default=25, ge=1, le=500),
+    matrix_limit: int = Query(default=12, ge=1, le=250),
+) -> Dict[str, Any]:
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    request_context = _response_context(selection, taxonomy, min_reads, [])
+    node = _resolve_node_in_context(tree, taxid, min_reads, request_context)
+
+    top_descendants = _table_rows_for_subtree(
+        node,
+        min_reads=min_reads,
+        sort_by="subtree",
+        limit=descendant_limit,
+    )
+    # The first row returned for a subtree is often the selected node itself.
+    if top_descendants and int(top_descendants[0]["taxid"]) == node.taxid:
+        top_descendants = top_descendants[1:]
+    top_children = _top_children_rows(node, min_reads=min_reads, limit=descendant_limit)
+    matrix_rows = top_children[:matrix_limit]
+    matrix = []
+    for row in matrix_rows:
+        child = node.find_taxid(int(row["taxid"]))
+        if child is None:
+            continue
+        matrix.append(
+            {
+                "taxid": child.taxid,
+                "name": child.name,
+                "rank": child.rank,
+                "subtree": child.total,
+                "datasets": _dataset_breakdown(selection, child),
+            }
+        )
+
+    return {
+        "ok": True,
+        "report": {
+            "target": {
+                "taxid": node.taxid,
+                "name": node.name,
+                "rank": node.rank,
+                "depth": node.depth,
+                "parent": node.parent,
+                "direct": node.direct,
+                "subtree": node.total,
+                "child_count": _filtered_child_count(node, min_reads),
+                "lineage": _build_lineage(node, tree),
+                "datasets": _dataset_breakdown(selection, node),
+            },
+            "top_descendants": top_descendants,
+            "top_children": top_children,
+            "matrix": {
+                "rows": matrix,
+                "dataset_names": [dataset.fileinfo.name for dataset in selection.datasets],
+                "row_count": len(matrix),
+            },
+        },
         "request_context": request_context,
     }
 

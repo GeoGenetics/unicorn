@@ -107,6 +107,13 @@ browser. The new backend tree model is in place for the next client transition.
   same dataset selection, taxonomy files, and `min_reads` filter as the tree
   view. Rows can currently be sorted by `direct` or `subtree`.
 
+- `GET /subtree-report?taxid=123&files=a&files=b`
+  Returns a richer subtree-focused report for one node under the same dataset
+  selection, taxonomy files, and `min_reads` filter as the tree view. The
+  payload currently includes target-node summary, per-dataset totals, top
+  immediate children, top descendants, and a small child-by-dataset count
+  matrix.
+
 ## What these new endpoints are for
 
 - `/node-tooltip`
@@ -116,6 +123,10 @@ browser. The new backend tree model is in place for the next client transition.
 - `/table-view`
   This answers: "for this root or subtree, what ranked rows should the count
   table show under the current tree context?"
+
+- `/subtree-report`
+  This answers: "for this one selected subtree, what compact report should the
+  analysis panel show under the current tree context?"
 
 They are meant to use the same selection and filter context as the visible tree
 API, so the client does not have to recompute those derived views locally.

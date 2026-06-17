@@ -725,6 +725,52 @@ button {
   max-height: 24vh;
 }
 
+.subtree-report {
+  display: grid;
+  gap: 14px;
+  margin: 12px 0 18px;
+}
+
+.subtree-report-card {
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  background: rgba(255, 253, 247, 0.92);
+}
+
+.subtree-report-card h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.subtree-report-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.subtree-report-lineage {
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.subtree-report-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.subtree-report-matrix {
+  overflow: auto;
+}
+
+.subtree-report-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .table-panel.hidden {
   display: none;
 }

@@ -127,6 +127,7 @@
               <div class="selection-tools" aria-label="Selection tools">
                 <span class="selection-tools-label">Selection</span>
                 <div class="selection-tools-actions">
+                  <button id="subtreeReportBtn" class="secondary compact-btn" type="button">Subtree Report</button>
                   <button id="uncollapseBtn" class="secondary compact-btn" type="button">Uncollapse</button>
                   <button id="uncollapseTipsBtn" class="secondary compact-btn" type="button">Uncollapse Tips</button>
                   <button id="selectDescendantsBtn" class="secondary compact-btn" type="button">Select Descendants</button>
@@ -159,7 +160,8 @@
       </section>
 
       <section id="tablePanel" class="table-panel hidden" aria-label="Top LCA placements" hidden>
-        <h2>Top direct placements</h2>
+        <h2 id="tablePanelTitle">Top direct placements</h2>
+        <div id="subtreeReport" class="subtree-report" hidden></div>
         <table>
           <thead>
             <tr>
