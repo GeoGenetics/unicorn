@@ -15,6 +15,8 @@ const state = {
     serverTreeActive: false,
     totalReads: 0,
     directTaxa: 0,
+    tooltipRequestId: 0,
+    tableRequestId: 0,
   },
   tree: null,
   flat: [],
@@ -527,30 +529,62 @@ function isRemoteServerTreeMode() {
   return state.remote.connected && state.remote.serverTreeActive;
 }
 
-function buildRemoteTreeRequestUrl(path, options = {}) {
+function buildRemoteContextUrl(path, options = {}) {
   const url = new URL(`http://localhost:8000/${path}`);
   const files = getSelectedRemoteDatasets();
   for (const file of files) url.searchParams.append("files", file);
   if (els.nodesFile.files[0]) url.searchParams.set("nodes_file", els.nodesFile.files[0].name);
   if (els.namesFile.files[0]) url.searchParams.set("names_file", els.namesFile.files[0].name);
   url.searchParams.set("min_reads", String(Number(els.minReads.value || 0)));
-  const expandedTaxids = options.expandedTaxids || Array.from(state.remote.expandedTaxids);
-  for (const taxid of expandedTaxids) {
-    url.searchParams.append("expanded", String(taxid));
+  if (Array.isArray(options.expandedTaxids)) {
+    for (const taxid of options.expandedTaxids) {
+      url.searchParams.append("expanded", String(taxid));
+    }
   }
-  if (options.taxid != null) {
-    url.searchParams.set("taxid", String(options.taxid));
+  for (const [key, value] of Object.entries(options.query || {})) {
+    if (value == null) continue;
+    url.searchParams.set(key, String(value));
   }
   return url;
 }
 
 async function fetchRemoteVisibleTree(options = {}) {
   const endpoint = options.taxid != null ? "expand-node" : "root-view";
-  const response = await fetch(buildRemoteTreeRequestUrl(endpoint, options).toString(), { method: "GET" });
+  const response = await fetch(buildRemoteContextUrl(endpoint, {
+    expandedTaxids: options.expandedTaxids || Array.from(state.remote.expandedTaxids),
+    query: options.taxid != null ? { taxid: options.taxid } : {},
+  }).toString(), { method: "GET" });
   if (!response.ok) {
     throw new Error(`Remote ${endpoint} request failed with HTTP ${response.status}`);
   }
   return response.json();
+}
+
+async function fetchRemoteNodeTooltip(taxid) {
+  const response = await fetch(buildRemoteContextUrl("node-tooltip", {
+    query: { taxid },
+  }).toString(), { method: "GET" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.detail?.message || `Remote node-tooltip request failed with HTTP ${response.status}`);
+  }
+  return payload;
+}
+
+async function fetchRemoteTableView(options = {}) {
+  const response = await fetch(buildRemoteContextUrl("table-view", {
+    query: {
+      scope: options.scope || "root",
+      taxid: options.taxid,
+      sort: options.sort || "direct",
+      limit: options.limit || 40,
+    },
+  }).toString(), { method: "GET" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.detail?.message || `Remote table-view request failed with HTTP ${response.status}`);
+  }
+  return payload;
 }
 
 function applyRemoteVisiblePayload(payload) {
@@ -1404,6 +1438,10 @@ function updateTooltipPosition(event) {
 }
 
 function showTooltip(event, node) {
+  if (isRemoteServerTreeMode()) {
+    showRemoteTooltip(event, node);
+    return;
+  }
   const mode = els.countMode.value === "direct" ? "direct reads" : "subtree reads";
   const childCount = typeof node.childCount === "number" ? node.childCount : node.children.length;
   const breakdown = getNodeSeriesValues(node)
@@ -1430,11 +1468,62 @@ function showTooltip(event, node) {
   `;
 }
 
+async function showRemoteTooltip(event, node) {
+  const requestId = ++state.remote.tooltipRequestId;
+  els.tooltip.hidden = false;
+  positionTooltip(event);
+  els.tooltip.innerHTML = `
+    <strong>${escapeHtml(node.name)}</strong>
+    taxid: ${node.taxid}<br>
+    loading tooltip...
+  `;
+  try {
+    const payload = await fetchRemoteNodeTooltip(node.taxid);
+    if (requestId !== state.remote.tooltipRequestId) return;
+    if (state.tooltipNode !== node) return;
+    const remoteNode = payload.node || {};
+    const breakdown = Array.isArray(remoteNode.datasets)
+      ? remoteNode.datasets
+        .filter((entry) => Number(entry.subtree || 0) > 0 || Number(entry.direct || 0) > 0)
+        .sort((a, b) => Number(b.subtree || 0) - Number(a.subtree || 0))
+        .map((entry, index) => `
+          <div class="tooltip-source">
+            <span class="tooltip-swatch" style="background:${state.series[index]?.color || "#9cad9f"}"></span>
+            <span>${escapeHtml(entry.dataset)}: ${Number(entry.direct || 0).toLocaleString()} direct / ${Number(entry.subtree || 0).toLocaleString()} subtree</span>
+          </div>
+        `)
+        .join("")
+      : "";
+    els.tooltip.hidden = false;
+    positionTooltip(state.tooltipPoint || event);
+    els.tooltip.innerHTML = `
+      <strong>${escapeHtml(remoteNode.name || node.name)}</strong>
+      taxid: ${Number(remoteNode.taxid ?? node.taxid)}<br>
+      rank: ${escapeHtml(remoteNode.rank || node.rank || "NA")}<br>
+      direct reads: ${Number(remoteNode.direct || 0).toLocaleString()}<br>
+      subtree reads: ${Number(remoteNode.subtree || 0).toLocaleString()}<br>
+      children: ${Number(remoteNode.child_count || 0).toLocaleString()}<br>
+      ${breakdown ? `<div class="tooltip-breakdown"><em>per dataset</em>${breakdown}</div>` : ""}
+    `;
+  } catch (error) {
+    if (requestId !== state.remote.tooltipRequestId) return;
+    if (state.tooltipNode !== node) return;
+    els.tooltip.hidden = false;
+    positionTooltip(state.tooltipPoint || event);
+    els.tooltip.innerHTML = `
+      <strong>${escapeHtml(node.name)}</strong>
+      taxid: ${node.taxid}<br>
+      ${escapeHtml(error.message || "Could not load tooltip.")}
+    `;
+  }
+}
+
 function hideTooltip() {
   if (state.tooltipTimer) {
     clearTimeout(state.tooltipTimer);
     state.tooltipTimer = null;
   }
+  state.remote.tooltipRequestId++;
   state.tooltipNode = null;
   state.tooltipPoint = null;
   els.tooltip.hidden = true;
@@ -1455,6 +1544,10 @@ function renderSummary(visible) {
 }
 
 function renderTopTable() {
+  if (isRemoteServerTreeMode()) {
+    renderRemoteTopTable();
+    return;
+  }
   const rows = state.flat
     .filter((node) => node.direct > 0)
     .sort((a, b) => b.direct - a.direct)
@@ -1468,6 +1561,47 @@ function renderTopTable() {
       <td>${node.total.toLocaleString()}</td>
     </tr>
   `).join("");
+}
+
+async function renderRemoteTopTable() {
+  const requestId = ++state.remote.tableRequestId;
+  els.topTable.innerHTML = `
+    <tr>
+      <td colspan="5">Loading server table...</td>
+    </tr>
+  `;
+  try {
+    const payload = await fetchRemoteTableView({
+      scope: "root",
+      sort: "direct",
+      limit: 40,
+    });
+    if (requestId !== state.remote.tableRequestId) return;
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    els.topTable.innerHTML = rows.map((row) => `
+      <tr>
+        <td>${Number(row.taxid).toLocaleString()}</td>
+        <td>${escapeHtml(row.name || "")}</td>
+        <td>${escapeHtml(row.rank || "NA")}</td>
+        <td>${Number(row.direct || 0).toLocaleString()}</td>
+        <td>${Number(row.subtree || 0).toLocaleString()}</td>
+      </tr>
+    `).join("");
+    if (!rows.length) {
+      els.topTable.innerHTML = `
+        <tr>
+          <td colspan="5">No rows passed the current server filters.</td>
+        </tr>
+      `;
+    }
+  } catch (error) {
+    if (requestId !== state.remote.tableRequestId) return;
+    els.topTable.innerHTML = `
+      <tr>
+        <td colspan="5">${escapeHtml(error.message || "Could not load server table.")}</td>
+      </tr>
+    `;
+  }
 }
 
 function svgEl(name, attrs = {}, text = "") {
