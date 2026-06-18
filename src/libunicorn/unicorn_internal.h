@@ -572,3 +572,4 @@ double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount);
 uint64_t _getcovbases(ueventq_t events,
                      uint64_t *_depthsum,
             uint64_t *_sumsqdepth);
+
