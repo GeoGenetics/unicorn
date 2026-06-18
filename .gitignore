@@ -21,3 +21,4 @@ figures/
 src/genesisC/*.o
 debug/
 src/libunicorn/graphengine/__pycache__/
+doc/*.pdf

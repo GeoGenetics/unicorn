@@ -32,7 +32,7 @@ SOFTWARE.
 typedef struct taxa {
   uint32_t taxid;
 	uint64_t count;
-	uint64_t *mmm;
+	float *mmm;
 } taxa_t;
 
 KHASHL_MAP_INIT(static,
@@ -93,11 +93,11 @@ static inline size_t _mmm_offset(uint8_t mmm, uint8_t side, uint8_t pos, uint8_t
   return (((size_t)side * (size_t)mmm) + (size_t)pos) * (size_t)UNICORN_LCA_MMM_ROWS + (size_t)pair;
 }
 
-static uint64_t *_mmm_alloc(uint8_t mmm)
+static float *_mmm_alloc(uint8_t mmm)
 {
   size_t cells = _mmm_cells(mmm);
   if (!cells) return NULL;
-  return (uint64_t *)calloc(cells, sizeof(uint64_t));
+  return (float *)calloc(cells, sizeof(float));
 }
 
 static char *_base64_encode_bytes(const uint8_t *src, size_t nsrc)
@@ -259,7 +259,8 @@ static void _taxamap_add_mismatch(uint32map_t *taxamap,
                                   uint8_t side,
                                   uint8_t pos,
                                   char ref_base,
-                                  char query_base)
+                                  char query_base,
+                                  float weight)
 {
   int ref_idx, query_idx;
   uint8_t pair;
@@ -272,7 +273,7 @@ static void _taxamap_add_mismatch(uint32map_t *taxamap,
   pair = (uint8_t)(ref_idx * UNICORN_LCA_MMM_BASES + query_idx);
   k = _taxamap_touch(taxamap, taxid, mmm);
   if (k == kh_end(taxamap) || !kh_val(taxamap, k).mmm) return;
-  kh_val(taxamap, k).mmm[_mmm_offset(mmm, side, pos, pair)]++;
+  kh_val(taxamap, k).mmm[_mmm_offset(mmm, side, pos, pair)] += weight;
 }
 
 static void _taxamap_merge(uint32map_t *dst, const uint32map_t *src, uint8_t mmm)
@@ -296,6 +297,7 @@ static void _taxamap_merge(uint32map_t *dst, const uint32map_t *src, uint8_t mmm
 static void _taxamap_add_alignment_mismatches(uint32map_t *taxamap,
                                               uint32_t taxid,
                                               uint8_t mmm,
+                                              float weight,
                                               const bam1_t *b)
 {
   const uint32_t *cigar;
@@ -304,7 +306,7 @@ static void _taxamap_add_alignment_mismatches(uint32map_t *taxamap,
   int32_t *ref2q = NULL;
   int32_t qpos = 0, ref_idx = 0, ref_cols = 0, qlen;
   uint32_t ncigar;
-  if (!taxamap || !taxid || !mmm || !b) return;
+  if (!taxamap || !taxid || !mmm || !b || weight <= 0.0f) return;
   {
     uint8_t *md_aux = bam_aux_get((bam1_t *)b, "MD");
     if (!md_aux) return;
@@ -384,12 +386,12 @@ static void _taxamap_add_alignment_mismatches(uint32map_t *taxamap,
         const char query_base = (char)toupper((unsigned char)seq_nt16_str[bam_seqi(seq, qpos)]);
         if (ref_base != 'N' && query_base != 'N') {
           if (qpos < mmm) {
-            _taxamap_add_mismatch(taxamap, taxid, mmm, 0, (uint8_t)qpos, ref_base, query_base);
+            _taxamap_add_mismatch(taxamap, taxid, mmm, 0, (uint8_t)qpos, ref_base, query_base, weight);
           }
           {
             int32_t dist3 = qlen - qpos - 1;
             if (dist3 >= 0 && dist3 < mmm) {
-              _taxamap_add_mismatch(taxamap, taxid, mmm, 1, (uint8_t)dist3, ref_base, query_base);
+              _taxamap_add_mismatch(taxamap, taxid, mmm, 1, (uint8_t)dist3, ref_base, query_base, weight);
             }
           }
         }
@@ -406,9 +408,11 @@ static void _taxamap_add_alignment_mismatches(uint32map_t *taxamap,
 static void _write_mmm_output(FILE *fp, const uint32map_t *taxamap, const utax_t *utax, uint8_t mmm)
 {
   khint_t k;
-  const size_t nbytes = _mmm_cells(mmm) * sizeof(uint64_t);
+  const size_t nbytes = _mmm_cells(mmm) * sizeof(float);
+  char header[64];
   if (!fp || !taxamap || !utax || !mmm) return;
-  fprintf(fp, "#taxid\tcount\tname\tmmm_base64\n");
+  snprintf(header, sizeof(header), "mmm_%u", (unsigned)mmm);
+  fprintf(fp, "#taxid\tcount\tname\t%s\n", header);
   kh_foreach(taxamap, k) {
     const taxa_t t = kh_val(taxamap, k);
     const char *name = utax_getname(utax, t.taxid);
@@ -622,11 +626,13 @@ static void _statfor(void *data, long i, int tid)
       continue;
     }
     if (strcmp(group_q, qname) != 0) {
+      const uint32_t nk = j - group_start;
+      const float weight = nk ? (1.0f / (float)nk) : 0.0f;
       kv_push(uint32_t, *lcas, cur_lca);
       _taxamap_add(taxamap, cur_lca, s->mmm);
       for (uint32_t jj = group_start; jj < j; jj++) {
         bam1_t *bb = q->a[jj];
-        _taxamap_add_alignment_mismatches(taxamap, cur_lca, s->mmm, bb);
+        _taxamap_add_alignment_mismatches(taxamap, cur_lca, s->mmm, weight, bb);
       }
       group_q = qname;
       group_start = j;
@@ -636,10 +642,12 @@ static void _statfor(void *data, long i, int tid)
     cur_lca = cur_lca ? _utax_lca_pair(utax, cur_lca, taxid) : taxid;
   }
   if (group_q) {
+    const uint32_t nk = q->n - group_start;
+    const float weight = nk ? (1.0f / (float)nk) : 0.0f;
     kv_push(uint32_t, *lcas, cur_lca);
     _taxamap_add(taxamap, cur_lca, s->mmm);
     for (uint32_t jj = group_start; jj < q->n; jj++) {
-      _taxamap_add_alignment_mismatches(taxamap, cur_lca, s->mmm, q->a[jj]);
+      _taxamap_add_alignment_mismatches(taxamap, cur_lca, s->mmm, weight, q->a[jj]);
     }
   }
 }
