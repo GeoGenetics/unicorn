@@ -1,0 +1,51 @@
+This is excellent. What you’re seeing is exactly the provider request payload Unicorn would send under the current contract.
+And it’s a very healthy sign because it shows the whole structure is now real:
+provider identity and model
+system prompt
+raw user prompt
+full Unicorn graph context
+allowed Unicorn tools
+conversation history
+tool results so far
+turn config with iteration limit
+So yes, this means the protocol is now visible and inspectable end-to-end.
+A few important observations from your example:
+provider.name: "openai" and model: "gpt-5" are coming from the UI config, even though the active runtime provider is still mock
+Unicorn is sending the current selected taxid, expanded taxids, filters, and dataset state exactly as intended
+the tool surface is explicit, so the provider can only ask for those Unicorn-native actions
+Also, your prompt Select all the wheat taxa is a very good test because it reveals an important boundary in the current mock logic:
+the contract loop works
+but the mock provider does not yet understand semantic taxonomy requests like “wheat taxa”
+Right now the mock provider mostly reacts to:
+keywords like selected, dataset, top, rank, table, damage
+explicit numeric taxids
+So this payload looks correct, but the mock provider probably won’t do the biologically meaningful thing yet, because that would require either:
+smarter hardcoded logic for terms like wheat, or
+a real LLM
+That’s actually a good sign. It means the remaining gap is language understanding, not architecture.
+On your earlier question: in production, yes, this loop would usually move at least partly to the backend. Not because the protocol changes, but because the execution location changes.
+Typical production split:
+frontend:collects prompt
+renders transcript
+shows tool traces and UI state
+
+backend:holds provider credentials
+sends/receives provider payloads
+runs the provider turn loop
+may execute backend-safe Unicorn tools
+
+frontend and backend together:share the same contract shape we just defined
+
+So the important part is: the protocol stays the same. Only where it runs changes.
+Right now, though, we are still correctly staying client-side.
+The next good implementation step is probably one of these:
+teach the mock provider a few more domain-shaped intents like:
+select all ... taxa
+focus on ...
+show me details for ...
+
+add richer tool schemas so future real providers know the expected arguments more clearly
+
+begin the first real OpenAI adapter
+
+I’d recommend 1 first for a bit more UX power before we wire a real provider.
