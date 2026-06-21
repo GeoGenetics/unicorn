@@ -170,6 +170,49 @@
             </div>
           </section>
 
+          <section class="panel-section" aria-label="Agent section">
+            <div class="panel-section-head">
+              <h2>Agent</h2>
+              <button id="toggleAgentSection" class="secondary compact-btn section-toggle" type="button" aria-expanded="true">Hide</button>
+            </div>
+            <div id="agentSectionBody" class="panel-section-body">
+              <div class="agent-shell">
+                <div class="agent-shell-head">
+                  <div id="agentMeta" class="agent-meta">Mock mode. Client-side only.</div>
+                  <button id="agentClearBtn" class="secondary compact-btn" type="button">Clear</button>
+                </div>
+                <div class="agent-config">
+                  <label>
+                    <span>Provider</span>
+                    <select id="agentProviderSelect">
+                      <option value="openai">OpenAI</option>
+                      <option value="google">Google</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Model</span>
+                    <select id="agentModelSelect"></select>
+                  </label>
+                  <label class="agent-api-key-label">
+                    <span>API Key</span>
+                    <input id="agentApiKey" type="password" placeholder="UI only for now" autocomplete="off" spellcheck="false">
+                  </label>
+                </div>
+                <div id="agentProviderState" class="agent-provider-state">Configuration only for now. Mock adapter remains active until real provider calls are implemented.</div>
+                <label for="agentPrompt">
+                  <span>Prompt</span>
+                </label>
+                <textarea id="agentPrompt" class="agent-prompt" rows="4" placeholder="Ask Unicorn about the current graph state..."></textarea>
+                <div class="agent-actions">
+                  <button id="agentSendBtn" class="primary" type="button">Send</button>
+                </div>
+                <div id="agentTranscript" class="agent-transcript" aria-live="polite">
+                  <div class="agent-empty">Mock agent replies will appear here.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section class="panel-section" aria-label="Client log section">
             <div class="panel-section-head">
               <h2>Client Log</h2>

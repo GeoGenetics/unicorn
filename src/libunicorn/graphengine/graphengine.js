@@ -6,6 +6,13 @@ const state = {
   names: new Map(),
   series: [],
   clientLog: [],
+  agent: {
+    history: [],
+    currentProvider: "mock",
+    configuredProvider: "openai",
+    configuredModel: "gpt-5",
+    apiKey: "",
+  },
   remote: {
     user: "",
     host: "",
@@ -50,8 +57,19 @@ const els = {
   optionsSectionBody: document.getElementById("optionsSectionBody"),
   toggleReportsSection: document.getElementById("toggleReportsSection"),
   reportsSectionBody: document.getElementById("reportsSectionBody"),
+  toggleAgentSection: document.getElementById("toggleAgentSection"),
+  agentSectionBody: document.getElementById("agentSectionBody"),
+  agentMeta: document.getElementById("agentMeta"),
+  agentProviderSelect: document.getElementById("agentProviderSelect"),
+  agentModelSelect: document.getElementById("agentModelSelect"),
+  agentApiKey: document.getElementById("agentApiKey"),
+  agentProviderState: document.getElementById("agentProviderState"),
   toggleLogSection: document.getElementById("toggleLogSection"),
   logSectionBody: document.getElementById("logSectionBody"),
+  agentPrompt: document.getElementById("agentPrompt"),
+  agentSendBtn: document.getElementById("agentSendBtn"),
+  agentClearBtn: document.getElementById("agentClearBtn"),
+  agentTranscript: document.getElementById("agentTranscript"),
   uncollapseBtn: document.getElementById("uncollapseBtn"),
   uncollapseTipsBtn: document.getElementById("uncollapseTipsBtn"),
   subtreeReportBtn: document.getElementById("subtreeReportBtn"),
@@ -113,6 +131,39 @@ const els = {
   clearClientLogBtn: document.getElementById("clearClientLogBtn"),
 };
 
+const SOURCE_COLORS = [
+  "#c85f43",
+  "#255f75",
+  "#e2a44e",
+  "#5f8c6f",
+  "#8a5a99",
+  "#d17b2c",
+  "#5d6cc1",
+  "#b24d6d",
+  "#4c9f9b",
+  "#7f6a58",
+];
+
+const AGENT_PROVIDER_MODELS = {
+  openai: [
+    { value: "gpt-5", label: "GPT-5" },
+    { value: "gpt-5-mini", label: "GPT-5 mini" },
+    { value: "gpt-4.1", label: "GPT-4.1" },
+  ],
+  google: [
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+  ],
+};
+
+const AGENT_MAX_TOOL_ITERATIONS = 4;
+
+const unicornAgentRegistry = createUnicornAgentRegistry();
+window.unicornAgentRegistry = unicornAgentRegistry;
+const unicornAgentProviderAdapter = createAgentProviderAdapter();
+window.unicornAgentProviderAdapter = unicornAgentProviderAdapter;
+
 els.renderBtn.addEventListener("click", loadAndRender);
 els.addLcaBtn.addEventListener("click", addLcaInput);
 els.clearLcaListBtn.addEventListener("click", clearLcaListFile);
@@ -157,6 +208,29 @@ if (els.subtreeReportBtn) {
 if (els.rankReportBtn) {
   els.rankReportBtn.addEventListener("click", openSelectedRankReport);
 }
+if (els.agentSendBtn) {
+  els.agentSendBtn.addEventListener("click", handleAgentSend);
+}
+if (els.agentClearBtn) {
+  els.agentClearBtn.addEventListener("click", clearAgentTranscript);
+}
+if (els.agentProviderSelect) {
+  els.agentProviderSelect.addEventListener("change", handleAgentProviderChange);
+}
+if (els.agentModelSelect) {
+  els.agentModelSelect.addEventListener("change", handleAgentModelChange);
+}
+if (els.agentApiKey) {
+  els.agentApiKey.addEventListener("input", handleAgentApiKeyInput);
+}
+if (els.agentPrompt) {
+  els.agentPrompt.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleAgentSend();
+    }
+  });
+}
 els.selectDescendantsBtn.addEventListener("click", selectDescendants);
 els.clearSelectionBtn.addEventListener("click", clearSelection);
 if (els.exportMatrixBtn) {
@@ -174,19 +248,8 @@ initChartPan();
 initRemotePanel();
 initFileInputs();
 initMinReadsControls();
-
-const SOURCE_COLORS = [
-  "#c85f43",
-  "#255f75",
-  "#e2a44e",
-  "#5f8c6f",
-  "#8a5a99",
-  "#d17b2c",
-  "#5d6cc1",
-  "#b24d6d",
-  "#4c9f9b",
-  "#7f6a58",
-];
+initAgentControls();
+renderAgentTranscript();
 
 function initRemotePanel() {
   const savedUser = localStorage.getItem("unicorn.remoteUser") || "";
@@ -350,6 +413,7 @@ function initSidebarPanel() {
   initSectionToggle("filesSection", els.toggleFilesSection, els.filesSectionBody);
   initSectionToggle("optionsSection", els.toggleOptionsSection, els.optionsSectionBody);
   initSectionToggle("reportsSection", els.toggleReportsSection, els.reportsSectionBody);
+  initSectionToggle("agentSection", els.toggleAgentSection, els.agentSectionBody);
   initSectionToggle("logSection", els.toggleLogSection, els.logSectionBody);
 }
 
@@ -388,6 +452,891 @@ function setSidebarCollapsed(collapsed) {
   els.app.classList.toggle("sidebar-collapsed", collapsed);
   els.sidebarToggle.textContent = collapsed ? "Show Panel" : "Hide Panel";
   els.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+}
+
+function createUnicornAgentRegistry() {
+  const tools = {
+    get_graph_context: async () => buildAgentContext(),
+    list_selected_datasets: async () => ({
+      mode: state.remote.connected ? "remote" : "local",
+      datasets: buildAgentContext().datasets,
+    }),
+    get_selected_nodes: async () => ({
+      selected: getSelectedNodes().map((node) => summarizeNodeForAgent(node)),
+      count: state.selected.size,
+    }),
+    get_node_details: async (args = {}) => {
+      const taxid = normalizeToolTaxid(args.taxid);
+      if (taxid == null) {
+        throw new Error("get_node_details requires a numeric taxid.");
+      }
+      if (isRemoteServerTreeMode()) {
+        return fetchRemoteNodeTooltip(taxid);
+      }
+      const node = findNodeByTaxid(state.tree, taxid);
+      if (!node) {
+        throw new Error(`Taxid ${taxid} is not present in the active tree.`);
+      }
+      return {
+        ok: true,
+        mode: "local",
+        node: buildLocalNodeDetails(node),
+      };
+    },
+    get_table_view: async (args = {}) => {
+      const options = {
+        scope: args.scope || "root",
+        taxid: normalizeToolTaxid(args.taxid),
+        sort: args.sort || "direct",
+        limit: normalizeToolLimit(args.limit, 40),
+      };
+      if (isRemoteServerTreeMode()) {
+        return fetchRemoteTableView(options);
+      }
+      return buildLocalTableView(options);
+    },
+    select_taxon: async (args = {}) => {
+      const taxid = normalizeToolTaxid(args.taxid);
+      if (taxid == null) {
+        throw new Error("select_taxon requires a numeric taxid.");
+      }
+      const additive = Boolean(args.additive);
+      const node = findNodeByTaxid(state.tree, taxid);
+      if (!node) {
+        throw new Error(`Taxid ${taxid} is not present in the active tree.`);
+      }
+      if (!additive) {
+        state.selected.clear();
+      }
+      state.selected.add(node.taxid);
+      redraw();
+      return {
+        ok: true,
+        mode: isRemoteServerTreeMode() ? "remote" : "local",
+        additive,
+        selected: getSelectedNodes().map((selectedNode) => summarizeNodeForAgent(selectedNode)),
+      };
+    },
+    focus_taxon: async (args = {}) => {
+      const taxid = normalizeToolTaxid(args.taxid);
+      if (taxid == null) {
+        throw new Error("focus_taxon requires a numeric taxid.");
+      }
+      const node = findNodeByTaxid(state.tree, taxid);
+      if (!node) {
+        throw new Error(`Taxid ${taxid} is not present in the active tree.`);
+      }
+      state.focusTaxid = node.taxid;
+      centerNode(node);
+      redraw();
+      return {
+        ok: true,
+        mode: isRemoteServerTreeMode() ? "remote" : "local",
+        focused: summarizeNodeForAgent(node),
+      };
+    },
+    center_root: async () => {
+      state.focusTaxid = null;
+      centerRoot();
+      redraw();
+      return {
+        ok: true,
+        mode: isRemoteServerTreeMode() ? "remote" : "local",
+        focused: null,
+      };
+    },
+  };
+
+  return {
+    listTools() {
+      return Object.keys(tools);
+    },
+    async invokeTool(name, args = {}) {
+      const tool = tools[name];
+      if (!tool) {
+        throw new Error(`Unknown Unicorn agent tool: ${name}`);
+      }
+      return tool(args);
+    },
+  };
+}
+
+function createAgentProviderAdapter() {
+  const providers = {
+    mock: createMockAgentProvider(),
+  };
+
+  return {
+    listProviders() {
+      return Object.keys(providers);
+    },
+    getCurrentProviderName() {
+      return state.agent.currentProvider;
+    },
+    getCurrentProviderImplementation() {
+      return providers[state.agent.currentProvider] || null;
+    },
+    getCurrentProviderMeta() {
+      const provider = providers[state.agent.currentProvider];
+      if (!provider) return null;
+      return {
+        name: provider.name,
+        label: provider.label,
+        mode: provider.mode,
+        client_side: provider.clientSide,
+      };
+    },
+    async runTurn(input) {
+      return executeAgentProviderTurn(input);
+    },
+  };
+}
+
+function createMockAgentProvider() {
+  return {
+    name: "mock",
+    label: "Mock",
+    mode: "mock",
+    clientSide: true,
+    async runRequest(payload) {
+      return runMockProviderRequest(payload);
+    },
+  };
+}
+
+function initAgentControls() {
+  if (!els.agentProviderSelect || !els.agentModelSelect || !els.agentApiKey) return;
+  els.agentProviderSelect.value = state.agent.configuredProvider;
+  populateAgentModelOptions(state.agent.configuredProvider, state.agent.configuredModel);
+  els.agentApiKey.value = state.agent.apiKey;
+  renderAgentProviderState();
+}
+
+function populateAgentModelOptions(provider, selectedModel) {
+  if (!els.agentModelSelect) return;
+  const models = AGENT_PROVIDER_MODELS[provider] || [];
+  if (!models.length) {
+    els.agentModelSelect.innerHTML = "";
+    state.agent.configuredModel = "";
+    return;
+  }
+  const nextSelected = models.some((model) => model.value === selectedModel)
+    ? selectedModel
+    : models[0].value;
+  els.agentModelSelect.innerHTML = models.map((model) => `
+    <option value="${escapeHtml(model.value)}">${escapeHtml(model.label)}</option>
+  `).join("");
+  els.agentModelSelect.value = nextSelected;
+  state.agent.configuredModel = nextSelected;
+}
+
+function handleAgentProviderChange() {
+  if (!els.agentProviderSelect) return;
+  state.agent.configuredProvider = els.agentProviderSelect.value || "openai";
+  populateAgentModelOptions(state.agent.configuredProvider, state.agent.configuredModel);
+  renderAgentProviderState();
+}
+
+function handleAgentModelChange() {
+  if (!els.agentModelSelect) return;
+  state.agent.configuredModel = els.agentModelSelect.value || "";
+  renderAgentProviderState();
+}
+
+function handleAgentApiKeyInput() {
+  if (!els.agentApiKey) return;
+  state.agent.apiKey = els.agentApiKey.value || "";
+  renderAgentProviderState();
+}
+
+function buildAgentContext() {
+  const remoteMode = Boolean(state.remote.connected);
+  const serverTreeActive = Boolean(state.remote.serverTreeActive);
+  const selectedDatasets = remoteMode
+    ? getSelectedRemoteDatasets()
+    : getSelectedLocalDatasetNames();
+  const expandedTaxids = serverTreeActive
+    ? Array.from(state.remote.expandedTaxids)
+    : [];
+  const collapsedTaxids = serverTreeActive
+    ? []
+    : Array.from(state.collapsed);
+  const selectedTaxids = Array.from(state.selected);
+  const focusNode = state.focusTaxid != null
+    ? state.flat.find((node) => node.taxid === state.focusTaxid) || null
+    : null;
+  const visibleRoot = state.tree
+    ? {
+        taxid: Number(state.tree.taxid),
+        name: String(state.tree.name || ""),
+        rank: String(state.tree.rank || ""),
+        direct: Number(state.tree.direct || 0),
+        total: Number(state.tree.total || 0),
+        child_count: Array.isArray(state.tree.children) ? state.tree.children.length : 0,
+      }
+    : null;
+  const currentReport = state.remote.currentReport
+    ? summarizeCurrentAgentReport(state.remote.currentReport)
+    : null;
+
+  return {
+    captured_at: new Date().toISOString(),
+    mode: remoteMode ? "remote" : "local",
+    datasets: {
+      selected: selectedDatasets,
+      count: selectedDatasets.length,
+      total_reads: Number(remoteMode ? state.remote.totalReads : sumLocalSeriesReads()),
+      direct_taxa: Number(remoteMode ? state.remote.directTaxa : state.counts.size),
+    },
+    taxonomy: {
+      nodes_file: getActiveNodesFilename(),
+      names_file: getActiveNamesFilename(),
+    },
+    filters: {
+      min_reads: getMinReadsValue(),
+      count_mode: String(els.countMode?.value || "total"),
+      scale_mode: String(els.scaleMode?.value || "sqrt"),
+      search: String(els.searchBox?.value || "").trim(),
+    },
+    tree: {
+      loaded: Boolean(state.tree),
+      server_tree_active: serverTreeActive,
+      visible_root: visibleRoot,
+      visible_node_count: state.flat.length,
+      focused_taxid: focusNode ? Number(focusNode.taxid) : null,
+      focused_name: focusNode ? String(focusNode.name || "") : null,
+      selected_taxids: selectedTaxids,
+      expanded_taxids: expandedTaxids,
+      collapsed_taxids: collapsedTaxids,
+    },
+    report: currentReport,
+    backend: {
+      connected: remoteMode,
+      backend_nodes_file: state.remote.backendNodesFile || null,
+      backend_names_file: state.remote.backendNamesFile || null,
+    },
+  };
+}
+
+function summarizeCurrentAgentReport(reportState) {
+  if (!reportState || typeof reportState !== "object") return null;
+  if (reportState.type === "subtree") {
+    return {
+      type: "subtree",
+      target_taxid: Number(reportState.report?.target?.taxid || 0) || null,
+      target_name: String(reportState.report?.target?.name || ""),
+    };
+  }
+  if (reportState.type === "rank") {
+    return {
+      type: "rank",
+      selected_taxids: Array.isArray(reportState.taxids) ? reportState.taxids.map((value) => Number(value)) : [],
+      rank_count: Array.isArray(reportState.report?.rows) ? reportState.report.rows.length : 0,
+    };
+  }
+  return {
+    type: String(reportState.type || "unknown"),
+  };
+}
+
+function getSelectedLocalDatasetNames() {
+  return state.series
+    .map((dataset, index) => String(dataset?.label || dataset?.filename || `local-dataset-${index + 1}`));
+}
+
+function sumLocalSeriesReads() {
+  let total = 0;
+  for (const count of state.counts.values()) {
+    total += Number(count || 0);
+  }
+  return total;
+}
+
+function getActiveNodesFilename() {
+  if (els.nodesFile?.files?.[0]) return els.nodesFile.files[0].name;
+  if (state.remote.backendNodesFile) return state.remote.backendNodesFile;
+  return null;
+}
+
+function getActiveNamesFilename() {
+  if (els.namesFile?.files?.[0]) return els.namesFile.files[0].name;
+  if (state.remote.backendNamesFile) return state.remote.backendNamesFile;
+  return null;
+}
+
+function clearAgentTranscript() {
+  state.agent.history = [];
+  renderAgentTranscript();
+  setStatus("Cleared mock agent transcript.");
+}
+
+function pushAgentEntry(entry) {
+  state.agent.history.push({
+    timestamp: new Date().toISOString(),
+    role: String(entry.role || "assistant"),
+    message: String(entry.message || ""),
+    tools: Array.isArray(entry.tools) ? entry.tools.map((tool) => String(tool)) : [],
+    note: entry.note ? String(entry.note) : "",
+  });
+  renderAgentTranscript();
+}
+
+function renderAgentTranscript() {
+  if (!els.agentTranscript || !els.agentMeta) return;
+  const entries = state.agent.history;
+  const providerMeta = unicornAgentProviderAdapter.getCurrentProviderMeta();
+  const providerLabel = providerMeta?.label || state.agent.currentProvider || "unknown";
+  const providerMode = providerMeta?.mode || "unknown";
+  els.agentMeta.textContent = entries.length
+    ? `${entries.length.toLocaleString()} transcript entr${entries.length === 1 ? "y" : "ies"} · provider: ${providerLabel} · ${providerMode} mode · client-side only`
+    : `Provider: ${providerLabel} · ${providerMode} mode · client-side only.`;
+  if (!entries.length) {
+    els.agentTranscript.innerHTML = `<div class="agent-empty">Mock agent replies will appear here.</div>`;
+    return;
+  }
+  els.agentTranscript.innerHTML = entries.map((entry) => `
+    <div class="agent-entry role-${escapeHtml(entry.role)}">
+      <div class="agent-entry-head">
+        <span class="agent-entry-role">${escapeHtml(entry.role)}</span>
+        <span class="agent-entry-time">${escapeHtml(formatLogTime(entry.timestamp))}</span>
+      </div>
+      <div class="agent-entry-message">${escapeHtml(entry.message)}</div>
+      ${entry.tools.length ? `
+        <div class="agent-entry-tools">
+          ${entry.tools.map((tool) => `<span class="agent-tool-badge">${escapeHtml(tool)}</span>`).join("")}
+        </div>
+      ` : ""}
+      ${entry.note ? `<div class="agent-entry-note">${escapeHtml(entry.note)}</div>` : ""}
+    </div>
+  `).join("");
+  els.agentTranscript.scrollTop = els.agentTranscript.scrollHeight;
+  renderAgentProviderState();
+}
+
+function renderAgentProviderState() {
+  if (!els.agentProviderState) return;
+  const configuredProvider = state.agent.configuredProvider || "openai";
+  const configuredModel = state.agent.configuredModel || "unset";
+  const hasKey = Boolean(state.agent.apiKey);
+  els.agentProviderState.textContent = `Configured provider: ${configuredProvider} · model: ${configuredModel} · API key ${hasKey ? "entered" : "not entered"}. Configuration only for now; the mock adapter remains the active runtime provider.`;
+}
+
+function buildProviderToolDefinitions() {
+  return unicornAgentRegistry.listTools().map((name) => ({
+    name,
+    description: describeAgentTool(name),
+    input_schema: {},
+  }));
+}
+
+function describeAgentTool(name) {
+  const descriptions = {
+    get_graph_context: "Returns the current Unicorn graph context snapshot.",
+    list_selected_datasets: "Returns selected datasets and aggregate totals.",
+    get_selected_nodes: "Returns the nodes currently selected in the graph.",
+    get_node_details: "Returns detailed information for one taxon in the current graph context.",
+    get_table_view: "Returns ranked rows for the current root or one node scope.",
+    select_taxon: "Selects one taxon in the active Unicorn graph.",
+    focus_taxon: "Focuses the graph on one taxon and centers the chart.",
+    center_root: "Clears current focus and recenters on the root.",
+  };
+  return descriptions[name] || "Unicorn-native tool.";
+}
+
+function buildProviderRequestPayload(providerMeta, input, toolResults, iteration) {
+  return {
+    provider: {
+      name: String(state.agent.configuredProvider || providerMeta?.name || "mock"),
+      model: String(state.agent.configuredModel || "unset"),
+    },
+    system_prompt: "You are the Unicorn Graph Engine agent. Answer only from Unicorn context and Unicorn tool outputs. Use only Unicorn-native tools when needed, and do not invent unsupported facts.",
+    user_prompt: String(input?.prompt || ""),
+    graph_context: input?.context || buildAgentContext(),
+    tools: buildProviderToolDefinitions(),
+    conversation: state.agent.history.map((entry) => ({
+      role: entry.role,
+      content: entry.message,
+    })),
+    tool_results: toolResults.map((toolResult) => ({
+      tool_name: toolResult.tool_name,
+      args: toolResult.args,
+      result: toolResult.result,
+    })),
+    turn_config: {
+      max_tool_iterations: AGENT_MAX_TOOL_ITERATIONS,
+      iteration,
+    },
+  };
+}
+
+async function executeAgentProviderTurn(input) {
+  const provider = unicornAgentProviderAdapter.getCurrentProviderMeta();
+  if (!provider) {
+    throw new Error("No active agent provider is configured.");
+  }
+  const implementation = unicornAgentProviderAdapter.getCurrentProviderImplementation();
+  if (!implementation || typeof implementation.runRequest !== "function") {
+    throw new Error("Active agent provider does not implement runRequest().");
+  }
+
+  const toolsUsed = [];
+  const toolResults = [];
+  let latestContext = input?.context || buildAgentContext();
+  addClientLog("info", "agent", `Provider turn started for ${provider.label}.`);
+
+  for (let iteration = 0; iteration < AGENT_MAX_TOOL_ITERATIONS; iteration++) {
+    const requestPayload = buildProviderRequestPayload(provider, {
+      ...input,
+      context: latestContext,
+    }, toolResults, iteration);
+    pushAgentEntry({
+      role: "provider",
+      message: `Provider request payload (iteration ${iteration + 1}).`,
+      note: JSON.stringify(requestPayload, null, 2),
+    });
+    addClientLog("info", "agent", `Provider request payload prepared for iteration ${iteration + 1}.`, JSON.stringify(requestPayload, null, 2));
+
+    const response = await implementation.runRequest(requestPayload);
+    addClientLog("info", "agent", `Provider responded with ${response?.type || "unknown"} on iteration ${iteration + 1}.`, JSON.stringify(response, null, 2));
+
+    if (!response || typeof response !== "object") {
+      throw new Error("Provider returned an invalid response payload.");
+    }
+
+    if (response.type === "assistant_message") {
+      pushAgentEntry({
+        role: "assistant",
+        message: String(response.content || ""),
+        note: "Intermediate provider message.",
+      });
+      continue;
+    }
+
+    if (response.type === "tool_call") {
+      const toolName = String(response.tool_name || "");
+      const args = response.args && typeof response.args === "object" ? response.args : {};
+      if (!unicornAgentRegistry.listTools().includes(toolName)) {
+        throw new Error(`Provider requested an unknown Unicorn tool: ${toolName}`);
+      }
+      addClientLog("info", "agent", `Executing Unicorn tool ${toolName}.`, JSON.stringify(args, null, 2));
+      const result = await unicornAgentRegistry.invokeTool(toolName, args);
+      toolsUsed.push(toolName);
+      toolResults.push({
+        tool_name: toolName,
+        args,
+        result,
+      });
+      pushAgentEntry({
+        role: "tool",
+        message: `Executed Unicorn tool: ${toolName}`,
+        tools: [toolName],
+        note: JSON.stringify(result, null, 2),
+      });
+      latestContext = buildAgentContext();
+      continue;
+    }
+
+    if (response.type === "final_answer") {
+      return {
+        provider: implementation.name,
+        provider_label: implementation.label,
+        provider_mode: implementation.mode,
+        client_side: implementation.clientSide,
+        answer: String(response.content || ""),
+        toolsUsed: Array.isArray(response.tool_summary) && response.tool_summary.length
+          ? response.tool_summary.map((tool) => String(tool))
+          : toolsUsed,
+        note: String(response.notes || ""),
+      };
+    }
+
+    if (response.type === "error") {
+      throw new Error(String(response.message || "Provider returned an error payload."));
+    }
+
+    throw new Error(`Provider returned unsupported response type: ${response.type}`);
+  }
+
+  addClientLog("error", "agent", "Provider turn hit the max tool iteration limit.");
+  throw new Error(`Provider turn exceeded the maximum of ${AGENT_MAX_TOOL_ITERATIONS} tool iterations.`);
+}
+
+async function runMockProviderRequest(payload) {
+  const prompt = String(payload?.user_prompt || "");
+  const context = payload?.graph_context || buildAgentContext();
+  const toolResults = Array.isArray(payload?.tool_results) ? payload.tool_results : [];
+  const lower = prompt.trim().toLowerCase();
+
+  if (!context.tree.loaded) {
+    return {
+      type: "final_answer",
+      content: "No active Unicorn tree is loaded yet. Render a tree first, then ask me about the current graph state.",
+      tool_summary: ["get_graph_context"],
+      notes: "Mock mode only. This reply is generated locally from current Unicorn state.",
+    };
+  }
+
+  if (!toolResults.length) {
+    if (lower.includes("selected")) {
+      return {
+        type: "tool_call",
+        tool_name: "get_selected_nodes",
+        args: {},
+      };
+    }
+    if (lower.includes("dataset") || lower.includes("sample")) {
+      return {
+        type: "tool_call",
+        tool_name: "list_selected_datasets",
+        args: {},
+      };
+    }
+    if (lower.includes("damage") || lower.includes("top") || lower.includes("table") || lower.includes("rank")) {
+      return {
+        type: "tool_call",
+        tool_name: "get_table_view",
+        args: {
+          scope: "root",
+          sort: "direct",
+          limit: 5,
+        },
+      };
+    }
+    const taxid = extractTaxidFromPrompt(prompt);
+    if (taxid != null) {
+      return {
+        type: "tool_call",
+        tool_name: "get_node_details",
+        args: { taxid },
+      };
+    }
+    return {
+      type: "final_answer",
+      content: `The current Unicorn session is in ${context.mode} mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
+      tool_summary: ["get_graph_context"],
+      notes: "Mock mode only. This response is a local summary built from the current graph context.",
+    };
+  }
+
+  const latest = toolResults[toolResults.length - 1];
+  if (latest.tool_name === "get_selected_nodes") {
+    const selected = latest.result || {};
+    const rows = Array.isArray(selected.selected) ? selected.selected : [];
+    if (!rows.length) {
+      return {
+        type: "final_answer",
+        content: "No nodes are currently selected in the graph.",
+        tool_summary: ["get_graph_context", "get_selected_nodes"],
+        notes: "Try selecting one or more taxa in the tree, then ask again.",
+      };
+    }
+    const top = rows.slice(0, 3).map((node) => `${node.name} (${node.taxid})`).join(", ");
+    return {
+      type: "final_answer",
+      content: `${Number(selected.count || rows.length)} node${Number(selected.count || rows.length) === 1 ? "" : "s"} ${Number(selected.count || rows.length) === 1 ? "is" : "are"} currently selected. The current selection includes ${top}.`,
+      tool_summary: ["get_graph_context", "get_selected_nodes"],
+      notes: "Mock mode only. This summary comes from Unicorn's current selection state.",
+    };
+  }
+
+  if (latest.tool_name === "list_selected_datasets") {
+    const datasets = latest.result?.datasets || {};
+    const names = Array.isArray(datasets.selected) ? datasets.selected.slice(0, 3).join(", ") : "";
+    return {
+      type: "final_answer",
+      content: `${Number(datasets.count || 0)} dataset${Number(datasets.count || 0) === 1 ? "" : "s"} ${Number(datasets.count || 0) === 1 ? "is" : "are"} active in the current ${latest.result?.mode || context.mode} session. Total reads: ${Number(datasets.total_reads || 0).toLocaleString()}. Direct taxa: ${Number(datasets.direct_taxa || 0).toLocaleString()}.`,
+      tool_summary: ["get_graph_context", "list_selected_datasets"],
+      notes: names ? `Active datasets: ${names}${Array.isArray(datasets.selected) && datasets.selected.length > 3 ? " ..." : ""}` : "No active datasets were reported.",
+    };
+  }
+
+  if (latest.tool_name === "get_table_view") {
+    const rows = Array.isArray(latest.result?.rows) ? latest.result.rows : [];
+    if (!rows.length) {
+      return {
+        type: "final_answer",
+        content: "I could not find any ranked rows in the current table scope.",
+        tool_summary: ["get_graph_context", "get_table_view"],
+        notes: "Mock mode only. The table query returned no rows.",
+      };
+    }
+    const first = rows[0];
+    const preview = rows.slice(0, 3).map((row) => `${row.name} (${Number(row.direct || 0).toLocaleString()} direct)`).join(", ");
+    return {
+      type: "final_answer",
+      content: `From the current root table scope, ${first.name} is the strongest direct-read row with ${Number(first.direct || 0).toLocaleString()} direct reads and ${Number(first.subtree || 0).toLocaleString()} subtree reads.`,
+      tool_summary: ["get_graph_context", "get_table_view"],
+      notes: `Top rows preview: ${preview}`,
+    };
+  }
+
+  if (latest.tool_name === "get_node_details") {
+    const node = latest.result?.node || {};
+    const taxid = Number(node.taxid || extractTaxidFromPrompt(prompt) || 0);
+    return {
+      type: "final_answer",
+      content: `${node.name || taxid} (${taxid}) is currently visible with ${Number(node.direct || 0).toLocaleString()} direct reads and ${Number(node.subtree || 0).toLocaleString()} subtree reads.`,
+      tool_summary: ["get_graph_context", "get_node_details"],
+      notes: `Rank: ${node.rank || "NA"}. Filtered child count: ${Number(node.child_count || 0).toLocaleString()}.`,
+    };
+  }
+
+  return {
+    type: "error",
+    code: "provider_response_invalid",
+    message: "Mock provider could not interpret the latest tool result.",
+  };
+}
+
+async function runMockAgent(prompt, context = buildAgentContext()) {
+  const result = await executeAgentProviderTurn({
+    prompt,
+    context,
+  });
+  return {
+    answer: result.answer,
+    toolsUsed: result.toolsUsed,
+    note: result.note,
+  };
+}
+
+async function runMockAgentLegacy(prompt, context = buildAgentContext()) {
+  const toolsUsed = ["get_graph_context"];
+  const lower = String(prompt || "").trim().toLowerCase();
+
+  if (!context.tree.loaded) {
+    return {
+      answer: "No active Unicorn tree is loaded yet. Render a tree first, then ask me about the current graph state.",
+      toolsUsed,
+      note: "Mock mode only. This reply is generated locally from current Unicorn state.",
+    };
+  }
+
+  if (lower.includes("selected")) {
+    toolsUsed.push("get_selected_nodes");
+    const selected = await unicornAgentRegistry.invokeTool("get_selected_nodes", {});
+    if (!selected.selected.length) {
+      return {
+        answer: "No nodes are currently selected in the graph.",
+        toolsUsed,
+        note: "Try selecting one or more taxa in the tree, then ask again.",
+      };
+    }
+    const top = selected.selected.slice(0, 3)
+      .map((node) => `${node.name} (${node.taxid})`)
+      .join(", ");
+    return {
+      answer: `${selected.count} node${selected.count === 1 ? "" : "s"} ${selected.count === 1 ? "is" : "are"} currently selected. The current selection includes ${top}.`,
+      toolsUsed,
+      note: "Mock mode only. This summary comes from Unicorn's current selection state.",
+    };
+  }
+
+  if (lower.includes("dataset") || lower.includes("sample")) {
+    toolsUsed.push("list_selected_datasets");
+    const datasets = await unicornAgentRegistry.invokeTool("list_selected_datasets", {});
+    const names = datasets.datasets.selected.slice(0, 3).join(", ");
+    return {
+      answer: `${datasets.datasets.count} dataset${datasets.datasets.count === 1 ? "" : "s"} ${datasets.datasets.count === 1 ? "is" : "are"} active in the current ${datasets.mode} session. Total reads: ${Number(datasets.datasets.total_reads || 0).toLocaleString()}. Direct taxa: ${Number(datasets.datasets.direct_taxa || 0).toLocaleString()}.`,
+      toolsUsed,
+      note: names ? `Active datasets: ${names}${datasets.datasets.selected.length > 3 ? " ..." : ""}` : "No active datasets were reported.",
+    };
+  }
+
+  if (lower.includes("damage") || lower.includes("top") || lower.includes("table") || lower.includes("rank")) {
+    toolsUsed.push("get_table_view");
+    const table = await unicornAgentRegistry.invokeTool("get_table_view", {
+      scope: "root",
+      sort: "direct",
+      limit: 5,
+    });
+    const rows = Array.isArray(table.rows) ? table.rows : [];
+    if (!rows.length) {
+      return {
+        answer: "I could not find any ranked rows in the current table scope.",
+        toolsUsed,
+        note: "Mock mode only. The table query returned no rows.",
+      };
+    }
+    const first = rows[0];
+    const preview = rows.slice(0, 3)
+      .map((row) => `${row.name} (${Number(row.direct || 0).toLocaleString()} direct)`)
+      .join(", ");
+    return {
+      answer: `From the current root table scope, ${first.name} is the strongest direct-read row with ${Number(first.direct || 0).toLocaleString()} direct reads and ${Number(first.subtree || 0).toLocaleString()} subtree reads.`,
+      toolsUsed,
+      note: `Top rows preview: ${preview}`,
+    };
+  }
+
+  const taxid = extractTaxidFromPrompt(prompt);
+  if (taxid != null) {
+    toolsUsed.push("get_node_details");
+    const details = await unicornAgentRegistry.invokeTool("get_node_details", { taxid });
+    const node = details.node || {};
+    return {
+      answer: `${node.name || taxid} (${taxid}) is currently visible with ${Number(node.direct || 0).toLocaleString()} direct reads and ${Number(node.subtree || 0).toLocaleString()} subtree reads.`,
+      toolsUsed,
+      note: `Rank: ${node.rank || "NA"}. Filtered child count: ${Number(node.child_count || 0).toLocaleString()}.`,
+    };
+  }
+
+  return {
+    answer: `The current Unicorn session is in ${context.mode} mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
+    toolsUsed,
+    note: "Mock mode only. This response is a local summary built from the current graph context.",
+  };
+}
+
+function extractTaxidFromPrompt(prompt) {
+  const match = String(prompt || "").match(/\b\d+\b/);
+  if (!match) return null;
+  const taxid = Number(match[0]);
+  return Number.isFinite(taxid) ? taxid : null;
+}
+
+function normalizeToolTaxid(value) {
+  const taxid = Number(value);
+  return Number.isFinite(taxid) ? taxid : null;
+}
+
+function normalizeToolLimit(value, fallback) {
+  const limit = Number(value);
+  if (!Number.isFinite(limit) || limit <= 0) return fallback;
+  return Math.max(1, Math.min(200, Math.round(limit)));
+}
+
+function summarizeNodeForAgent(node) {
+  if (!node) return null;
+  return {
+    taxid: Number(node.taxid),
+    name: String(node.name || ""),
+    rank: String(node.rank || ""),
+    direct: Number(node.direct || 0),
+    subtree: Number(node.total || 0),
+    child_count: nodeHasChildren(node) ? getVisibleChildCount(node) : 0,
+  };
+}
+
+function buildLocalNodeDetails(node) {
+  return {
+    taxid: Number(node.taxid),
+    name: String(node.name || ""),
+    rank: String(node.rank || ""),
+    direct: Number(node.direct || 0),
+    subtree: Number(node.total || 0),
+    child_count: getVisibleChildCount(node),
+    lineage: buildLocalLineage(node),
+    datasets: state.series.map((dataset, index) => ({
+      dataset: String(dataset.label || `dataset-${index + 1}`),
+      direct: Number(node.directBySource?.[index] || 0),
+      subtree: Number(node.totalBySource?.[index] || 0),
+    })),
+  };
+}
+
+function buildLocalLineage(node) {
+  const lineage = [];
+  let current = node;
+  while (current) {
+    lineage.push({
+      taxid: Number(current.taxid),
+      name: String(current.name || ""),
+      rank: String(current.rank || ""),
+    });
+    if (current.parent == null || current === state.tree) break;
+    current = findNodeByTaxid(state.tree, current.parent);
+  }
+  lineage.reverse();
+  return lineage;
+}
+
+function getVisibleChildCount(node) {
+  const children = Array.isArray(node.children) ? node.children : [];
+  return children.filter((child) => Number(child.total || 0) > 0).length;
+}
+
+function buildLocalTableView(options = {}) {
+  if (!state.tree) {
+    throw new Error("No active tree is loaded.");
+  }
+  const scope = options.scope === "node" ? "node" : "root";
+  const sort = options.sort === "subtree" ? "subtree" : "direct";
+  const limit = normalizeToolLimit(options.limit, 40);
+  const target = scope === "node"
+    ? findNodeByTaxid(state.tree, options.taxid)
+    : state.tree;
+  if (!target) {
+    throw new Error(scope === "node"
+      ? `Taxid ${options.taxid} is not present in the active tree.`
+      : "Could not resolve root scope.");
+  }
+  const rows = [];
+  walkTree(target, (node) => {
+    if (node !== target && Number(node.total || 0) <= 0) return;
+    if (Number(node.direct || 0) <= 0) return;
+    rows.push(summarizeNodeForAgent(node));
+  });
+  rows.sort((a, b) => Number(b[sort] || 0) - Number(a[sort] || 0) || Number(b.direct || 0) - Number(a.direct || 0) || String(a.name).localeCompare(String(b.name)));
+  return {
+    ok: true,
+    mode: "local",
+    scope,
+    rows: rows.slice(0, limit),
+    request: {
+      scope,
+      taxid: scope === "node" ? Number(target.taxid) : null,
+      sort,
+      limit,
+    },
+  };
+}
+
+function handleAgentSend() {
+  if (!els.agentPrompt) return;
+  const prompt = els.agentPrompt.value.trim();
+  if (!prompt) {
+    setStatus("Enter an agent prompt to continue.");
+    return;
+  }
+  pushAgentEntry({
+    role: "user",
+    message: prompt,
+  });
+  const providerMeta = unicornAgentProviderAdapter.getCurrentProviderMeta();
+  const context = buildAgentContext();
+  setStatus(`${providerMeta?.label || "Agent"} is drafting a local reply from Unicorn state...`);
+  unicornAgentProviderAdapter.runTurn({
+    prompt,
+    context,
+    registry: unicornAgentRegistry,
+  })
+    .then((response) => {
+      console.log("[Unicorn Agent Context]", context);
+      console.log("[Unicorn Agent Provider Response]", response);
+      addClientLog("info", "agent", "Captured agent context locally.", JSON.stringify({
+        prompt,
+        context,
+        response,
+      }, null, 2));
+      pushAgentEntry({
+        role: "assistant",
+        message: response.answer,
+        tools: response.toolsUsed,
+        note: response.note,
+      });
+      els.agentPrompt.value = "";
+      setStatus(`${response.provider_label || "Agent"} reply rendered locally.`);
+    })
+    .catch((error) => {
+      addClientLog("error", "agent", "Agent provider reply failed.", errorToDetail(error));
+      pushAgentEntry({
+        role: "assistant",
+        message: `I could not build an agent reply from the current Unicorn state: ${error.message || error}`,
+        note: "Provider adapter mode only. No external model provider is being used yet.",
+      });
+      setStatus(`Agent provider reply failed: ${error.message || error}`);
+    });
 }
 
 async function connectRemote() {
