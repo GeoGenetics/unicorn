@@ -29,6 +29,7 @@ SOFTWARE.
 #define UNICORN_DAMAGE_H
 
 #define _XOPEN_SOURCE 700
+#define UNICORN_DAMAGE_OUTPOS 5U
 
 typedef struct taxa {
   uint32_t taxid;
@@ -43,6 +44,12 @@ typedef struct taxa {
   float Zfit;
   float fitCT0;
   float fitGA0;
+  float K5[UNICORN_DAMAGE_OUTPOS];
+  float N5[UNICORN_DAMAGE_OUTPOS];
+  float K3[UNICORN_DAMAGE_OUTPOS];
+  float N3[UNICORN_DAMAGE_OUTPOS];
+  float Dx5[UNICORN_DAMAGE_OUTPOS];
+  float Dx3[UNICORN_DAMAGE_OUTPOS];
   float nll;
 } taxa_t;
 

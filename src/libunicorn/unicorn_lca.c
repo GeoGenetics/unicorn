@@ -143,6 +143,7 @@ static khint_t _taxamap_touch(damagemap_t *taxamap, uint32_t taxid, uint8_t mmm)
   khint_t k = damagemap_put(taxamap, taxid, &absent);
   if (k == kh_end(taxamap)) return k;
   if (absent) {
+    uint8_t j;
     kh_val(taxamap, k).taxid   = taxid;
     kh_val(taxamap, k).count   = 0;
     kh_val(taxamap, k).mmm     = _mmm_alloc(mmm);
@@ -155,6 +156,14 @@ static khint_t _taxamap_touch(damagemap_t *taxamap, uint32_t taxid, uint8_t mmm)
     kh_val(taxamap, k).Zfit   = 0.0f;
     kh_val(taxamap, k).fitCT0 = 0.0f;
     kh_val(taxamap, k).fitGA0 = 0.0f;
+    for (j = 0; j < UNICORN_DAMAGE_OUTPOS; j++) {
+      kh_val(taxamap, k).K5[j]  = NAN;
+      kh_val(taxamap, k).N5[j]  = NAN;
+      kh_val(taxamap, k).K3[j]  = NAN;
+      kh_val(taxamap, k).N3[j]  = NAN;
+      kh_val(taxamap, k).Dx5[j] = NAN;
+      kh_val(taxamap, k).Dx3[j] = NAN;
+    }
     kh_val(taxamap, k).nll    = 0.0f;
 	}
   return k;
@@ -426,15 +435,18 @@ static void _write_mmm_output(FILE *fp,
   khint_t k;
   const size_t nbytes = _mmm_cells(mmm) * sizeof(float);
   char header[64];
+  uint8_t i;
   if (!fp || !taxamap || !utax || !mmm) return;
   snprintf(header, sizeof(header), "mmm_%u", (unsigned)mmm);
-  fprintf(fp, "#taxid\tcount\tname\tCTfreq\tGAfreq\tA\tq\tc\tphi\tZfit\tfitCT0\tfitGA0\tnll\t%s\n", header);
+  fprintf(fp, "#taxid\tcount\tname\tCTfreq\tGAfreq\tA\tq\tc\tphi\tZfit\tfitCT0\tfitGA0\tnll");
+  for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) fprintf(fp, "\tK5_%u\tN5_%u\tK3_%u\tN3_%u\tDx5_%u\tDx3_%u", i, i, i, i, i, i);
+  fprintf(fp, "\t%s\n", header);
   kh_foreach(taxamap, k) {
     const taxa_t t = kh_val(taxamap, k);
     const char *name = utax_getname(utax, t.taxid);
     char *encoded = _base64_encode_bytes((const uint8_t *)t.mmm, nbytes);
     fprintf(fp,
-            "%u\t%lu\t\"%s\"\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.6f\t%s\n",
+            "%u\t%lu\t\"%s\"\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.6f",
             t.taxid,
             t.count,
             name ? name : "NA",
@@ -447,8 +459,12 @@ static void _write_mmm_output(FILE *fp,
             t.Zfit,
             t.fitCT0,
             t.fitGA0,
-            t.nll,
-            encoded ? encoded : "");
+            t.nll);
+    for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) {
+      fprintf(fp, "\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g",
+              t.K5[i], t.N5[i], t.K3[i], t.N3[i], t.Dx5[i], t.Dx3[i]);
+    }
+    fprintf(fp, "\t%s\n", encoded ? encoded : "");
     free(encoded);
   }
 }
@@ -761,11 +777,14 @@ int unicorn_lcacompute(unicorn_t *u,
     snprintf(BUFF,256, "%s.bdamage.txt", outprefix);
     FILE *taxafp = fopen(BUFF, "w");
     khint_t k;
-    fprintf(taxafp, "#taxid\tcount\tname\tCTfreq\tGAfreq\tA\tq\tc\tphi\tZfit\tfitCT0\tfitGA0\tnll\n");
+    uint8_t i;
+    fprintf(taxafp, "#taxid\tcount\tname\tCTfreq\tGAfreq\tA\tq\tc\tphi\tZfit\tfitCT0\tfitGA0\tnll");
+    for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) fprintf(taxafp, "\tK5_%u\tN5_%u\tK3_%u\tN3_%u\tDx5_%u\tDx3_%u", i, i, i, i, i, i);
+    fprintf(taxafp, "\n");
     kh_foreach(p.taxamap, k) {
       taxa_t t = kh_val(p.taxamap, k);
       const char *name = utax_getname(p.utax, t.taxid);
-      fprintf(taxafp, "%u\t%lu\t\"%s\"\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.6f\n",
+      fprintf(taxafp, "%u\t%lu\t\"%s\"\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.6f",
               t.taxid,
               t.count,
               name ? name : "NA",
@@ -779,6 +798,11 @@ int unicorn_lcacompute(unicorn_t *u,
               t.fitCT0,
               t.fitGA0,
               t.nll);
+      for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) {
+        fprintf(taxafp, "\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g",
+                t.K5[i], t.N5[i], t.K3[i], t.N3[i], t.Dx5[i], t.Dx3[i]);
+      }
+      fprintf(taxafp, "\n");
     }
     fclose(taxafp);
     if (p.mmm) {

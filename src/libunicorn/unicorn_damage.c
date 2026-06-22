@@ -263,6 +263,41 @@ static float _damage_zfit(const float *N5,
   return (float)((double)par->A / sigmaD);
 }
 
+static void _damage_store_first5_arrays(float *dstK5,
+                                        float *dstN5,
+                                        float *dstK3,
+                                        float *dstN3,
+                                        float *dstDx5,
+                                        float *dstDx3,
+                                        const float *K5,
+                                        const float *N5,
+                                        const float *K3,
+                                        const float *N3,
+                                        uint8_t mmm_size,
+                                        const damagepar_t *par)
+{
+  uint8_t i;
+  if (!dstK5 || !dstN5 || !dstK3 || !dstN3 || !dstDx5 || !dstDx3) return;
+  for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) {
+    if (i < mmm_size && K5 && N5 && K3 && N3 && par) {
+      dstK5[i] = K5[i];
+      dstN5[i] = N5[i];
+      dstK3[i] = K3[i];
+      dstN3[i] = N3[i];
+      dstDx5[i] = _damage_dx(i, par);
+      dstDx3[i] = _damage_dx(i, par);
+    }
+    else {
+      dstK5[i] = NAN;
+      dstN5[i] = NAN;
+      dstK3[i] = NAN;
+      dstN3[i] = NAN;
+      dstDx5[i] = NAN;
+      dstDx3[i] = NAN;
+    }
+  }
+}
+
 static uint8_t _damage_has_information(const float *N5, const float *N3, uint8_t mmm_size)
 {
   uint8_t x;
@@ -370,24 +405,34 @@ static void _statfor(void *data, long i, int tid)
   double best_nll;
   if (kh_exist(taxmap, i)) {
     taxa_t clade_taxa;
+    taxa_t out_taxa;
     float *mmm = _damage_mrollup(taxmap, utax, kh_key(taxmap, i), step->mmm);
     if (!mmm) return;
     clade_taxa = kh_val(taxmap, i);
+    out_taxa = kh_val(taxmap, i);
     clade_taxa.mmm = mmm;
 		_damage_collapse_k5n5(clade_taxa.mmm, step->mmm, &K5, &N5);
     _damage_collapse_k3n3(clade_taxa.mmm, step->mmm, &K3, &N3);
-    kh_val(taxmap, i).CTfreq = (K5 && N5 && N5[0] > 0.0f) ? K5[0] / N5[0] : 0.0f;
-    kh_val(taxmap, i).GAfreq = (K3 && N3 && N3[0] > 0.0f) ? K3[0] / N3[0] : 0.0f;
+    out_taxa.CTfreq = (K5 && N5 && N5[0] > 0.0f) ? K5[0] / N5[0] : 0.0f;
+    out_taxa.GAfreq = (K3 && N3 && N3[0] > 0.0f) ? K3[0] / N3[0] : 0.0f;
     par = _damage_init_par(K5, N5, K3, N3, step->mmm);
     best_nll = _damage_fit_mle(K5, N5, K3, N3, step->mmm, &par);
-    kh_val(taxmap, i).A = par.A;
-    kh_val(taxmap, i).q = par.q;
-    kh_val(taxmap, i).c = par.c;
-    kh_val(taxmap, i).phi = par.phi;
-    kh_val(taxmap, i).Zfit = _damage_zfit(N5, N3, step->mmm, &par);
-    kh_val(taxmap, i).fitCT0 = _damage_dx(0, &par);
-    kh_val(taxmap, i).fitGA0 = _damage_dx(0, &par);
-    kh_val(taxmap, i).nll = best_nll == DBL_MAX ? NAN : (float)best_nll;
+    out_taxa.A = par.A;
+    out_taxa.q = par.q;
+    out_taxa.c = par.c;
+    out_taxa.phi = par.phi;
+    out_taxa.Zfit = _damage_zfit(N5, N3, step->mmm, &par);
+    out_taxa.fitCT0 = _damage_dx(0, &par);
+    out_taxa.fitGA0 = _damage_dx(0, &par);
+    _damage_store_first5_arrays(out_taxa.K5,
+                                out_taxa.N5,
+                                out_taxa.K3,
+                                out_taxa.N3,
+                                out_taxa.Dx5,
+                                out_taxa.Dx3,
+                                K5, N5, K3, N3, step->mmm, &par);
+    out_taxa.nll = best_nll == DBL_MAX ? NAN : (float)best_nll;
+    kh_val(taxmap, i) = out_taxa;
     free(K5);
     free(N5);
     free(K3);
