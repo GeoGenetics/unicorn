@@ -1008,8 +1008,8 @@ static int unicorn_alnfilt(int argc, char **argv)
   uint64_t ns = 0;
   clock_gettime(CLOCK_MONOTONIC, &pB);
   unicorn_opt_t opts = {0};
-  opts.strict_score_bounds = 0;
-  opts.threads             = 4;
+  opts.outbam              = NULL;
+	opts.threads             = 4;
   opts.minscore            = 0.0f;
   opts.maxscore            = FLT_MAX;
   opts.pct                 = 0.90;
@@ -1022,11 +1022,8 @@ static int unicorn_alnfilt(int argc, char **argv)
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
   ret = 1;
   if (!opts.ifile) goto exit;
-  if (opts.maxscore < opts.minscore) {
-    fprintf(stderr, "[unicorn::%s] Error: --maxscore must be greater than or equal to --minscore\n", __func__);
-    ret = 7;
-    goto exit;
-  }
+  ret = 7;
+	if (opts.maxscore < opts.minscore) goto exit;
   ret = 2;
   fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
                                                                      opts.ifile);
@@ -1035,20 +1032,10 @@ static int unicorn_alnfilt(int argc, char **argv)
   u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, opts.qsize, argc, _argv);
   if (!u) goto exit;
   ret = 5;
-  if (!unicorn_isqgrouped(u)) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
-  fprintf(stderr, "[unicorn::%s] Filtering alignments\n"\
-                  "\tmode          == %s\n"\
-                  "\tminscore      == %f\n"\
-                  "\tmaxscore      == %f\n",
-                  __func__, ALNFILT_MODES[opts.alnfiltmode], opts.minscore, opts.maxscore);
-  if (opts.alnfiltmode == UNICORN_ALNFILT_PCTTOP)
-    fprintf(stderr, "\tpct          == %f\n", opts.pct);
-  if (opts.strict_score_bounds)
-    fprintf(stderr, "\tstrictbounds == TRUE\n");
   fflush(stderr);
   ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minscore, opts.maxscore, opts.pct, opts.strict_score_bounds);
   if (ret) goto exit;

@@ -230,3 +230,8 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minscore, float maxscore
 	exit:
 		return ret;
 }
+
+int unicorn_alnfiltercompute(unicorn_t *u, uint8_t mode, float minscore, float maxscore, float pct)
+{
+
+}
