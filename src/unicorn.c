@@ -949,7 +949,7 @@ static int unicorn_taxstats(int argc, char **argv)
     }
     clock_gettime(CLOCK_MONOTONIC, &stop);
     ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
-    uint64_t taln, tread, faln, fread, frefs;
+    uint64_t taln, faln, frefs;
     taln  = unicorn_stat_gettaln(stats);
     faln  = unicorn_stat_getfaln(stats);
     frefs = unicorn_stats_getfrefn(stats);
@@ -957,7 +957,7 @@ static int unicorn_taxstats(int argc, char **argv)
                   taln,
                   faln,
                   (float)faln/taln);
-    fprintf(stderr, "\t%" PRIu64 " references, %" PRIu64 " passed filters (%f)\n",
+    fprintf(stderr, "\t%d references, %" PRIu64 " passed filters (%f)\n",
 			              unicorn_getnref(u),
 										frefs,
 										(float)frefs/unicorn_getnref(u));
