@@ -213,6 +213,7 @@ static void taxstats_usage(FILE *fp)
     fprintf(fp, "./unicorn taxstats [options] -b <in.bam>|<in.sam>\n");
     fprintf(fp, "Options:\n"\
             "  -b <str>                     Input bam|sam\n"\
+						"  -o <str>, --outbam  <str>    Output BAM file with filtered alignments [NULL]\n"\
 						"  -t <int>, --threads <int>    Number of threads [4]\n"\
             "  -k <int>, --ksize <int>      kmer size for duplicity computation [17]\n"\
 						"  --outstat <str> Print statistics to file <str> [stdout]\n"\

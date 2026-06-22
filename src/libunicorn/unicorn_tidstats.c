@@ -1,4 +1,5 @@
 #define _XOPEN_SOURCE 700
+#include <time.h>
 #include "unicorn_internal.h"
 #include "klib/kthread.h"
 #include "klib/kvec.h"
@@ -11,12 +12,12 @@ typedef struct  pipeline {
   unicorn_stat_t *stats;
   utax_t *utax;
   void *forpool;
-	u64set_t *treadset;
+  u64set_t *treadset;
   u64set_t *freadset;
-	htsFile *ofp;
-	sam_hdr_t *ohdr;
-	uint64_t nalns;
-	uint64_t nreads;
+  htsFile *ofp;
+  sam_hdr_t *ohdr;
+  uint64_t nalns;
+  uint64_t nreads;
 } pipeline_t;
 
 typedef kvec_t(taxstat_t *) taxstatpq_t;
@@ -27,9 +28,9 @@ typedef struct step {
   taxstatpq_t *taxq;
   uint64_t *nreads;
   uint64_t *nrefs;
-	uint32_t nalns;
- 	u64set_t *treadset;
-	const unicorn_t *u;
+  uint32_t nalns;
+   u64set_t *treadset;
+  const unicorn_t *u;
   const unicorn_stat_t *stats;
   const utax_t *utax;
 } step_t;
@@ -480,17 +481,17 @@ static void _taxstat_free(taxstat_t *t)
 
 static step_t *_step_new(void)
 {
-	step_t *s = malloc(sizeof(step_t));
-	if (!s) return NULL;
-	s->queue  = NULL;
+  step_t *s = malloc(sizeof(step_t));
+  if (!s) return NULL;
+  s->queue  = NULL;
   s->nqueue = 0;
   s->taxq   = NULL;
-	s->nreads = NULL;
+  s->nreads = NULL;
   s->nrefs  = NULL;
-	s->u      = NULL;
-	s->stats  = NULL;
+  s->u      = NULL;
+  s->stats  = NULL;
   s->utax   = NULL;
-	return s;
+  return s;
 }
 
 static void _step_free(step_t *s)
@@ -519,7 +520,7 @@ static void _step_free(step_t *s)
     free(s->taxq);
   }
   if (s->treadset) u64set_destroy(s->treadset);
-	free(s);
+  free(s);
 }
 
 static inline uint64_t _hash64str(const char *s)
@@ -539,11 +540,11 @@ static void _loadalns(step_t *s,
                       const utax_t *t,
                       uint32_t qsize)
 {
-	bamq_t *q  = s->queue;
+  bamq_t *q  = s->queue;
   uint8_t nq = s->nqueue, n = 0;
   bam1_t *b = bam_init1();
   if (!b) return;
-	uint32_t nalns = 0;
+  uint32_t nalns = 0;
   for (uint8_t i = 0; i < nq; i++) { //Loop over queues
     kv_init(q[i]);
     bam1_t *first = NULL;
@@ -557,12 +558,8 @@ static void _loadalns(step_t *s,
           goto done;
         }
         u->dcache = 0;
-        //nalns++;
-        //khint_t qid = kh_hash_str(bam_get_qname(first));
-        //int absent;
-        //u64set_put(s->treadset, qid, &absent);
       }
-			else {
+      else {
         if (sam_read1(u->_FP, u->hdr, b) < 0) {
           bam_destroy1(first);
           goto done; // EOF
@@ -571,12 +568,9 @@ static void _loadalns(step_t *s,
           bam_destroy1(first);
           goto done;
         }
-				nalns++;
-      	uint64_t qid = _hash64str(bam_get_qname(first));
-      	int absent;
-      	u64set_put(s->treadset, qid, &absent);
+        nalns++;
       }
-			if (!_keep_tagged_alignment(t, stats, first)) {
+      if (!_keep_tagged_alignment(t, stats, first)) {
         bam_destroy1(first);
         first = NULL;
         continue;
@@ -595,12 +589,9 @@ static void _loadalns(step_t *s,
         n = i + 1;
         goto done;
       }
-			nalns++;
-	    uint64_t qid = _hash64str(bam_get_qname(b));
-      int absent;
-      u64set_put(s->treadset, qid, &absent);
-			if (!_keep_tagged_alignment(t, stats, b)) continue;
-			uint8_t *ntag  = bam_aux_get(b, "XR");
+      nalns++;
+      if (!_keep_tagged_alignment(t, stats, b)) continue;
+      uint8_t *ntag  = bam_aux_get(b, "XR");
       int32_t next_xr = ntag ? bam_aux2i(ntag) : INT32_MIN;
       if (q[i].n >= qsize && next_xr != group_xr) {
         // Batch limit reached and taxid boundary crossed: cache for next call
@@ -619,25 +610,24 @@ static void _loadalns(step_t *s,
     n = i + 1;
   }
   done:
-		s->nqueue = n;
-		s->nalns = nalns;
-		fprintf(stderr, "[libunicorn::%s] Loaded %u alignments in %u queues\n", __func__, nalns, n);
-		bam_destroy1(b);
+    s->nqueue = n;
+    s->nalns = nalns;
+    fprintf(stderr, "[libunicorn::%s] Loaded %u alignments in %u queues\n", __func__, nalns, n);
+    bam_destroy1(b);
 }
 
 static step_t *_loadtaxa(unicorn_t *u,
-												 const unicorn_stat_t *stats,
-												 utax_t *utax)
+                         const unicorn_stat_t *stats,
+                         utax_t *utax)
 {
-	step_t *s = calloc(1, sizeof(step_t));
-	if (!s) return NULL;
+  step_t *s = calloc(1, sizeof(step_t));
+  if (!s) return NULL;
   s->nalns  = 0;
-	s->treadset = u64set_init(); //TODO handle error
-	s->nreads = NULL;
+  s->nreads = NULL;
   s->nrefs  = NULL;
-	s->queue  = calloc(u->nthreads, sizeof(bamq_t));
+  s->queue  = calloc(u->nthreads, sizeof(bamq_t));
   s->nqueue = u->nthreads;
-	_loadalns(s, u, stats, utax, stats->qsize);
+  _loadalns(s, u, stats, utax, stats->qsize);
   if (s->nqueue == 0) {
     if (s->queue) free(s->queue);
     free(s);
@@ -652,13 +642,13 @@ static step_t *_loadtaxa(unicorn_t *u,
   s->taxq = calloc(s->nqueue, sizeof(taxstatpq_t));
   if (!s->taxq) {
     _step_free(s);
-		return NULL;
-	}
-	for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->taxq[i]);
-	s->u     = u;
-	s->stats = stats;
+    return NULL;
+  }
+  for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->taxq[i]);
+  s->u     = u;
+  s->stats = stats;
   s->utax  = utax;
-	return s;
+  return s;
 }
 
 static uint8_t _keep_taxid(const utax_t *utax,
@@ -755,41 +745,41 @@ static void _statfor(void *data, long i, int tid)
 
 static void _printtaxstats(FILE *fp, const taxstat_t taxstat, const utax_t *utax)
 {
-	if (!fp) return;
+  if (!fp) return;
   float breath = taxstat.reflen ? (float)(taxstat.covbases/(double)taxstat.reflen) : 0.0f;
   float expbreath = -expm1f(-breath);
   float stdevoncov = sqrtf(taxstat.varoncov);
   float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
   float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
-	fprintf(fp, TIDFMTSTR, taxstat._ntid,
-	                         utax_getname(utax, taxstat._ntid),
-	                         taxstat.nrefs,
-	                         taxstat.reflen,
-	                         taxstat.nalns,
-	                         kh_size(taxstat.readset),
-	                         taxstat.readl_mean,
-	                         sqrtf(taxstat.readl_var),
-	                         taxstat.readl_median,
-	                         taxstat.readl_mode,
-	                         taxstat.readl_min,
-	                         taxstat.readl_max,
-	                         taxstat.alnnm_mean,
-	                         taxstat.alnani_mean,
-	                         sqrtf(taxstat.alnani_var),
-	                         taxstat.alnani_median,
-	                         taxstat.covbases,
-	                         taxstat.covmean,
-	                         breath,
-	                         expbreath,
-	                         breath_ratio,
-	                         taxstat.meanoncov,
-	                         stdevoncov,
-	                         evenness,
-	                         1000.0f * breath,
-	                         taxstat.duplicity,
-	                         taxstat.mdust,
-	                         sqrtf(taxstat.vdust)
-	            );
+  fprintf(fp, TIDFMTSTR, taxstat._ntid,
+                           utax_getname(utax, taxstat._ntid),
+                           taxstat.nrefs,
+                           taxstat.reflen,
+                           taxstat.nalns,
+                           kh_size(taxstat.readset),
+                           taxstat.readl_mean,
+                           sqrtf(taxstat.readl_var),
+                           taxstat.readl_median,
+                           taxstat.readl_mode,
+                           taxstat.readl_min,
+                           taxstat.readl_max,
+                           taxstat.alnnm_mean,
+                           taxstat.alnani_mean,
+                           sqrtf(taxstat.alnani_var),
+                           taxstat.alnani_median,
+                           taxstat.covbases,
+                           taxstat.covmean,
+                           breath,
+                           expbreath,
+                           breath_ratio,
+                           taxstat.meanoncov,
+                           stdevoncov,
+                           evenness,
+                           1000.0f * breath,
+                           taxstat.duplicity,
+                           taxstat.mdust,
+                           sqrtf(taxstat.vdust)
+              );
 }
 
 static void _taxstats_add_passed_totals(pipeline_t *p,
@@ -863,33 +853,46 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
 {
   pipeline_t *p = (pipeline_t *)data;
   if      ( 0 == step ) { //Load alignments
-		step_t *s = _loadtaxa(p->u, p->stats, p->utax);
-		if (!s) return 0;
-		p->nalns += s->nalns;
-    if (p->treadset && s->treadset) {
-      khint_t kr;
-      kh_foreach(s->treadset, kr) {
-        uint64_t qid = kh_key(s->treadset, kr);
-        int absent;
-        u64set_put(p->treadset, qid, &absent);
-      }
-      p->nreads = kh_size(p->treadset);
-    }
+    step_t *s = _loadtaxa(p->u, p->stats, p->utax);
+    if (!s) return 0;
+    p->nalns += s->nalns;
     return s;
   } //Load queries
   else if ( 1 == step ) { //Compute statistics
-		step_t *s = (step_t *)in;
+    step_t *s = (step_t *)in;
     kt_forpool(p->forpool, _statfor, s, s->nqueue);
-		return s;
+    if (!p->u->outbam) {
+      for (uint8_t i = 0; i < s->nqueue; i++) {
+        bamq_t *q = &s->queue[i];
+        for (uint32_t j = 0; j < q->n; j++) {
+          if (q->a[j]) bam_destroy1(q->a[j]);
+        }
+        kv_destroy(*q);
+        q->a = NULL;
+        q->n = 0;
+      }
+    }
+    return s;
   }
   else if (2  == step ) { //Write output
     step_t *s = (step_t *)in;
-		unicorn_stat_t *stats = p->stats;
-		for (uint8_t i = 0; i < s->nqueue; i++) { //Loop over queues
-      bamq_t *q = &s->queue[i];
+    unicorn_stat_t *stats = p->stats;
+    for (uint8_t i = 0; i < s->nqueue; i++) { //Loop over queues
       taxstatpq_t *tq = &s->taxq[i];
-      /* 1. Computation of summary statistics */
       stats->_nrefs += s->nrefs ? s->nrefs[i] : 0;
+      if (!p->u->outbam) {
+        for (uint32_t j = 0; j < tq->n; j++) {
+          taxstat_t *ts = tq->a[j];
+          if (!ts) continue;
+          _printtaxstats(p->u->ofp, *ts, p->utax);
+          _taxstats_add_passed_totals(p, stats, ts);
+          _taxstat_free(ts);
+          tq->a[j] = NULL;
+        }
+        continue;
+      }
+
+      bamq_t *q = &s->queue[i];
       uint32_t qi = 0;
       uint32_t tj = 0;
       while (qi < q->n) {
@@ -898,18 +901,8 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
         if (!_taxstats_group_range(q, &qi, &qstart, &qend, &xr)) break;
         taxstat_t *ts = (tj < tq->n) ? tq->a[tj] : NULL;
         if (ts && ts->_ntid == xr) {
-          /* 2. Printing statistics */
           _printtaxstats(p->u->ofp, *ts, p->utax);
           _taxstats_add_passed_totals(p, stats, ts);
-          if (p->treadset && ts->readset) {
-            khint_t kr;
-            kh_foreach(ts->readset, kr) {
-              uint64_t qid = kh_key(ts->readset, kr);
-              int absent;
-              u64set_put(p->treadset, qid, &absent);
-            }
-          }
-          /* 3. Handling of alignment records */
           if (_taxstats_flush_group_alignments(q,
                                                qstart,
                                                qend,
@@ -921,9 +914,10 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
             _step_free(s);
             return (void *)1;
           }
+          _taxstat_free(ts);
+          tq->a[tj] = NULL;
           tj++;
         } else {
-          /* 3. Handling of alignment records */
           _taxstats_flush_group_alignments(q,
                                            qstart,
                                            qend,
@@ -935,8 +929,8 @@ static void *_taxstats_pipeline(void *data, int step, void *in)
         }
       }
     }
-		_step_free(s);
-	}
+    _step_free(s);
+  }
   return 0;
 }
 
@@ -955,31 +949,25 @@ static int _sorted_compute(unicorn_t *u,
   p.u = u;
   p.stats = stats;
   p.utax  = utax;
-	p.treadset = u64set_init();
-	p.freadset = u64set_init();
   p.forpool = kt_forpool_init(u->nthreads);
   if (!p.forpool) return ret;
- 	fprintf(u->ofp, TIDSTATSTR);
-	if (u->outbam) {
-		p.ofp = hts_open(u->outbam, "wb5");
-		p.ohdr = bam_hdr_dup(u->hdr);
-		if ( sam_hdr_write(p.ofp, p.ohdr) < 0 ) {
-			kt_forpool_destroy(p.forpool);
-			if (p.ohdr) bam_hdr_destroy(p.ohdr);
-			if (p.ofp) hts_close(p.ofp);
-			return ret;
-		}
-	}
-	kt_pipeline(3, _taxstats_pipeline, &p, 3);
+   fprintf(u->ofp, TIDSTATSTR);
+  if (u->outbam) {
+    p.ofp = hts_open(u->outbam, "wb5");
+    p.ohdr = bam_hdr_dup(u->hdr);
+    if ( sam_hdr_write(p.ofp, p.ohdr) < 0 ) {
+      kt_forpool_destroy(p.forpool);
+      if (p.ohdr) bam_hdr_destroy(p.ohdr);
+      if (p.ofp) hts_close(p.ofp);
+      return ret;
+    }
+  }
+  kt_pipeline(3, _taxstats_pipeline, &p, 3);
   kt_forpool_destroy(p.forpool);
-  stats->_nreads  = p.nreads;
-  stats->_nfreads = p.freadset ? kh_size(p.freadset) : 0;
-  stats->_nalns	  = p.nalns;
-	if (p.treadset) u64set_destroy(p.treadset);
-  if (p.freadset) u64set_destroy(p.freadset);
-	if (p.ohdr) bam_hdr_destroy(p.ohdr);
-	if (p.ofp && u->outbam) hts_close(p.ofp);
-	ret = 0;
+  stats->_nalns    = p.nalns;
+  if (p.ohdr) bam_hdr_destroy(p.ohdr);
+  if (p.ofp && u->outbam) hts_close(p.ofp);
+  ret = 0;
   return ret;
 }
 

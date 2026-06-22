@@ -152,7 +152,7 @@ KHASHL_MAP_INIT(static, lint2int_t, lint2int,
 KHASHL_SET_INIT(static,               //Scope
                 u64set_t, u64set, //type and prefix
                 uint64_t,             //key type
-                kh_hash_dummy, kh_eq_generic) //hash and equality functions
+                kh_hash_uint64, kh_eq_generic) //hash and equality functions
 
 /******************
  * Reference statistics
