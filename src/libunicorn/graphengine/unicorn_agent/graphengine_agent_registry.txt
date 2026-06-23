@@ -1,0 +1,130 @@
+Unicorn Graph Engine Agent Registry
+===================================
+
+This file documents the current live Unicorn-native tool registry exposed to
+the graph engine Agent panel.
+
+It is intentionally runtime-first: if this file disagrees with
+`graphengine.js`, `graphengine.js` wins and this file should be updated.
+
+New invariant:
+
+- graphengine is intended to run with a backend connection at all times
+- if a user is on one machine, they should run the backend locally and connect
+  to `localhost`
+- backend data is the intended authoritative grounding source for the agent
+- any remaining local-vs-remote shape differences are transition debt, not
+  desired long-term architecture
+
+
+Format
+------
+
+Column 1: explicit tool call
+Column 2: current runtime behavior
+
+
+Tool Call                                      Current Runtime Behavior
+---------------------------------------------  --------------------------------------------------------------
+invokeTool("get_graph_context", {})            Returns `buildAgentContext()` exactly. This is the canonical graph snapshot and includes `captured_at`, `mode`, `datasets`, `taxonomy`, `filters`, `tree`, `report`, and `backend`.
+
+invokeTool("list_selected_datasets", {})       Requires a backend connection. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "list_selected_datasets", request, datasets, context }`. `datasets` contains `selected`, `count`, `total_reads`, and `direct_taxa`.
+
+invokeTool("get_selected_nodes", {})           Requires a backend-backed rendered tree. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_selected_nodes", request, count, selected, context }`. `selected` is the current selected-node list with `taxid`, `name`, `rank`, `direct`, `subtree`, and `child_count`.
+
+invokeTool("get_node_details", { taxid })      Requires a backend-backed rendered tree and a numeric `taxid`. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_node_details", request, node, context }`. `node` is normalized from backend `/node-tooltip` data.
+
+invokeTool("get_table_view", { scope, taxid, sort, limit })  Requires a backend-backed rendered tree. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_table_view", request, target, row_count, rows, context }`. Data is normalized from backend `/table-view`. Supported inputs are `scope=root|node`, `sort=direct|subtree`, and numeric `limit`.
+
+invokeTool("select_taxon", { taxid, additive })  Requires a backend-backed rendered tree and a numeric `taxid` present in the active tree. Selects the node in Unicorn state, redraws the graph, and returns `{ ok, mode, additive, selected }`, where `mode` is currently `"backend"`.
+
+invokeTool("focus_taxon", { taxid })           Requires a backend-backed rendered tree and a numeric `taxid` present in the active tree. Sets the focus taxon, centers the chart on it, redraws, and returns `{ ok, mode, focused }`, where `mode` is currently `"backend"`.
+
+invokeTool("center_root", {})                  Requires a backend-backed rendered tree. Clears focus, recenters the graph on the root, redraws, and returns `{ ok, mode, focused: null }`, where `mode` is currently `"backend"`.
+
+
+Canonical context shape
+-----------------------
+
+`get_graph_context` currently returns:
+
+- `captured_at`
+- `mode`
+- `datasets`
+  - `selected`
+  - `count`
+  - `total_reads`
+  - `direct_taxa`
+- `taxonomy`
+  - `nodes_file`
+  - `names_file`
+- `filters`
+  - `min_reads`
+  - `count_mode`
+  - `scale_mode`
+  - `search`
+- `tree`
+  - `loaded`
+  - `server_tree_active`
+  - `visible_root`
+  - `visible_node_count`
+  - `focused_taxid`
+  - `focused_name`
+  - `selected_taxids`
+  - `expanded_taxids`
+  - `collapsed_taxids`
+- `report`
+- `backend`
+  - `connected`
+  - `backend_nodes_file`
+  - `backend_names_file`
+
+
+Known current transition debt
+-----------------------------
+
+These are the main remaining mismatches worth tracking before broader provider
+integration work.
+
+1. Backend preconditions are now explicit runtime behavior
+- several agent tools now throw if there is no backend connection or no
+  backend-backed rendered tree
+- this is intended behavior, but provider-side error handling should be shaped
+  deliberately once a real provider is added
+
+2. Read-only tools now share a provider-normalized top-level envelope, but
+state-mutating tools still use lighter ad hoc shapes
+- `select_taxon`, `focus_taxon`, and `center_root` still return direct action
+  results rather than the same read-only schema
+- this is acceptable for now, but it is still worth deciding later whether the
+  full registry should converge on one shared response pattern
+
+
+What is live vs not live
+------------------------
+
+Live today:
+
+- `window.unicornAgentRegistry.listTools()`
+- `window.unicornAgentRegistry.invokeTool(name, args)`
+- browser-local tool execution
+- backend-required agent grounding
+- provider-normalized read-only tool envelopes for:
+  `list_selected_datasets`, `get_selected_nodes`, `get_node_details`, and
+  `get_table_view`
+
+Not live yet:
+
+- `get_subtree_report`
+- `expand_taxon`
+- broader normalization of state-mutating tools if we decide the full registry
+  should use one response family
+
+
+Why this matters for the next agentic step
+------------------------------------------
+
+The current tool set is now in much better shape for a first real provider
+adapter because the read-only inspection tools share a stable top-level
+contract. The next step is less about wrapper cleanup and more about making the
+provider loop consume that contract deliberately.

@@ -13,8 +13,16 @@ It answers three questions:
 2. What a provider may return to Unicorn
 3. How Unicorn processes that response in its internal turn loop
 
-This contract is intended to be implemented first in client-side prototype
-mode, and later reused by backend-proxied provider integrations.
+This contract is intended to be implemented first in the current browser-side
+prototype loop and later reused by backend-proxied provider integrations.
+
+Operating invariant:
+
+- graphengine now assumes a backend connection is required
+- if a user is working on one machine, the backend should run locally and the
+  UI should connect to `localhost`
+- provider grounding should converge on backend-owned Unicorn state, not dual
+  local-vs-remote execution semantics
 
 
 Design Goals
@@ -39,6 +47,9 @@ Instead:
 - Unicorn executes tools through its own registry
 - Unicorn sends tool results back into the provider loop
 - Unicorn renders the final answer and any resulting tool effects
+
+Under the current architecture direction, Unicorn should treat backend-grounded
+state as the authoritative source for graph context and analysis context.
 
 
 Section 1. Unicorn -> Provider
@@ -98,6 +109,9 @@ Required request fields
 `provider`
 - selected provider identity
 - selected model identity
+- current prototype caveat: the request payload uses the configured provider/model
+  values from the UI, even though the only live runtime adapter today is still
+  the mock provider
 
 `system_prompt`
 - defines the Unicorn agent behavior
@@ -116,6 +130,9 @@ Required request fields
   - tool name
   - short description
   - input schema
+- current prototype caveat: `input_schema` is present but still an empty object
+  for every tool; argument validation currently happens at the tool boundary in
+  Unicorn runtime code rather than through a rich provider-facing schema
 
 `conversation`
 - optional prior turn history for multi-turn continuity
@@ -124,6 +141,8 @@ Required request fields
 `tool_results`
 - empty on the first provider request of a new turn
 - populated on later loop iterations after Unicorn executes requested tools
+- for provider-facing stability, Unicorn may normalize some tool outputs before
+  appending them here
 
 `turn_config`
 - runtime limits set by Unicorn
@@ -139,6 +158,143 @@ What Unicorn should not send
 - unsupported hidden application internals
 - tool functions themselves
 - unrestricted backend secrets
+
+
+Current normalized read-only tool shapes
+----------------------------------------
+
+For the first provider-facing normalization pass, Unicorn now guarantees stable
+top-level envelopes for these read-only tools:
+
+`list_selected_datasets`
+
+```json
+{
+  "ok": true,
+  "mode": "backend",
+  "tool": "list_selected_datasets",
+  "request": {},
+  "datasets": {
+    "selected": ["sample-a.bdamage.txt"],
+    "count": 1,
+    "total_reads": 123456,
+    "direct_taxa": 789
+  },
+  "context": {
+    "dataset_names": ["sample-a.bdamage.txt"],
+    "nodes_file": "nodes.dmp",
+    "names_file": "names.dmp",
+    "min_reads": 0,
+    "expanded_taxids": [1, 2, 3]
+  }
+}
+```
+
+`get_selected_nodes`
+
+```json
+{
+  "ok": true,
+  "mode": "backend",
+  "tool": "get_selected_nodes",
+  "request": {},
+  "count": 2,
+  "selected": [
+    {
+      "taxid": 3702,
+      "name": "Arabidopsis thaliana",
+      "rank": "species",
+      "direct": 123,
+      "subtree": 456,
+      "child_count": 3
+    }
+  ],
+  "context": {
+    "dataset_names": ["sample-a.bdamage.txt"],
+    "nodes_file": "nodes.dmp",
+    "names_file": "names.dmp",
+    "min_reads": 0,
+    "expanded_taxids": [1, 2, 3]
+  }
+}
+```
+
+`get_node_details`
+
+```json
+{
+  "ok": true,
+  "mode": "backend",
+  "tool": "get_node_details",
+  "request": {
+    "taxid": 3702
+  },
+  "node": {
+    "taxid": 3702,
+    "name": "Arabidopsis thaliana",
+    "rank": "species",
+    "parent": 3701,
+    "depth": 12,
+    "direct": 123,
+    "subtree": 456,
+    "child_count": 3,
+    "lineage": [],
+    "datasets": []
+  },
+  "context": {
+    "dataset_names": ["sample-a.bdamage.txt"],
+    "nodes_file": "nodes.dmp",
+    "names_file": "names.dmp",
+    "min_reads": 0,
+    "expanded_taxids": [1, 2, 3]
+  }
+}
+```
+
+`get_table_view`
+
+```json
+{
+  "ok": true,
+  "mode": "backend",
+  "tool": "get_table_view",
+  "request": {
+    "scope": "root",
+    "taxid": null,
+    "sort": "direct",
+    "limit": 40
+  },
+  "target": {
+    "taxid": 1,
+    "name": "root",
+    "rank": "no rank",
+    "direct": 0,
+    "subtree": 999,
+    "child_count": 12
+  },
+  "row_count": 40,
+  "rows": [],
+  "context": {
+    "dataset_names": ["sample-a.bdamage.txt"],
+    "nodes_file": "nodes.dmp",
+    "names_file": "names.dmp",
+    "min_reads": 0,
+    "expanded_taxids": []
+  }
+}
+```
+
+Notes:
+
+- all normalized read-only tool results now share the same top-level pattern:
+  `ok`, `mode`, `tool`, `request`, payload body, and `context`
+- `context` is a normalized form of backend `request_context`
+- for tools that do not come straight from one backend endpoint payload,
+  `context` is normalized from Unicorn's current backend-grounded graph context
+- `request` is echoed in a stable schema even if the backend payload does not
+  return the same wrapper shape directly
+- this normalization is specifically for provider/tool-loop stability; it does
+  not change the backend endpoint contract itself
 
 
 Section 2. Provider -> Unicorn
@@ -381,6 +537,21 @@ Client log:
 - request/response summaries
 - tool-call traces
 - JSON detail blocks
+
+
+Current prototype vs target split
+---------------------------------
+
+The current browser prototype is slightly noisier than the target split above.
+
+Today it still writes some debugging material into the transcript, including:
+
+- provider request payload entries
+- tool execution entries
+- JSON payloads in transcript notes
+
+This is acceptable while the provider loop is still being debugged, but it is a
+known cleanup item before or during the first real provider integration pass.
 
 
 Section 5. V1 Response Handling Rules

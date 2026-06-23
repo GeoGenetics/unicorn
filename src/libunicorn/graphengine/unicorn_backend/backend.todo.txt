@@ -1,0 +1,153 @@
+Unicorn Graph Engine Backend TODO
+=================================
+
+Current backend-truth status
+----------------------------
+
+The backend is no longer at the "define the model first" stage.
+The intended graphengine architecture is now backend-required only.
+
+Operational meaning:
+
+- there should be one execution path for datasets, taxonomy, tree slices, and
+  report payloads
+- a user without a separate remote host should run the backend locally and
+  connect to `localhost`
+- "local" should no longer mean a second in-browser computation mode
+
+Implemented server-authoritative pieces:
+
+- cached dataset loading on the backend
+- backend taxonomy loading from `nodes.dmp` and optional `names.dmp`
+- backend-built induced tree model
+- backend-visible tree slice endpoints:
+  - `/root-view`
+  - `/expand-node`
+- backend-derived analysis endpoints:
+  - `/node-tooltip`
+  - `/table-view`
+  - `/subtree-report`
+
+Current frontend relationship:
+
+- backend-connected mode treats backend responses as the source of truth
+- expanded state is driven by backend-visible slices
+- tooltip, table, and subtree-report flows already use backend endpoints
+- the client still owns rendering and interaction state
+- the client should stop carrying local fallback behavior as backend-only
+  cleanup proceeds
+
+
+What is already decided
+-----------------------
+
+The following semantics are already stable enough to treat as current contract:
+
+- root is always returned
+- visible nodes are those that survive filters and lie on the expanded frontier
+- `child_count` is filtered child count, not raw taxonomy child count
+- collapsed nodes still carry subtree totals
+- changing dataset selection resets expanded state
+- changing taxonomy files resets expanded state
+- changing `min_reads` preserves the expansion request, while the backend may
+  prune filtered branches
+
+
+Immediate backend priorities
+----------------------------
+
+1. Finish freezing graphengine to backend-required mode.
+That means:
+
+- no second local dataset/tree/report execution path
+- one contract for UI and agent tools
+- localhost remains the supported single-machine setup
+
+2. Document the full live endpoint contract in one place.
+The semantics are now spread across `server_README.md`, code, and UI behavior.
+We should keep one concise backend contract reference for:
+
+- request parameters
+- response fields
+- error payloads
+- filter/selection semantics
+- remote-tree state transitions
+
+3. Harden backend analysis/report consistency.
+We now have tree view, tooltip, table, and subtree report all driven by the
+same context. The next step is to keep them provably aligned when:
+
+- dataset selection changes
+- taxonomy files change
+- `min_reads` changes
+- focus/selection/report scope changes
+
+4. Add performance instrumentation before caching.
+Measure:
+
+- root-view latency
+- expand-node latency
+- tooltip latency
+- table-view latency
+- subtree-report latency
+- payload sizes for each endpoint
+- latency growth with more datasets and deeper expansions
+
+Only after that should we decide what deserves caching.
+
+5. Clarify backend session policy.
+We need an explicit policy for:
+
+- one global in-memory model
+- one model per browser/user session
+- explicit named sessions
+
+This matters more now that the UI is doing real multi-step interaction and
+agentic flows on top of backend state.
+
+
+Near-term backend extensions
+----------------------------
+
+1. Selected-node matrix endpoints by rank.
+This work is now relevant because the UI already has rank-report affordances and
+the agentic layer wants structured analysis payloads.
+
+2. Rank-collapsed subtree report variants.
+Useful follow-ons:
+
+- direct-count vs subtree-count toggles
+- compare-two-scope report shapes
+- TSV/export-friendly payloads
+
+3. Agent-facing backend analysis hooks.
+Once the current agent loop is stable, the backend should expose a small set of
+agent-friendly read-only views instead of making the agent reconstruct analysis
+from multiple lower-level calls.
+
+
+Deferred until measurement
+--------------------------
+
+Do not implement these yet:
+
+- visible-tree caching
+- tooltip caching
+- table caching
+- subtree-report caching
+- prefetch heuristics
+- delta transport
+
+We should only add them after we know which endpoint families are actually hot.
+
+
+Recommended next order
+---------------------
+
+1. Freeze graphengine to backend-required mode
+2. Write one live backend contract reference
+3. Add endpoint-level performance instrumentation
+4. Stabilize report consistency across filters and dataset switches
+5. Decide session/lifecycle policy
+6. Add selected-node / rank-matrix backend analysis shapes
+7. Add caching only where measurement shows real pressure

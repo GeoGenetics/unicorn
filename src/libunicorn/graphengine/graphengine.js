@@ -1,9 +1,7 @@
 "use strict";
 
 const state = {
-  nodes: new Map(),
   counts: new Map(),
-  names: new Map(),
   series: [],
   clientLog: [],
   agent: {
@@ -14,8 +12,6 @@ const state = {
     apiKey: "",
   },
   remote: {
-    user: "",
-    host: "",
     connected: false,
     datasets: [],
     selectedDatasets: new Set(),
@@ -31,7 +27,6 @@ const state = {
   },
   tree: null,
   flat: [],
-  collapsed: new Set(),
   selected: new Set(),
   missingTaxids: new Set(),
   centerOnNextRender: false,
@@ -256,8 +251,6 @@ function initRemotePanel() {
   const savedHost = localStorage.getItem("unicorn.remoteHost") || "";
   els.remoteUser.value = savedUser;
   els.remoteHost.value = savedHost;
-  state.remote.user = savedUser;
-  state.remote.host = savedHost;
   updateTunnelHint();
   updateConnectionState(false, "Not connected");
   renderRemoteDatasets();
@@ -346,16 +339,17 @@ function syncMinReadsControl() {
 async function handleMinReadsScaleChange() {
   localStorage.setItem("unicorn.minReadsScale", getMinReadsScale());
   syncMinReadsControl();
-  if (isRemoteServerTreeMode()) {
+  if (hasBackendTree()) {
     try {
       const payload = await fetchRemoteVisibleTree();
       applyRemoteVisiblePayload(payload);
-      await refreshCurrentRemoteSubtreeReportIfNeeded();
+      await refreshCurrentReportIfNeeded();
       redraw();
+      return;
     } catch (error) {
-      setStatus(`Could not refresh remote tree after changing the read-scale mode: ${error.message || error}`);
+      setStatus(`Could not refresh backend tree after changing the read-scale mode: ${error.message || error}`);
+      return;
     }
-    return;
   }
   redraw();
 }
@@ -367,16 +361,17 @@ async function handleMinReadsMaxChange() {
     localStorage.setItem("unicorn.minReadsMax", els.minReadsMax.value);
   }
   syncMinReadsControl();
-  if (isRemoteServerTreeMode()) {
+  if (hasBackendTree()) {
     try {
       const payload = await fetchRemoteVisibleTree();
       applyRemoteVisiblePayload(payload);
-      await refreshCurrentRemoteSubtreeReportIfNeeded();
+      await refreshCurrentReportIfNeeded();
       redraw();
+      return;
     } catch (error) {
-      setStatus(`Could not refresh remote tree after changing the slider range: ${error.message || error}`);
+      setStatus(`Could not refresh backend tree after changing the slider range: ${error.message || error}`);
+      return;
     }
-    return;
   }
   redraw();
 }
@@ -457,45 +452,39 @@ function setSidebarCollapsed(collapsed) {
 function createUnicornAgentRegistry() {
   const tools = {
     get_graph_context: async () => buildAgentContext(),
-    list_selected_datasets: async () => ({
-      mode: state.remote.connected ? "remote" : "local",
-      datasets: buildAgentContext().datasets,
-    }),
-    get_selected_nodes: async () => ({
-      selected: getSelectedNodes().map((node) => summarizeNodeForAgent(node)),
-      count: state.selected.size,
-    }),
+    list_selected_datasets: async () => {
+      requireAgentBackendConnection();
+      return normalizeSelectedDatasetsForProvider(buildAgentContext());
+    },
+    get_selected_nodes: async () => {
+      requireAgentBackendTree();
+      return normalizeSelectedNodesForProvider(
+        getSelectedNodes().map((node) => summarizeNodeForAgent(node)),
+        buildAgentContext(),
+      );
+    },
     get_node_details: async (args = {}) => {
+      requireAgentBackendTree();
       const taxid = normalizeToolTaxid(args.taxid);
       if (taxid == null) {
         throw new Error("get_node_details requires a numeric taxid.");
       }
-      if (isRemoteServerTreeMode()) {
-        return fetchRemoteNodeTooltip(taxid);
-      }
-      const node = findNodeByTaxid(state.tree, taxid);
-      if (!node) {
-        throw new Error(`Taxid ${taxid} is not present in the active tree.`);
-      }
-      return {
-        ok: true,
-        mode: "local",
-        node: buildLocalNodeDetails(node),
-      };
+      const payload = await fetchRemoteNodeTooltip(taxid);
+      return normalizeNodeDetailsForProvider(payload, { taxid });
     },
     get_table_view: async (args = {}) => {
+      requireAgentBackendTree();
       const options = {
         scope: args.scope || "root",
         taxid: normalizeToolTaxid(args.taxid),
         sort: args.sort || "direct",
         limit: normalizeToolLimit(args.limit, 40),
       };
-      if (isRemoteServerTreeMode()) {
-        return fetchRemoteTableView(options);
-      }
-      return buildLocalTableView(options);
+      const payload = await fetchRemoteTableView(options);
+      return normalizeTableViewForProvider(payload, options);
     },
     select_taxon: async (args = {}) => {
+      requireAgentBackendTree();
       const taxid = normalizeToolTaxid(args.taxid);
       if (taxid == null) {
         throw new Error("select_taxon requires a numeric taxid.");
@@ -512,12 +501,13 @@ function createUnicornAgentRegistry() {
       redraw();
       return {
         ok: true,
-        mode: isRemoteServerTreeMode() ? "remote" : "local",
+        mode: "backend",
         additive,
         selected: getSelectedNodes().map((selectedNode) => summarizeNodeForAgent(selectedNode)),
       };
     },
     focus_taxon: async (args = {}) => {
+      requireAgentBackendTree();
       const taxid = normalizeToolTaxid(args.taxid);
       if (taxid == null) {
         throw new Error("focus_taxon requires a numeric taxid.");
@@ -531,17 +521,18 @@ function createUnicornAgentRegistry() {
       redraw();
       return {
         ok: true,
-        mode: isRemoteServerTreeMode() ? "remote" : "local",
+        mode: "backend",
         focused: summarizeNodeForAgent(node),
       };
     },
     center_root: async () => {
+      requireAgentBackendTree();
       state.focusTaxid = null;
       centerRoot();
       redraw();
       return {
         ok: true,
-        mode: isRemoteServerTreeMode() ? "remote" : "local",
+        mode: "backend",
         focused: null,
       };
     },
@@ -650,22 +641,19 @@ function handleAgentApiKeyInput() {
 }
 
 function buildAgentContext() {
-  const remoteMode = Boolean(state.remote.connected);
-  const serverTreeActive = Boolean(state.remote.serverTreeActive);
-  const selectedDatasets = remoteMode
+  const backendConnected = Boolean(state.remote.connected);
+  const backendTreeReady = Boolean(backendConnected && state.remote.serverTreeActive && state.tree);
+  const selectedDatasets = backendConnected
     ? getSelectedRemoteDatasets()
-    : getSelectedLocalDatasetNames();
-  const expandedTaxids = serverTreeActive
+    : [];
+  const expandedTaxids = backendTreeReady
     ? Array.from(state.remote.expandedTaxids)
     : [];
-  const collapsedTaxids = serverTreeActive
-    ? []
-    : Array.from(state.collapsed);
-  const selectedTaxids = Array.from(state.selected);
-  const focusNode = state.focusTaxid != null
+  const selectedTaxids = backendTreeReady ? Array.from(state.selected) : [];
+  const focusNode = backendTreeReady && state.focusTaxid != null
     ? state.flat.find((node) => node.taxid === state.focusTaxid) || null
     : null;
-  const visibleRoot = state.tree
+  const visibleRoot = backendTreeReady
     ? {
         taxid: Number(state.tree.taxid),
         name: String(state.tree.name || ""),
@@ -675,18 +663,18 @@ function buildAgentContext() {
         child_count: Array.isArray(state.tree.children) ? state.tree.children.length : 0,
       }
     : null;
-  const currentReport = state.remote.currentReport
+  const currentReport = backendTreeReady && state.remote.currentReport
     ? summarizeCurrentAgentReport(state.remote.currentReport)
     : null;
 
   return {
     captured_at: new Date().toISOString(),
-    mode: remoteMode ? "remote" : "local",
+    mode: "backend",
     datasets: {
       selected: selectedDatasets,
       count: selectedDatasets.length,
-      total_reads: Number(remoteMode ? state.remote.totalReads : sumLocalSeriesReads()),
-      direct_taxa: Number(remoteMode ? state.remote.directTaxa : state.counts.size),
+      total_reads: Number(backendConnected ? state.remote.totalReads : 0),
+      direct_taxa: Number(backendConnected ? state.remote.directTaxa : 0),
     },
     taxonomy: {
       nodes_file: getActiveNodesFilename(),
@@ -699,19 +687,19 @@ function buildAgentContext() {
       search: String(els.searchBox?.value || "").trim(),
     },
     tree: {
-      loaded: Boolean(state.tree),
-      server_tree_active: serverTreeActive,
+      loaded: backendTreeReady,
+      server_tree_active: backendTreeReady,
       visible_root: visibleRoot,
-      visible_node_count: state.flat.length,
+      visible_node_count: backendTreeReady ? state.flat.length : 0,
       focused_taxid: focusNode ? Number(focusNode.taxid) : null,
       focused_name: focusNode ? String(focusNode.name || "") : null,
       selected_taxids: selectedTaxids,
       expanded_taxids: expandedTaxids,
-      collapsed_taxids: collapsedTaxids,
+      collapsed_taxids: [],
     },
     report: currentReport,
     backend: {
-      connected: remoteMode,
+      connected: backendConnected,
       backend_nodes_file: state.remote.backendNodesFile || null,
       backend_names_file: state.remote.backendNamesFile || null,
     },
@@ -739,17 +727,167 @@ function summarizeCurrentAgentReport(reportState) {
   };
 }
 
-function getSelectedLocalDatasetNames() {
-  return state.series
-    .map((dataset, index) => String(dataset?.label || dataset?.filename || `local-dataset-${index + 1}`));
+function normalizeProviderRequestContext(requestContext) {
+  if (!requestContext || typeof requestContext !== "object") {
+    return null;
+  }
+  return {
+    dataset_names: Array.isArray(requestContext.dataset_names)
+      ? requestContext.dataset_names.map((name) => String(name))
+      : [],
+    nodes_file: requestContext.nodes_file ? String(requestContext.nodes_file) : null,
+    names_file: requestContext.names_file ? String(requestContext.names_file) : null,
+    min_reads: Number(requestContext.min_reads || 0),
+    expanded_taxids: Array.isArray(requestContext.expanded_taxids)
+      ? requestContext.expanded_taxids.map((value) => Number(value))
+      : [],
+  };
 }
 
-function sumLocalSeriesReads() {
-  let total = 0;
-  for (const count of state.counts.values()) {
-    total += Number(count || 0);
+function normalizeGraphContextForProviderContext(graphContext) {
+  if (!graphContext || typeof graphContext !== "object") {
+    return null;
   }
-  return total;
+  return {
+    dataset_names: Array.isArray(graphContext.datasets?.selected)
+      ? graphContext.datasets.selected.map((name) => String(name))
+      : [],
+    nodes_file: graphContext.taxonomy?.nodes_file ? String(graphContext.taxonomy.nodes_file) : null,
+    names_file: graphContext.taxonomy?.names_file ? String(graphContext.taxonomy.names_file) : null,
+    min_reads: Number(graphContext.filters?.min_reads || 0),
+    expanded_taxids: Array.isArray(graphContext.tree?.expanded_taxids)
+      ? graphContext.tree.expanded_taxids.map((value) => Number(value))
+      : [],
+  };
+}
+
+function normalizeSelectedDatasetsForProvider(graphContext) {
+  const datasets = graphContext?.datasets && typeof graphContext.datasets === "object"
+    ? graphContext.datasets
+    : {};
+  return {
+    ok: true,
+    mode: "backend",
+    tool: "list_selected_datasets",
+    request: {},
+    datasets: {
+      selected: Array.isArray(datasets.selected)
+        ? datasets.selected.map((name) => String(name))
+        : [],
+      count: Number(datasets.count || 0),
+      total_reads: Number(datasets.total_reads || 0),
+      direct_taxa: Number(datasets.direct_taxa || 0),
+    },
+    context: normalizeGraphContextForProviderContext(graphContext),
+  };
+}
+
+function normalizeSelectedNodesForProvider(selectedNodes, graphContext) {
+  const rows = Array.isArray(selectedNodes) ? selectedNodes : [];
+  return {
+    ok: true,
+    mode: "backend",
+    tool: "get_selected_nodes",
+    request: {},
+    count: rows.length,
+    selected: rows.map((node) => ({
+      taxid: Number(node?.taxid || 0),
+      name: String(node?.name || ""),
+      rank: String(node?.rank || ""),
+      direct: Number(node?.direct || 0),
+      subtree: Number(node?.subtree || 0),
+      child_count: Number(node?.child_count || 0),
+    })),
+    context: normalizeGraphContextForProviderContext(graphContext),
+  };
+}
+
+function normalizeNodeDetailsForProvider(payload, request = {}) {
+  const node = payload?.node && typeof payload.node === "object" ? payload.node : {};
+  return {
+    ok: Boolean(payload?.ok),
+    mode: "backend",
+    tool: "get_node_details",
+    request: {
+      taxid: Number(request.taxid),
+    },
+    node: {
+      taxid: Number(node.taxid || 0),
+      name: String(node.name || ""),
+      rank: String(node.rank || ""),
+      parent: node.parent == null ? null : Number(node.parent),
+      depth: Number(node.depth || 0),
+      direct: Number(node.direct || 0),
+      subtree: Number(node.subtree || 0),
+      child_count: Number(node.child_count || 0),
+      lineage: Array.isArray(node.lineage)
+        ? node.lineage.map((entry) => ({
+          taxid: Number(entry?.taxid || 0),
+          name: String(entry?.name || ""),
+          rank: String(entry?.rank || ""),
+        }))
+        : [],
+      datasets: Array.isArray(node.datasets)
+        ? node.datasets.map((entry) => ({
+          dataset: String(entry?.dataset || ""),
+          direct: Number(entry?.direct || 0),
+          subtree: Number(entry?.subtree || 0),
+        }))
+        : [],
+    },
+    context: normalizeProviderRequestContext(payload?.request_context),
+  };
+}
+
+function normalizeTableViewForProvider(payload, request = {}) {
+  const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+  const target = payload?.target && typeof payload.target === "object" ? payload.target : null;
+  const scope = request.scope === "node" ? "node" : "root";
+  const sort = request.sort === "subtree" ? "subtree" : "direct";
+  const limit = normalizeToolLimit(request.limit, 40);
+  return {
+    ok: Boolean(payload?.ok),
+    mode: "backend",
+    tool: "get_table_view",
+    request: {
+      scope,
+      taxid: scope === "node" && request.taxid != null ? Number(request.taxid) : null,
+      sort,
+      limit,
+    },
+    target: target ? {
+      taxid: Number(target.taxid || 0),
+      name: String(target.name || ""),
+      rank: String(target.rank || ""),
+      direct: Number(target.direct || 0),
+      subtree: Number(target.subtree || 0),
+      child_count: Number(target.child_count || 0),
+    } : null,
+    row_count: Number(payload?.row_count ?? rows.length),
+    rows: rows.map((row) => ({
+      taxid: Number(row?.taxid || 0),
+      name: String(row?.name || ""),
+      rank: String(row?.rank || ""),
+      depth: Number(row?.depth || 0),
+      direct: Number(row?.direct || 0),
+      subtree: Number(row?.subtree || 0),
+      child_count: Number(row?.child_count || 0),
+    })),
+    context: normalizeProviderRequestContext(payload?.request_context),
+  };
+}
+
+function requireAgentBackendConnection() {
+  if (!state.remote.connected) {
+    throw new Error("Unicorn agent tools require a backend connection. Start the graphengine backend locally or remotely, connect it, and try again.");
+  }
+}
+
+function requireAgentBackendTree() {
+  requireAgentBackendConnection();
+  if (!state.remote.serverTreeActive || !state.tree) {
+    throw new Error("Unicorn agent tools require a backend-backed tree. Render a tree from the backend first.");
+  }
 }
 
 function getActiveNodesFilename() {
@@ -967,12 +1105,21 @@ async function runMockProviderRequest(payload) {
   const toolResults = Array.isArray(payload?.tool_results) ? payload.tool_results : [];
   const lower = prompt.trim().toLowerCase();
 
+  if (!context.backend.connected) {
+    return {
+      type: "final_answer",
+      content: "No Unicorn backend connection is active yet. Start the graphengine backend, connect to it, render a tree, then ask me about the current graph state.",
+      tool_summary: ["get_graph_context"],
+      notes: "Mock mode only. Agent grounding now assumes a backend-backed Unicorn session.",
+    };
+  }
+
   if (!context.tree.loaded) {
     return {
       type: "final_answer",
-      content: "No active Unicorn tree is loaded yet. Render a tree first, then ask me about the current graph state.",
+      content: "No active backend-backed Unicorn tree is loaded yet. Render a tree first, then ask me about the current graph state.",
       tool_summary: ["get_graph_context"],
-      notes: "Mock mode only. This reply is generated locally from current Unicorn state.",
+      notes: "Mock mode only. Agent grounding now assumes a backend-backed Unicorn session.",
     };
   }
 
@@ -1012,9 +1159,9 @@ async function runMockProviderRequest(payload) {
     }
     return {
       type: "final_answer",
-      content: `The current Unicorn session is in ${context.mode} mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
+      content: `The current Unicorn session is using ${context.mode} mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
       tool_summary: ["get_graph_context"],
-      notes: "Mock mode only. This response is a local summary built from the current graph context.",
+      notes: "Mock mode only. This response is grounded in the current backend-backed graph context.",
     };
   }
 
@@ -1104,11 +1251,19 @@ async function runMockAgentLegacy(prompt, context = buildAgentContext()) {
   const toolsUsed = ["get_graph_context"];
   const lower = String(prompt || "").trim().toLowerCase();
 
+  if (!context.backend.connected) {
+    return {
+      answer: "No Unicorn backend connection is active yet. Start the graphengine backend, connect to it, render a tree, then ask me about the current graph state.",
+      toolsUsed,
+      note: "Mock mode only. Agent grounding now assumes a backend-backed Unicorn session.",
+    };
+  }
+
   if (!context.tree.loaded) {
     return {
-      answer: "No active Unicorn tree is loaded yet. Render a tree first, then ask me about the current graph state.",
+      answer: "No active backend-backed Unicorn tree is loaded yet. Render a tree first, then ask me about the current graph state.",
       toolsUsed,
-      note: "Mock mode only. This reply is generated locally from current Unicorn state.",
+      note: "Mock mode only. Agent grounding now assumes a backend-backed Unicorn session.",
     };
   }
 
@@ -1182,9 +1337,9 @@ async function runMockAgentLegacy(prompt, context = buildAgentContext()) {
   }
 
   return {
-    answer: `The current Unicorn session is in ${context.mode} mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
+    answer: `The current Unicorn session is using ${context.mode} mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
     toolsUsed,
-    note: "Mock mode only. This response is a local summary built from the current graph context.",
+    note: "Mock mode only. This response is grounded in the current backend-backed graph context.",
   };
 }
 
@@ -1218,78 +1373,9 @@ function summarizeNodeForAgent(node) {
   };
 }
 
-function buildLocalNodeDetails(node) {
-  return {
-    taxid: Number(node.taxid),
-    name: String(node.name || ""),
-    rank: String(node.rank || ""),
-    direct: Number(node.direct || 0),
-    subtree: Number(node.total || 0),
-    child_count: getVisibleChildCount(node),
-    lineage: buildLocalLineage(node),
-    datasets: state.series.map((dataset, index) => ({
-      dataset: String(dataset.label || `dataset-${index + 1}`),
-      direct: Number(node.directBySource?.[index] || 0),
-      subtree: Number(node.totalBySource?.[index] || 0),
-    })),
-  };
-}
-
-function buildLocalLineage(node) {
-  const lineage = [];
-  let current = node;
-  while (current) {
-    lineage.push({
-      taxid: Number(current.taxid),
-      name: String(current.name || ""),
-      rank: String(current.rank || ""),
-    });
-    if (current.parent == null || current === state.tree) break;
-    current = findNodeByTaxid(state.tree, current.parent);
-  }
-  lineage.reverse();
-  return lineage;
-}
-
 function getVisibleChildCount(node) {
   const children = Array.isArray(node.children) ? node.children : [];
   return children.filter((child) => Number(child.total || 0) > 0).length;
-}
-
-function buildLocalTableView(options = {}) {
-  if (!state.tree) {
-    throw new Error("No active tree is loaded.");
-  }
-  const scope = options.scope === "node" ? "node" : "root";
-  const sort = options.sort === "subtree" ? "subtree" : "direct";
-  const limit = normalizeToolLimit(options.limit, 40);
-  const target = scope === "node"
-    ? findNodeByTaxid(state.tree, options.taxid)
-    : state.tree;
-  if (!target) {
-    throw new Error(scope === "node"
-      ? `Taxid ${options.taxid} is not present in the active tree.`
-      : "Could not resolve root scope.");
-  }
-  const rows = [];
-  walkTree(target, (node) => {
-    if (node !== target && Number(node.total || 0) <= 0) return;
-    if (Number(node.direct || 0) <= 0) return;
-    rows.push(summarizeNodeForAgent(node));
-  });
-  rows.sort((a, b) => Number(b[sort] || 0) - Number(a[sort] || 0) || Number(b.direct || 0) - Number(a.direct || 0) || String(a.name).localeCompare(String(b.name)));
-  return {
-    ok: true,
-    mode: "local",
-    scope,
-    rows: rows.slice(0, limit),
-    request: {
-      scope,
-      taxid: scope === "node" ? Number(target.taxid) : null,
-      sort,
-      limit,
-    },
-  };
 }
 
 function handleAgentSend() {
@@ -1305,7 +1391,7 @@ function handleAgentSend() {
   });
   const providerMeta = unicornAgentProviderAdapter.getCurrentProviderMeta();
   const context = buildAgentContext();
-  setStatus(`${providerMeta?.label || "Agent"} is drafting a local reply from Unicorn state...`);
+  setStatus(`${providerMeta?.label || "Agent"} is drafting a reply from Unicorn backend state...`);
   unicornAgentProviderAdapter.runTurn({
     prompt,
     context,
@@ -1314,7 +1400,7 @@ function handleAgentSend() {
     .then((response) => {
       console.log("[Unicorn Agent Context]", context);
       console.log("[Unicorn Agent Provider Response]", response);
-      addClientLog("info", "agent", "Captured agent context locally.", JSON.stringify({
+      addClientLog("info", "agent", "Captured agent context in the browser runtime.", JSON.stringify({
         prompt,
         context,
         response,
@@ -1326,7 +1412,7 @@ function handleAgentSend() {
         note: response.note,
       });
       els.agentPrompt.value = "";
-      setStatus(`${response.provider_label || "Agent"} reply rendered locally.`);
+      setStatus(`${response.provider_label || "Agent"} reply rendered in the graphengine UI.`);
     })
     .catch((error) => {
       addClientLog("error", "agent", "Agent provider reply failed.", errorToDetail(error));
@@ -1342,8 +1428,6 @@ function handleAgentSend() {
 async function connectRemote() {
   const user = els.remoteUser.value.trim();
   const host = els.remoteHost.value.trim();
-  state.remote.user = user;
-  state.remote.host = host;
   localStorage.setItem("unicorn.remoteUser", user);
   localStorage.setItem("unicorn.remoteHost", host);
   updateTunnelHint();
@@ -1379,7 +1463,7 @@ async function connectRemote() {
     );
     try {
       await refreshRemoteDatasets({ selectAll: true });
-      setStatus(remoteConnectionReadyMessage(user, host));
+      setStatus(backendConnectionReadyMessage(user, host));
     } catch (error) {
       addClientLog("error", "datasets", `Remote dataset refresh failed after tunnel check.`, errorToDetail(error));
       setStatus(`Tunnel check succeeded for ${user}@${host}, but the remote dataset list could not be loaded yet. ${error.message || error}`);
@@ -1466,49 +1550,21 @@ async function copyTunnelCommand() {
 }
 
 async function loadAndRender() {
-  if (!state.remote.connected && !els.nodesFile.files[0]) {
-    setStatus("Choose nodes.dmp before rendering.");
+  if (!state.remote.connected) {
+    setStatus("Connect to the backend before rendering. If you are working locally, start the graphengine backend and connect to localhost.");
     return;
   }
-  if (state.remote.connected && !canRenderRemoteTree()) {
+  if (!canRenderRemoteTree()) {
     setStatus(remoteRenderUnavailableMessage());
     return;
   }
   try {
-    setStatus(state.remote.connected ? "Syncing local inputs and fetching remote tree..." : "Parsing local input files...");
-    state.collapsed.clear();
+    setStatus("Syncing local uploads and fetching backend tree...");
     state.missingTaxids.clear();
-    if (state.remote.connected) {
-      await loadAndRenderRemote();
-      return;
-    }
-
-    const [parsedSources, nodesText, namesText] = await Promise.all([
-      loadLocalSources(),
-      readFile(els.nodesFile.files[0]),
-      els.namesFile.files[0] ? readFile(els.namesFile.files[0]) : Promise.resolve(""),
-    ]);
-    if (!parsedSources.length) {
-      setStatus("Choose at least one LCA output file or provide a file list.");
-      return;
-    }
-
-    state.nodes = parseNodes(nodesText);
-    state.series = buildSeries(parsedSources);
-    state.counts = aggregateSeriesCounts(state.series);
-    state.names = mergeNames(mergeSourceNames(parsedSources), parseNames(namesText));
-    state.tree = buildTree(state.nodes, state.series, state.names);
-    state.remote.serverTreeActive = false;
-    syncMinReadsControl();
-    setDefaultCollapsedState(state.tree);
-    state.centerOnNextRender = true;
-    renderSourceLegend();
-
-    setStatus(`Loaded ${state.nodes.size.toLocaleString()} taxonomy nodes, ${state.series.length.toLocaleString()} input file${state.series.length === 1 ? "" : "s"}, and ${state.counts.size.toLocaleString()} LCA taxa.`);
-    redraw();
+    await loadAndRenderBackend();
   } catch (error) {
     console.error(error);
-    addClientLog("error", state.remote.connected ? "tree" : "local", "Could not render tree.", errorToDetail(error));
+    addClientLog("error", "tree", "Could not render tree.", errorToDetail(error));
     setStatus(`Could not render tree: ${error.message || error}`);
   }
 }
@@ -1552,7 +1608,7 @@ async function uploadFilesToRemote(files) {
   return uploaded;
 }
 
-async function loadAndRenderRemote() {
+async function loadAndRenderBackend() {
   const localFiles = getLocalRemoteUploadFiles();
   if (localFiles.length) {
     await uploadFilesToRemote(localFiles);
@@ -1567,8 +1623,8 @@ async function loadAndRenderRemote() {
   const files = getSelectedRemoteDatasets();
   if (!files.length) {
     setStatus(state.remote.datasets.length
-      ? "No remote datasets are currently selected. Select one or more files in the Remote Datasets panel."
-      : "No remote .bdamage datasets are available to render.");
+      ? "No backend datasets are currently selected. Select one or more files in the Datasets panel."
+      : "No backend .bdamage datasets are available to render.");
     return;
   }
 
@@ -1576,7 +1632,7 @@ async function loadAndRenderRemote() {
   addClientLog(
     "info",
     "tree",
-    `Requesting remote root tree view for ${files.length.toLocaleString()} dataset${files.length === 1 ? "" : "s"}.`,
+    `Requesting backend root tree view for ${files.length.toLocaleString()} dataset${files.length === 1 ? "" : "s"}.`,
     files.join("\n"),
   );
   const payload = await fetchRemoteVisibleTree();
@@ -1589,7 +1645,7 @@ async function loadAndRenderRemote() {
   applyRemoteVisiblePayload(payload);
   state.centerOnNextRender = true;
   addClientLog("success", "tree", `Loaded backend tree with ${Number(payload.direct_taxa || 0).toLocaleString()} direct taxa.`);
-  setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} remote dataset${state.series.length === 1 ? "" : "s"} and ${state.remote.directTaxa.toLocaleString()} direct taxa.`);
+  setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} dataset${state.series.length === 1 ? "" : "s"} and ${state.remote.directTaxa.toLocaleString()} direct taxa.`);
   redraw();
 }
 
@@ -1600,72 +1656,6 @@ function clearRemoteDatasetInputs() {
   if (els.lcaListFile) {
     els.lcaListFile.value = "";
   }
-}
-
-async function loadLocalSources() {
-  const uploads = Array.from(document.querySelectorAll(".lca-file-input"))
-    .map((input) => input.files[0])
-    .filter(Boolean);
-  const uploadedSources = await Promise.all(
-    uploads.map(async (file) => ({
-      name: file.name,
-      text: await readFile(file),
-    })),
-  );
-
-  let listedSources = [];
-  if (els.lcaListFile.files[0]) {
-    const listText = await readFile(els.lcaListFile.files[0]);
-    listedSources = await loadSourcesFromList(listText);
-  }
-  return [...uploadedSources, ...listedSources].map((source) => ({
-    label: source.name,
-    ...parseLcaOutput(source.text),
-  }));
-}
-
-async function loadSourcesFromList(text) {
-  const paths = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"));
-  return Promise.all(paths.map(async (path) => ({
-    name: path.split(/[\\/]/).pop() || path,
-    text: await fetchTextPath(path),
-  })));
-}
-
-async function fetchTextPath(path) {
-  const target = new URL(path, window.location.href);
-  const response = await fetch(target.href);
-  if (!response.ok) {
-    throw new Error(`Could not load input file from ${path}`);
-  }
-  return response.text();
-}
-
-async function loadRemoteSources() {
-  const files = getSelectedRemoteDatasets();
-  if (!files.length) return [];
-
-  const url = new URL("http://localhost:8000/render-data");
-  for (const file of files) {
-    url.searchParams.append("files", file);
-  }
-
-  const response = await fetch(url.toString(), {
-    method: "GET",
-  });
-  if (!response.ok) {
-    throw new Error(`Remote render-data request failed with HTTP ${response.status}`);
-  }
-  const payload = await response.json();
-  const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
-  return datasets.map((dataset) => ({
-    label: dataset.filename || dataset.id || "remote-dataset",
-    counts: countsArrayToMap(dataset.counts || []),
-    names: countsArrayToNames(dataset.counts || []),
-  }));
 }
 
 function buildSeriesFromRemoteDatasets(datasets, treePayload) {
@@ -1716,22 +1706,23 @@ function buildRemoteTree(node) {
 
 async function handleMinReadsChange() {
   setMinReadsValue(valueFromSliderPosition(els.minReads.value));
-  if (!isRemoteServerTreeMode()) {
-    redraw();
-    return;
+  if (hasBackendTree()) {
+    try {
+      const payload = await fetchRemoteVisibleTree();
+      applyRemoteVisiblePayload(payload);
+      await refreshCurrentReportIfNeeded();
+      redraw();
+      return;
+    } catch (error) {
+      setStatus(`Could not refresh backend tree after changing the read filter: ${error.message || error}`);
+      return;
+    }
   }
-  try {
-    const payload = await fetchRemoteVisibleTree();
-    applyRemoteVisiblePayload(payload);
-    await refreshCurrentRemoteSubtreeReportIfNeeded();
-    redraw();
-  } catch (error) {
-    setStatus(`Could not refresh remote tree after changing the read filter: ${error.message || error}`);
-  }
+  redraw();
 }
 
-function isRemoteServerTreeMode() {
-  return state.remote.connected && state.remote.serverTreeActive;
+function hasBackendTree() {
+  return state.remote.connected && state.remote.serverTreeActive && Boolean(state.tree);
 }
 
 function buildRemoteContextUrl(path, options = {}) {
@@ -1850,8 +1841,6 @@ async function fetchRemoteFullTreeModel() {
 
 function applyRemoteVisiblePayload(payload) {
   const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
-  state.nodes = new Map();
-  state.names = new Map();
   state.series = buildSeriesFromRemoteDatasets(datasets, payload.tree);
   state.tree = buildRemoteTree(payload.tree);
   state.counts = aggregateSeriesCounts(state.series);
@@ -1862,14 +1851,6 @@ function applyRemoteVisiblePayload(payload) {
   state.remote.directTaxa = Number(payload.direct_taxa || 0);
   syncMinReadsControl();
   renderSourceLegend();
-}
-
-function setDefaultCollapsedState(root) {
-  state.collapsed.clear();
-  if (!root) return;
-  for (const child of root.children) {
-    collapseSubtreeBelow(child);
-  }
 }
 
 async function refreshRemoteDatasets(options = {}) {
@@ -2010,20 +1991,20 @@ function canRenderRemoteTree() {
 
 function remoteRenderUnavailableMessage() {
   if (!state.remote.connected) {
-    return "Connect to the backend before rendering a remote tree.";
+    return "Connect to the backend before rendering.";
   }
   if (!getSelectedRemoteDatasets().length) {
     if (getLocalRemoteDatasetUploadFiles().length > 0) {
-      return "Remote render is ready to upload your selected local datasets, but taxonomy must still be available locally or on the backend.";
+      return "The backend is ready to upload your selected local datasets, but taxonomy must still be available locally or on the backend.";
     }
     return state.remote.datasets.length
-      ? "Select one or more remote datasets before rendering."
-      : "No remote .bdamage datasets are available to render.";
+      ? "Select one or more backend datasets before rendering."
+      : "No backend .bdamage datasets are available to render.";
   }
-  return "Remote taxonomy is not ready yet. Upload or select nodes.dmp on the client, or place nodes.dmp in the backend uploads directory.";
+  return "Backend taxonomy is not ready yet. Upload or select nodes.dmp on the client, or place nodes.dmp in the backend uploads directory.";
 }
 
-function remoteConnectionReadyMessage(user, host) {
+function backendConnectionReadyMessage(user, host) {
   const selected = getSelectedRemoteDatasets().length;
   const pendingUploads = getLocalRemoteDatasetUploadFiles().length;
   const datasetLabel = selected === 1 ? "dataset" : "datasets";
@@ -2102,141 +2083,6 @@ function formatBytes(bytes) {
   return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
-function readFile(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsText(file);
-  });
-}
-
-function parseNodes(text) {
-  const map = new Map();
-  for (const line of text.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const parts = line.split("|").map((p) => p.trim());
-    const taxid = Number(parts[0]);
-    const parent = Number(parts[1]);
-    if (!Number.isFinite(taxid) || !Number.isFinite(parent)) continue;
-    map.set(taxid, {
-      taxid,
-      parent,
-      rank: parts[2] || "no rank",
-    });
-  }
-  return map;
-}
-
-function parseNames(text) {
-  const map = new Map();
-  if (!text) return map;
-  for (const line of text.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const parts = line.split("|").map((p) => p.trim());
-    const taxid = Number(parts[0]);
-    const name = parts[1] || "";
-    const cls = parts[3] || "";
-    if (!Number.isFinite(taxid) || !name) continue;
-    if (cls === "scientific name" || !map.has(taxid)) map.set(taxid, name);
-  }
-  return map;
-}
-
-function parseLcaOutput(text) {
-  const queryCounts = new Map();
-  const summaryCounts = new Map();
-  const names = new Map();
-  let inSummary = false;
-  let sawSummary = false;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (line.startsWith("#")) {
-      inSummary = /taxid/i.test(line) && /count/i.test(line);
-      continue;
-    }
-    const parts = line.split("\t");
-    if (parts.length < 2) continue;
-
-    const first = Number(parts[0]);
-    const second = Number(parts[1]);
-    let taxid = 0;
-    let count = 1;
-    let name = "";
-
-    if (Number.isFinite(first) && Number.isFinite(second) && inSummary) {
-      taxid = first;
-      count = second;
-      name = cleanName(parts.slice(2).join("\t"));
-      sawSummary = true;
-    } else if (Number.isFinite(first) && Number.isFinite(second) && parts.length >= 3) {
-      taxid = first;
-      count = second;
-      name = cleanName(parts.slice(2).join("\t"));
-    } else if (Number.isFinite(second)) {
-      taxid = second;
-      name = cleanName(parts.slice(2).join("\t"));
-    }
-
-    if (!Number.isFinite(taxid)) continue;
-    const target = inSummary ? summaryCounts : queryCounts;
-    target.set(taxid, (target.get(taxid) || 0) + count);
-    if (name && name !== "NA") names.set(taxid, name);
-  }
-  const counts = sawSummary ? summaryCounts : queryCounts;
-  return { counts, names };
-}
-
-function cleanName(name) {
-  return name.replace(/^"+|"+$/g, "").trim();
-}
-
-function mergeNames(a, b) {
-  const out = new Map(b);
-  for (const [taxid, name] of a) out.set(taxid, name);
-  return out;
-}
-
-function mergeSourceNames(series) {
-  const names = new Map();
-  for (const source of series) {
-    for (const [taxid, name] of source.names) names.set(taxid, name);
-  }
-  return names;
-}
-
-function buildSeries(parsedSources) {
-  return parsedSources.map((source, index) => ({
-    label: source.label,
-    color: colorForSource(index),
-    counts: source.counts,
-    visible: true,
-  }));
-}
-
-function countsArrayToMap(rows) {
-  const counts = new Map();
-  for (const row of rows) {
-    const taxid = Number(row.taxid);
-    const count = Number(row.count);
-    if (!Number.isFinite(taxid) || !Number.isFinite(count)) continue;
-    counts.set(taxid, (counts.get(taxid) || 0) + count);
-  }
-  return counts;
-}
-
-function countsArrayToNames(rows) {
-  const names = new Map();
-  for (const row of rows) {
-    const taxid = Number(row.taxid);
-    const name = typeof row.name === "string" ? cleanName(row.name) : "";
-    if (!Number.isFinite(taxid) || !name || name === "NA") continue;
-    names.set(taxid, name);
-  }
-  return names;
-}
-
 function aggregateSeriesCounts(series) {
   const total = new Map();
   for (const source of series) {
@@ -2247,125 +2093,22 @@ function aggregateSeriesCounts(series) {
   return total;
 }
 
-function buildTree(nodes, series, names) {
-  const counts = aggregateSeriesCounts(series);
-  const included = new Set();
-  for (const [taxid, count] of counts) {
-    if (!count || taxid === 0) continue;
-    if (!nodes.has(taxid)) {
-      state.missingTaxids.add(taxid);
-      continue;
-    }
-    let cur = taxid;
-    const seen = new Set();
-    while (nodes.has(cur) && !seen.has(cur)) {
-      seen.add(cur);
-      included.add(cur);
-      const parent = nodes.get(cur).parent;
-      if (!parent || parent === cur) break;
-      cur = parent;
-    }
-  }
-
-  const objects = new Map();
-  for (const taxid of included) {
-    const raw = nodes.get(taxid);
-    objects.set(taxid, {
-      taxid,
-      parent: raw.parent,
-      rank: raw.rank,
-      name: names.get(taxid) || String(taxid),
-      direct: counts.get(taxid) || 0,
-      directBySource: series.map((source) => source.counts.get(taxid) || 0),
-      total: 0,
-      totalBySource: new Array(series.length).fill(0),
-      children: [],
-      depth: 0,
-    });
-  }
-
-  const roots = [];
-  for (const node of objects.values()) {
-    const parent = objects.get(node.parent);
-    if (parent && parent.taxid !== node.taxid) parent.children.push(node);
-    else roots.push(node);
-  }
-
-  const unknown = counts.get(0) || 0;
-  if (unknown) {
-    const unclassified = {
-      taxid: 0,
-      parent: null,
-      rank: "unclassified",
-      name: names.get(0) || "unclassified",
-      direct: unknown,
-      directBySource: series.map((source) => source.counts.get(0) || 0),
-      total: unknown,
-      totalBySource: series.map((source) => source.counts.get(0) || 0),
-      children: [],
-      depth: 0,
-    };
-    if (roots.length === 1) roots[0].children.push(unclassified);
-    else roots.push(unclassified);
-  }
-
-  const root = roots.length === 1 ? roots[0] : {
-    taxid: -1,
-    parent: null,
-    rank: "synthetic root",
-    name: "root",
-    direct: 0,
-    directBySource: new Array(series.length).fill(0),
-    total: 0,
-    totalBySource: new Array(series.length).fill(0),
-    children: roots,
-    depth: 0,
-  };
-
-  computeTotals(root, 0);
-  sortTree(root);
-  return root;
-}
-
-function computeTotals(node, depth) {
-  node.depth = depth;
-  node.total = node.direct;
-  node.totalBySource = [...node.directBySource];
-  for (const child of node.children) {
-    computeTotals(child, depth + 1);
-    node.total += child.total;
-    for (let i = 0; i < node.totalBySource.length; i++) {
-      node.totalBySource[i] += child.totalBySource[i];
-    }
-  }
-}
-
-function sortTree(node) {
-  node.children.sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-  for (const child of node.children) sortTree(child);
-}
-
 function redraw() {
   if (!state.tree) return;
-  if (!isRemoteServerTreeMode()) {
-    applySeriesVisibility(state.tree);
-    state.counts = aggregateSeriesCounts(getVisibleSeries());
-  } else {
-    state.counts = collectDirectCountsFromVisibleTree(state.tree);
-  }
-  const minReads = isRemoteServerTreeMode() ? 0 : getMinReadsValue();
+  state.counts = collectDirectCountsFromVisibleTree(state.tree);
+  const minReads = 0;
   const search = els.searchBox.value.trim().toLowerCase();
   const visible = [];
   const links = [];
   const leaves = { count: 0 };
-  collectVisible(state.tree, null, visible, links, leaves, minReads, !isRemoteServerTreeMode());
-  layoutVisible(state.tree, new Set(visible), !isRemoteServerTreeMode());
+  collectVisible(state.tree, null, visible, links, leaves, minReads);
+  layoutVisible(state.tree, new Set(visible));
   state.flat = visible;
   renderSvg(visible, links, search);
   renderSummary(visible);
   renderTopTable();
   const activeSeries = getVisibleSeries().length;
-  setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from ${state.counts.size.toLocaleString()} LCA taxa across ${activeSeries.toLocaleString()} active sample${activeSeries === 1 ? "" : "s"}.`);
+  setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from ${state.counts.size.toLocaleString()} direct taxa across ${activeSeries.toLocaleString()} active dataset${activeSeries === 1 ? "" : "s"}.`);
 }
 
 function collectDirectCountsFromVisibleTree(root) {
@@ -2377,7 +2120,7 @@ function collectDirectCountsFromVisibleTree(root) {
   return counts;
 }
 
-function collectVisible(node, parent, nodes, links, leaves, minReads, useCollapsedState) {
+function collectVisible(node, parent, nodes, links, leaves, minReads) {
   if (node !== state.tree && node.total <= 0) return false;
   // The minimum-read filter is defined on subtree totals, so any node below
   // the threshold is hidden and its nearest visible ancestor becomes the
@@ -2385,12 +2128,9 @@ function collectVisible(node, parent, nodes, links, leaves, minReads, useCollaps
   if (node !== state.tree && node.total < minReads) return false;
   nodes.push(node);
   if (parent) links.push([parent, node]);
-  const collapsed = useCollapsedState && state.collapsed.has(node.taxid);
   let visibleChildren = 0;
-  if (!collapsed) {
-    for (const child of node.children) {
-      if (collectVisible(child, node, nodes, links, leaves, minReads, useCollapsedState)) visibleChildren++;
-    }
+  for (const child of node.children) {
+    if (collectVisible(child, node, nodes, links, leaves, minReads)) visibleChildren++;
   }
   if (visibleChildren === 0) {
     node._leaf = leaves.count++;
@@ -2398,14 +2138,14 @@ function collectVisible(node, parent, nodes, links, leaves, minReads, useCollaps
   return true;
 }
 
-function layoutVisible(root, visibleSet, useCollapsedState) {
+function layoutVisible(root, visibleSet) {
   const rowGap = 34;
   const levelGap = 230;
   const top = 42;
   const left = 42;
   const setY = (node) => {
     const children = node.children.filter((child) => visibleSet.has(child));
-    if ((useCollapsedState && state.collapsed.has(node.taxid)) || children.length === 0) {
+    if (children.length === 0) {
       node.x = left + node.depth * levelGap;
       node.y = top + (node._leaf || 0) * rowGap;
       return node.y;
@@ -2592,37 +2332,24 @@ function toggleFocus(node) {
 
 async function toggleCollapse(node) {
   if (!nodeHasChildren(node)) return;
-  if (isRemoteServerTreeMode()) {
-    try {
-      if (node.expanded) {
-        state.remote.expandedTaxids.delete(node.taxid);
-        const payload = await fetchRemoteVisibleTree({
-          expandedTaxids: Array.from(state.remote.expandedTaxids),
-        });
-        applyRemoteVisiblePayload(payload);
-      } else {
-        const nextExpanded = new Set(state.remote.expandedTaxids);
-        nextExpanded.add(node.taxid);
-        const payload = await fetchRemoteVisibleTree({
-          taxid: node.taxid,
-          expandedTaxids: Array.from(state.remote.expandedTaxids),
-        });
-        applyRemoteVisiblePayload(payload);
-        state.remote.expandedTaxids = nextExpanded;
-      }
-      redraw();
-    } catch (error) {
-      setStatus(`Could not update the remote tree view: ${error.message || error}`);
+  try {
+    if (node.expanded) {
+      state.remote.expandedTaxids.delete(node.taxid);
+      const payload = await fetchRemoteVisibleTree({
+        expandedTaxids: Array.from(state.remote.expandedTaxids),
+      });
+      applyRemoteVisiblePayload(payload);
+    } else {
+      const payload = await fetchRemoteVisibleTree({
+        taxid: node.taxid,
+        expandedTaxids: Array.from(state.remote.expandedTaxids),
+      });
+      applyRemoteVisiblePayload(payload);
     }
-    return;
+    redraw();
+  } catch (error) {
+    setStatus(`Could not update the backend tree view: ${error.message || error}`);
   }
-  if (state.collapsed.has(node.taxid)) {
-    state.collapsed.delete(node.taxid);
-    collapseChildren(node);
-  } else {
-    state.collapsed.add(node.taxid);
-  }
-  redraw();
 }
 
 function toggleSelection(node) {
@@ -2678,12 +2405,9 @@ function uncollapseSelected() {
     return;
   }
 
-  for (const node of selectedNodes) {
-    state.collapsed.delete(node.taxid);
-    addDescendantsToSelection(node);
-    collapseSubtreeBelow(node);
-  }
-  redraw();
+  expandSelectedNodes(selectedNodes).catch((error) => {
+    setStatus(`Could not expand the selected backend nodes: ${error.message || error}`);
+  });
 }
 
 function uncollapseSelectedToTips() {
@@ -2698,15 +2422,20 @@ function uncollapseSelectedToTips() {
     return;
   }
 
-  if (isRemoteServerTreeMode()) {
-    uncollapseSelectedToTipsRemote(selectedNodes);
-    return;
-  }
+  uncollapseSelectedToTipsRemote(selectedNodes);
+}
 
+async function expandSelectedNodes(selectedNodes) {
+  const expandedTaxids = new Set(state.remote.expandedTaxids);
   for (const node of selectedNodes) {
-    addDescendantsToSelection(node);
-    uncollapseSubtree(node);
+    if (nodeHasChildren(node)) {
+      expandedTaxids.add(node.taxid);
+    }
   }
+  const visiblePayload = await fetchRemoteVisibleTree({
+    expandedTaxids: Array.from(expandedTaxids),
+  });
+  applyRemoteVisiblePayload(visiblePayload);
   redraw();
 }
 
@@ -2732,20 +2461,6 @@ async function uncollapseSelectedToTipsRemote(selectedNodes) {
     redraw();
   } catch (error) {
     setStatus(`Could not uncollapse selected nodes to tips on the backend: ${error.message || error}`);
-  }
-}
-
-function collapseSubtreeBelow(node) {
-  for (const child of node.children) {
-    if (nodeHasChildren(child)) state.collapsed.add(child.taxid);
-    collapseSubtreeBelow(child);
-  }
-}
-
-function uncollapseSubtree(node) {
-  state.collapsed.delete(node.taxid);
-  for (const child of node.children) {
-    uncollapseSubtree(child);
   }
 }
 
@@ -2785,12 +2500,6 @@ function collectExpandableTaxids(node, expandedTaxids) {
   }
   for (const child of node.children || []) {
     collectExpandableTaxids(child, expandedTaxids);
-  }
-}
-
-function collapseChildren(node) {
-  for (const child of node.children) {
-    if (nodeHasChildren(child)) state.collapsed.add(child.taxid);
   }
 }
 
@@ -2842,37 +2551,10 @@ function updateTooltipPosition(event) {
 }
 
 function showTooltip(event, node) {
-  if (isRemoteServerTreeMode()) {
-    showRemoteTooltip(event, node);
-    return;
-  }
-  const mode = els.countMode.value === "direct" ? "direct reads" : "subtree reads";
-  const childCount = typeof node.childCount === "number" ? node.childCount : node.children.length;
-  const breakdown = getNodeSeriesValues(node)
-    .map((value, index) => ({ value, source: state.series[index] }))
-    .filter((entry) => entry.value > 0)
-    .sort((a, b) => b.value - a.value)
-    .map((entry) => `
-      <div class="tooltip-source">
-        <span class="tooltip-swatch" style="background:${entry.source.color}"></span>
-        <span>${escapeHtml(entry.source.label)}: ${entry.value.toLocaleString()}</span>
-      </div>
-    `)
-    .join("");
-  els.tooltip.hidden = false;
-  positionTooltip(event);
-  els.tooltip.innerHTML = `
-    <strong>${escapeHtml(node.name)}</strong>
-    taxid: ${node.taxid}<br>
-    rank: ${escapeHtml(node.rank || "NA")}<br>
-    direct reads: ${node.direct.toLocaleString()}<br>
-    subtree reads: ${node.total.toLocaleString()}<br>
-    children: ${childCount.toLocaleString()}<br>
-    ${breakdown ? `<div class="tooltip-breakdown"><em>${mode}</em>${breakdown}</div>` : ""}
-  `;
+  showBackendTooltip(event, node);
 }
 
-async function showRemoteTooltip(event, node) {
+async function showBackendTooltip(event, node) {
   const requestId = ++state.remote.tooltipRequestId;
   els.tooltip.hidden = false;
   positionTooltip(event);
@@ -2934,12 +2616,8 @@ function hideTooltip() {
 }
 
 function renderSummary(visible) {
-  const totalReads = isRemoteServerTreeMode()
-    ? state.remote.totalReads
-    : (state.tree ? state.tree.total : 0);
-  const directTaxa = isRemoteServerTreeMode()
-    ? state.remote.directTaxa
-    : Array.from(state.counts.values()).filter((v) => v > 0).length;
+  const totalReads = hasBackendTree() ? state.remote.totalReads : 0;
+  const directTaxa = hasBackendTree() ? state.remote.directTaxa : 0;
   els.readCount.textContent = totalReads.toLocaleString();
   els.taxonCount.textContent = directTaxa.toLocaleString();
   els.visibleCount.textContent = visible.length.toLocaleString();
@@ -2948,29 +2626,12 @@ function renderSummary(visible) {
 }
 
 function renderTopTable() {
-  if (isRemoteServerTreeMode()) {
-    if (state.remote.currentReport) {
-      renderCurrentRemoteSubtreeReport();
-      return;
-    }
-    clearSubtreeReportView();
-    renderRemoteTopTable();
+  if (state.remote.currentReport) {
+    renderCurrentReportView();
     return;
   }
   clearSubtreeReportView();
-  const rows = state.flat
-    .filter((node) => node.direct > 0)
-    .sort((a, b) => b.direct - a.direct)
-    .slice(0, 40);
-  els.topTable.innerHTML = rows.map((node) => `
-    <tr>
-      <td>${node.taxid}</td>
-      <td>${escapeHtml(node.name)}</td>
-      <td>${escapeHtml(node.rank || "NA")}</td>
-      <td>${node.direct.toLocaleString()}</td>
-      <td>${node.total.toLocaleString()}</td>
-    </tr>
-  `).join("");
+  renderBackendTopTable();
 }
 
 function clearSubtreeReportView() {
@@ -2991,8 +2652,8 @@ function clearSubtreeReportView() {
 }
 
 async function openSelectedSubtreeReport() {
-  if (!isRemoteServerTreeMode()) {
-    setStatus("Subtree reports are currently available in remote backend mode.");
+  if (!hasBackendTree()) {
+    setStatus("Render a backend-backed tree first, then request a subtree report.");
     return;
   }
   const selectedNodes = getSelectedNodes();
@@ -3032,8 +2693,8 @@ async function openSelectedSubtreeReport() {
 }
 
 async function openSelectedRankReport() {
-  if (!isRemoteServerTreeMode()) {
-    setStatus("Rank reports are currently available in remote backend mode.");
+  if (!hasBackendTree()) {
+    setStatus("Render a backend-backed tree first, then request a rank report.");
     return;
   }
   const selectedNodes = getSelectedNodes();
@@ -3068,8 +2729,8 @@ async function openSelectedRankReport() {
   }
 }
 
-async function refreshCurrentRemoteSubtreeReportIfNeeded() {
-  if (!isRemoteServerTreeMode() || !state.remote.currentReport) return;
+async function refreshCurrentReportIfNeeded() {
+  if (!hasBackendTree() || !state.remote.currentReport) return;
   if (state.remote.currentReport.type === "subtree") {
     const taxid = state.remote.currentReport.report?.target?.taxid;
     if (taxid == null) return;
@@ -3085,8 +2746,8 @@ async function refreshCurrentRemoteSubtreeReportIfNeeded() {
   }
 }
 
-function renderCurrentRemoteSubtreeReport() {
-  refreshCurrentRemoteSubtreeReportIfNeeded().catch((error) => {
+function renderCurrentReportView() {
+  refreshCurrentReportIfNeeded().catch((error) => {
     setStatus(`Could not refresh the current subtree report: ${error.message || error}`);
   });
 }
@@ -3334,7 +2995,7 @@ function exportCurrentRankMatrix(report) {
   setStatus("Exported rank-by-dataset direct count matrix.");
 }
 
-async function renderRemoteTopTable() {
+async function renderBackendTopTable() {
   const requestId = ++state.remote.tableRequestId;
   els.topTable.innerHTML = `
     <tr>
@@ -3678,23 +3339,6 @@ function renderSourceLegend() {
 
 function getVisibleSeries() {
   return state.series.filter((source) => source.visible);
-}
-
-function applySeriesVisibility(node) {
-  node.direct = sumVisibleValues(node.directBySource);
-  node.total = node.direct;
-  for (const child of node.children) {
-    applySeriesVisibility(child);
-    node.total += child.total;
-  }
-}
-
-function sumVisibleValues(values) {
-  let total = 0;
-  for (let i = 0; i < values.length; i++) {
-    if (state.series[i]?.visible) total += values[i];
-  }
-  return total;
 }
 
 function escapeHtml(value) {

@@ -1,258 +1,347 @@
-# Unicorn Graph Engine Prototype Server
+# Unicorn Graph Engine Backend Contract
 
-This is the backend service for the graph engine prototype.
+This file is the single live contract for the graph engine backend as it exists
+today.
 
-It now keeps parsed `.bdamage.txt` datasets in memory on the server side, so the
-API can serve cached dataset models instead of reparsing files for every client
-request.
+The goal is not to preserve prototype history. The goal is to define the
+current backend-owned semantics that the UI and the agentic workflow depend on.
 
-It also now supports loading taxonomy on the backend from `nodes.dmp` and
-optionally `names.dmp`, and can build the induced tree server-side.
 
-## What it does
+## Operating invariant
+
+Graphengine now has one intended operating model:
+
+- the UI requires a backend connection
+- the backend is the authoritative source for datasets, taxonomy, tree slices,
+  and analysis payloads
+- there is no separate intended in-browser local dataset/tree/report mode
+- if a user is working on one machine, they should run the backend locally and
+  connect the UI to `localhost`
+
+"Local" is therefore a deployment detail, not a second semantic mode.
+
+
+## Role of the backend
+
+In graphengine operation, the backend is the source of truth for:
+
+- uploaded `.bdamage.txt` datasets
+- dataset selection and aggregate counts
+- taxonomy loading from `nodes.dmp` and optional `names.dmp`
+- induced tree construction for the active dataset selection
+- visible-tree slicing under the active expansion state and `min_reads` filter
+- node tooltip payloads
+- ranked table payloads
+- subtree reports
+- rank reports
+
+The browser still renders the graph and owns transient UI state, but the data
+contract comes from the backend.
+
+
+## Shared request context
+
+The newer graph endpoints all operate under the same logical context:
+
+- `files`
+  - repeated query parameter
+  - selected dataset filenames
+  - if omitted, the backend uses all available uploaded datasets
+- `nodes_file`
+  - taxonomy nodes filename
+- `names_file`
+  - taxonomy names filename
+- `min_reads`
+  - subtree-read threshold used for filtering visible children and node access
+
+Tree-slice endpoints also use:
+
+- `expanded`
+  - repeated query parameter of taxids requested as expanded in remote tree mode
+
+The backend echoes the effective context in `request_context` where relevant:
+
+- `dataset_names`
+- `nodes_file`
+- `names_file`
+- `min_reads`
+- `expanded_taxids`
+
+
+## Visible-tree semantics
+
+These semantics are the current contract for backend-served tree mode:
+
+- the root is always returned
+- a node is visible when it survives the active `min_reads` filter and lies on
+  the requested expanded frontier
+- `child_count` is the number of children that survive the current filter, not
+  the raw taxonomy child count
+- collapsed nodes still carry subtree totals
+- dataset or taxonomy changes invalidate prior expansion state on the client
+- changing `min_reads` keeps the client expansion request, but the backend may
+  prune children that no longer pass the filter
+- the backend returns `expanded_taxids` as the effective expanded state the
+  client should treat as authoritative
+
+
+## Endpoint surface
+
+### Utility and compatibility endpoints
 
 - `GET /ping`
+  - service health plus upload/taxonomy/cache summary
 - `POST /upload`
+  - stores one uploaded dataset file
 - `GET /datasets`
-- `GET /render-data`
+  - lists available uploaded datasets
+- `GET /taxonomy/status`
+  - loads or reports backend taxonomy state
 - `GET /model/status`
-- `GET /taxonomy/status`
+  - backend-oriented summary of current dataset selection, taxonomy, tree, and
+    cache state
+- `GET /render-data`
+  - compatibility endpoint for the older client path that still wants parsed
+    dataset payloads
 - `GET /tree-model`
+  - returns the full induced tree model for the current selection
 
-## Phase 1 tree semantics
+These endpoints still exist, but they are not the main contract for the current
+backend-driven tree flow or the agent-facing workflow.
 
-For the new remote tree mode, the backend is the authority for what the client
-is allowed to render.
+### Remote graph endpoints
 
-"API contract" here simply means:
+#### `GET /root-view`
 
-- what parameters the client sends to the backend
-- what JSON fields the backend returns
-- what those fields mean
+Purpose:
+- returns the visible tree slice for the current selection, taxonomy, filter,
+  and expansion state
 
-For the visible tree, the current agreement is:
+Query parameters:
+- `files`
+- `nodes_file`
+- `names_file`
+- `min_reads`
+- `expanded`
 
-- the root node is always returned
-- a node is returned if it survives the active filters and lies on the visible
-  expanded frontier
-- `child_count` means the number of children that survive the current filters,
-  not the raw taxonomy child count
-- collapsed nodes still keep their subtree totals
-- in remote mode, the returned tree is the source of truth for expanded state
+Response fields:
+- `ok`
+- `datasets`
+- `taxonomy`
+- `tree`
+- `missing_taxids`
+- `expanded_taxids`
+- `min_reads`
+- `total_reads`
+- `direct_taxa`
+- `request_context`
+- `cache`
 
-Filter and selection behavior:
+Notes:
+- this is the base entry point for remote tree rendering
+- with no effective expansions, this is the root plus its visible frontier
 
-- changing selected dataset files resets expanded state
-- changing taxonomy files resets expanded state
-- changing `min_reads` keeps the current expansion request, but the backend may
-  prune children that no longer pass the filter
+#### `GET /expand-node`
 
-This is important because it defines what the client is allowed to cache later.
-We do not want to cache behavior that is still ambiguous.
+Purpose:
+- returns the updated visible tree slice after requesting one node expansion
 
-## Current server-side model
+Query parameters:
+- `taxid` required
+- `files`
+- `nodes_file`
+- `names_file`
+- `min_reads`
+- `expanded`
 
-The backend currently owns:
+Response fields:
+- same envelope as `/root-view`
 
-- uploaded `.bdamage.txt` files
-- parsed per-dataset direct taxon counts
-- per-dataset taxon-name mappings found in the files
-- cached selections across one or more datasets
-- parsed taxonomy nodes
-- parsed taxonomy names
-- cached server-side induced tree models
+Notes:
+- the backend adds the requested `taxid` to the incoming expanded set
+- the response `expanded_taxids` is the canonical post-expansion state
 
-The current frontend is still on the older rendering path: even in remote mode,
-it still fetches full dataset payloads and builds the visible tree in the
-browser. The new backend tree model is in place for the next client transition.
+#### `GET /node-tooltip`
 
-## Endpoint notes
+Purpose:
+- returns one node detail payload under the active tree context
 
-- `GET /datasets`
-  Returns metadata for available uploaded `.bdamage.txt` files.
+Query parameters:
+- `taxid` required
+- `files`
+- `nodes_file`
+- `names_file`
+- `min_reads`
 
-- `GET /render-data?files=a&files=b`
-  Returns the parsed dataset payloads needed by the current client. This stays
-  compatible with the existing frontend while using the server cache internally.
+Response fields:
+- `ok`
+- `node`
+- `request_context`
 
-- `GET /model/status?files=a&files=b`
-  Returns a backend-facing summary of the in-memory selection model, including
-  total reads, total taxon rows, aggregated direct taxa, taxonomy status, tree
-  summary, and cache status.
+`node` payload:
+- `taxid`
+- `name`
+- `rank`
+- `parent`
+- `depth`
+- `direct`
+- `subtree`
+- `child_count`
+- `lineage`
+- `datasets`
 
-- `GET /taxonomy/status`
-  Returns backend taxonomy loading status, including file metadata and numbers
-  of parsed nodes and names.
+Notes:
+- `datasets` is a per-dataset direct/subtree breakdown
+- this is the remote source for graph hover and detailed node inspection
 
-- `GET /tree-model?files=a&files=b`
-  Returns the induced taxonomy tree built on the backend for the requested
-  datasets.
+#### `GET /table-view`
 
-- `GET /root-view?files=a&files=b`
-  Returns the currently visible tree slice for the requested dataset selection
-  and filters. By default this is the root and its direct visible children.
+Purpose:
+- returns ranked rows for the current root scope or one subtree scope
 
-- `GET /expand-node?taxid=123&files=a&files=b`
-  Returns the updated visible tree slice after expanding the requested node
-  under the current selection and filters.
+Query parameters:
+- `scope`
+  - `root` or `node`
+- `taxid`
+  - required when `scope=node`
+- `files`
+- `nodes_file`
+- `names_file`
+- `min_reads`
+- `sort`
+  - `direct` or `subtree`
+- `limit`
+  - `1..1000`
 
-- `GET /node-tooltip?taxid=123&files=a&files=b`
-  Returns the tooltip payload for one node under the same dataset selection,
-  taxonomy files, and `min_reads` filter as the tree view. This includes node
-  identity, direct and subtree counts, filtered child count, lineage, and
-  per-dataset direct/subtree breakdown.
+Response fields:
+- `ok`
+- `scope`
+- `target`
+- `sort`
+- `limit`
+- `row_count`
+- `rows`
+- `request_context`
 
-- `GET /table-view?scope=root&files=a&files=b`
-  Returns table rows for the current root or for one requested subtree under the
-  same dataset selection, taxonomy files, and `min_reads` filter as the tree
-  view. Rows can currently be sorted by `direct` or `subtree`.
+`target` payload:
+- `taxid`
+- `name`
+- `rank`
+- `direct`
+- `subtree`
+- `child_count`
 
-- `GET /subtree-report?taxid=123&files=a&files=b`
-  Returns a richer subtree-focused report for one node under the same dataset
-  selection, taxonomy files, and `min_reads` filter as the tree view. The
-  payload currently includes a compact target summary, a per-dataset direct-read
-  summary, and a child-by-dataset direct count matrix.
+Notes:
+- rows are already ranked backend-side
+- the target node must exist in the active induced tree and pass `min_reads`
 
-## What these new endpoints are for
+#### `GET /subtree-report`
 
-- `/node-tooltip`
-  This answers: "for this one node, what should the hover panel show under the
-  current tree context?"
+Purpose:
+- returns a subtree-focused analysis payload for one taxon
 
-- `/table-view`
-  This answers: "for this root or subtree, what ranked rows should the count
-  table show under the current tree context?"
+Query parameters:
+- `taxid` required
+- `files`
+- `nodes_file`
+- `names_file`
+- `min_reads`
+- `descendant_limit`
+- `matrix_limit`
 
-- `/subtree-report`
-  This answers: "for this one selected subtree, what compact report should the
-  analysis panel show under the current tree context?"
+Response fields:
+- `ok`
+- `report`
+- `request_context`
 
-They are meant to use the same selection and filter context as the visible tree
-API, so the client does not have to recompute those derived views locally.
+`report` payload:
+- `target`
+- `per_dataset_summary`
+- `matrix`
 
-## Error behavior
+Notes:
+- `per_dataset_summary.rows` gives direct-read counts for the target by dataset
+- `matrix.rows` gives top child rows plus direct counts split by dataset
 
-The newer endpoints now return explicit error payloads with a short `code` and
-human-readable `message`.
+#### `GET /rank-report`
 
-Examples:
+Purpose:
+- returns a rank-collapsed summary across one or more requested taxids
+
+Query parameters:
+- `taxids`
+  - repeated query parameter
+- `files`
+- `nodes_file`
+- `names_file`
+- `min_reads`
+
+Response fields:
+- `ok`
+- `report`
+- `request_context`
+
+`report` payload:
+- `summary`
+- `rows`
+
+`summary` fields:
+- `selected_taxids`
+- `selected_node_count`
+- `dataset_names`
+- `total_direct`
+
+
+## Error contract
+
+These endpoints return structured FastAPI error payloads in `detail`:
+
+- `message`
+- `code`
+- optional `request_context`
+- optional endpoint-specific fields such as `taxid`, `scope`, `sort`,
+  `node_subtree_reads`, or `min_reads`
+
+Current error codes include:
 
 - `node_not_in_active_tree`
-  The requested taxid does not exist in the current induced tree.
-
 - `node_filtered_out`
-  The requested taxid exists in the current induced tree, but does not pass the
-  current `min_reads` threshold.
-
 - `invalid_scope`
-  The `/table-view` scope is not one of the supported values.
-
 - `invalid_sort`
-  The `/table-view` sort mode is not one of the supported values.
-
 - `missing_taxid`
-  `/table-view` was asked for `scope=node` without providing a `taxid`.
+- `missing_taxids`
 
-## Files
+Important distinction:
 
-- `server_app.py`: FastAPI application
-- `server_requirements.txt`: Python dependencies
+- `404 node_not_in_active_tree`
+  - the requested node is absent from the active induced tree
+- `409 node_filtered_out`
+  - the node exists in the active induced tree, but the current `min_reads`
+    threshold filters it out
 
-## Remote server setup
 
-Copy or clone this repository onto the remote machine, then from the directory
-containing `server_app.py`:
+## Client expectations
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r server_requirements.txt
-python3 server_app.py
-```
+The frontend should treat these as the current backend-required rules:
 
-By default, the service listens on:
+- do not recompute backend-derived tree visibility locally
+- treat `expanded_taxids` from `/root-view` and `/expand-node` as authoritative
+- carry the same dataset/taxonomy/filter context across tree, tooltip, table,
+  subtree report, and rank report requests
+- use the backend payloads directly for agent grounding
 
-- host: `127.0.0.1`
-- port: `8000`
 
-That is intentional: it keeps the service private to the remote machine, so you
-reach it through an SSH tunnel from your local computer.
+## Agentic workflow implications
 
-## Where files exist on the remote server
+Today, the agent registry is still browser-local, but several tools already
+ground themselves in backend data:
 
-Yes: by default, things exist relative to **where you start the server**.
+- `get_node_details` -> `/node-tooltip`
+- `get_table_view` -> `/table-view`
 
-More precisely:
+The next read-only tool additions should follow the same pattern:
 
-- the API code exists wherever you put `server_app.py`
-- uploaded files are stored in `./uploads` relative to the server process
-  working directory, unless overridden
+- `get_subtree_report` -> `/subtree-report`
+- selected-node rank summaries -> `/rank-report`
 
-Example:
-
-```bash
-cd /home/you/unicorn/src/libunicorn/graphengine
-python3 server_app.py
-```
-
-Then uploads will go to:
-
-```bash
-/home/you/unicorn/src/libunicorn/graphengine/uploads
-```
-
-## Making the upload directory explicit
-
-If you want uploads somewhere else, set:
-
-```bash
-export UNICORN_GRAPHENGINE_UPLOAD_DIR=/scratch/you/unicorn-uploads
-python3 server_app.py
-```
-
-Then uploads will be written there instead.
-
-## Tunnel from your local machine
-
-On your local machine:
-
-```bash
-ssh -L 8000:localhost:8000 youruser@remote-server
-```
-
-Then your browser app can test:
-
-```text
-http://localhost:8000/ping
-```
-
-And for the current in-memory model:
-
-```text
-http://localhost:8000/model/status
-```
-
-And for the backend-built tree model:
-
-```text
-http://localhost:8000/tree-model
-```
-
-## Good first remote layout
-
-I would suggest one of these:
-
-1. Keep everything under your repo clone
-
-```text
-/home/you/unicorn/src/libunicorn/graphengine
-```
-
-2. Keep code in the repo, but uploads on a larger filesystem
-
-```text
-code:    /home/you/unicorn/src/libunicorn/graphengine
-uploads: /scratch/you/unicorn-uploads
-```
-
-Option 2 is usually better once files get large.
+That keeps the agent grounded in the same backend-owned context as the graph UI.
