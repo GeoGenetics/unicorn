@@ -1,0 +1,440 @@
+Unicorn Graph Engine Provider Turn Contract
+===========================================
+
+Purpose
+-------
+
+This document defines the provider-facing turn contract for Unicorn's graph
+engine agent.
+
+It answers three questions:
+
+1. What Unicorn sends to a model provider
+2. What a provider may return to Unicorn
+3. How Unicorn processes that response in its internal turn loop
+
+This contract is intended to be implemented first in client-side prototype
+mode, and later reused by backend-proxied provider integrations.
+
+
+Design Goals
+------------
+
+- keep the provider interaction grounded in Unicorn state
+- keep tool usage explicit and inspectable
+- avoid provider-specific assumptions leaking into the rest of the UI
+- let Unicorn, not the provider, remain the authority over tool execution
+- support a direct-answer path and a tool-calling path
+
+
+Core Principle
+--------------
+
+The provider does not directly manipulate the Unicorn UI or backend.
+
+Instead:
+
+- Unicorn sends prompt + context + allowed tool definitions
+- provider returns either text or a tool-call request
+- Unicorn executes tools through its own registry
+- Unicorn sends tool results back into the provider loop
+- Unicorn renders the final answer and any resulting tool effects
+
+
+Section 1. Unicorn -> Provider
+------------------------------
+
+Each provider turn should be built from a single structured payload.
+
+Top-level provider request payload:
+
+```json
+{
+  "provider": {
+    "name": "openai",
+    "model": "gpt-5"
+  },
+  "system_prompt": "You are the Unicorn Graph Engine agent...",
+  "user_prompt": "What taxa show the most damage?",
+  "graph_context": {
+    "...": "output of buildAgentContext()"
+  },
+  "tools": [
+    {
+      "name": "get_graph_context",
+      "description": "Returns the current Unicorn graph context.",
+      "input_schema": {}
+    }
+  ],
+  "conversation": [
+    {
+      "role": "user",
+      "content": "previous turn text"
+    }
+  ],
+  "tool_results": [
+    {
+      "tool_name": "get_table_view",
+      "args": {
+        "scope": "root",
+        "sort": "direct",
+        "limit": 5
+      },
+      "result": {
+        "...": "tool output"
+      }
+    }
+  ],
+  "turn_config": {
+    "max_tool_iterations": 4
+  }
+}
+```
+
+
+Required request fields
+-----------------------
+
+`provider`
+- selected provider identity
+- selected model identity
+
+`system_prompt`
+- defines the Unicorn agent behavior
+- must instruct the model to stay grounded in Unicorn context and tool outputs
+
+`user_prompt`
+- raw user input from the Agent panel
+
+`graph_context`
+- output of `buildAgentContext()`
+- this is the model's current Unicorn world state
+
+`tools`
+- the allowed Unicorn-native tool definitions for this turn
+- each tool definition should include:
+  - tool name
+  - short description
+  - input schema
+
+`conversation`
+- optional prior turn history for multi-turn continuity
+- V1 may keep this minimal
+
+`tool_results`
+- empty on the first provider request of a new turn
+- populated on later loop iterations after Unicorn executes requested tools
+
+`turn_config`
+- runtime limits set by Unicorn
+- V1 should include `max_tool_iterations`
+
+
+What Unicorn should not send
+----------------------------
+
+- raw DOM or page HTML
+- unrestricted file contents
+- arbitrary browser state
+- unsupported hidden application internals
+- tool functions themselves
+- unrestricted backend secrets
+
+
+Section 2. Provider -> Unicorn
+------------------------------
+
+The provider may respond in one of four allowed shapes:
+
+1. assistant response payload
+2. tool call payload
+3. final answer payload
+4. error payload
+
+
+2A. Assistant response payload
+------------------------------
+
+This is a generic non-final assistant message that does not yet request a tool
+or declare the turn complete.
+
+```json
+{
+  "type": "assistant_message",
+  "content": "I am checking the current graph scope before answering."
+}
+```
+
+Use case:
+- optional intermediate provider narration
+- V1 may choose to suppress rendering of these if they add noise
+
+
+2B. Tool call payload
+---------------------
+
+This tells Unicorn to execute one allowed tool.
+
+```json
+{
+  "type": "tool_call",
+  "tool_name": "get_table_view",
+  "args": {
+    "scope": "root",
+    "sort": "direct",
+    "limit": 5
+  }
+}
+```
+
+Rules:
+
+- `tool_name` must match one tool in Unicorn's allowed registry
+- `args` must be JSON-serializable
+- provider does not execute the tool itself
+- Unicorn validates and executes the tool
+
+
+2C. Final answer payload
+------------------------
+
+This ends the current turn.
+
+```json
+{
+  "type": "final_answer",
+  "content": "From the current root scope, Viridiplantae has the strongest direct-read signal.",
+  "tool_summary": [
+    "get_graph_context",
+    "get_table_view"
+  ],
+  "notes": "Grounded in the current Unicorn table scope."
+}
+```
+
+Recommended fields:
+
+`content`
+- main assistant answer shown in the transcript
+
+`tool_summary`
+- optional list of tools used during the turn
+
+`notes`
+- optional caveats, grounding note, or scope reminder
+
+
+2D. Error payload
+-----------------
+
+This indicates the provider could not continue normally.
+
+```json
+{
+  "type": "error",
+  "code": "provider_request_failed",
+  "message": "The provider request could not be completed."
+}
+```
+
+Examples of provider-side error codes:
+
+- `provider_request_failed`
+- `provider_auth_failed`
+- `provider_rate_limited`
+- `provider_response_invalid`
+- `provider_tool_call_invalid`
+
+
+Section 3. Unicorn Internal Turn Loop
+-------------------------------------
+
+Each user message in the Agent panel should trigger one Unicorn turn.
+
+High-level loop:
+
+1. User submits prompt
+2. Unicorn builds graph context
+3. Unicorn builds provider request payload
+4. Unicorn sends request to the active provider adapter
+5. Unicorn receives provider response
+6. Unicorn handles response according to its type
+7. If the provider requested a tool:
+   - Unicorn validates the tool call
+   - Unicorn executes the tool
+   - Unicorn appends the tool result to the turn state
+   - Unicorn sends a follow-up request back to the provider
+8. Repeat until:
+   - final answer received
+   - provider error received
+   - Unicorn reaches max tool iterations
+
+
+Max number of tool iterations
+-----------------------------
+
+V1 recommended default:
+
+- `max_tool_iterations = 4`
+
+Reason:
+
+- enough for simple two-step analysis
+- avoids runaway loops
+- easy to explain and debug
+
+If this limit is reached:
+
+- Unicorn ends the turn
+- transcript receives a clear failure or partial-completion message
+- client log records that the max tool iteration limit was reached
+
+
+How tool results are fed back
+-----------------------------
+
+When the provider returns a `tool_call` payload:
+
+1. Unicorn checks that the requested tool exists in the allowed registry
+2. Unicorn validates arguments at the tool boundary
+3. Unicorn executes the tool locally or through allowed backend wrappers
+4. Unicorn captures the result as structured JSON
+5. Unicorn appends that result to `tool_results`
+6. Unicorn sends a follow-up provider request with:
+   - the same system prompt
+   - the same user prompt
+   - the same graph context or a refreshed one if the tool changed state
+   - the updated tool result list
+
+Important rule:
+
+If a tool changes Unicorn state, such as `select_taxon` or `focus_taxon`,
+Unicorn should rebuild the graph context before the next provider iteration.
+
+
+Section 4. Logging and Transcript Responsibilities
+--------------------------------------------------
+
+The transcript and the client log serve different purposes.
+
+
+What gets logged to the transcript
+----------------------------------
+
+Transcript is human-facing.
+
+It should show:
+
+- user prompt text
+- final assistant answer text
+- tool badges or tool summary for the visible answer
+- optional human-readable notes or caveats
+
+It may also show:
+
+- provider identity or mode label
+- optional high-level intermediate assistant text if that improves UX
+
+Transcript should not be overloaded with:
+
+- raw JSON payloads
+- low-level transport errors unless they need to be surfaced to the user
+- large raw tool result dumps
+
+
+What gets logged to the client log
+----------------------------------
+
+Client log is debugging-facing.
+
+It should record:
+
+- provider request started
+- provider request completed
+- provider request failed
+- tool call requested
+- tool call succeeded
+- tool call failed
+- max iteration limit reached
+- captured graph context when helpful
+- provider payload parsing failures
+
+The client log may include:
+
+- structured request and response summaries
+- JSON detail blocks
+- error details
+
+
+Recommended V1 transcript/client-log split
+------------------------------------------
+
+Transcript:
+
+- concise human-facing narrative
+- tools used
+- caveats
+
+Client log:
+
+- raw provider turn diagnostics
+- request/response summaries
+- tool-call traces
+- JSON detail blocks
+
+
+Section 5. V1 Response Handling Rules
+-------------------------------------
+
+For V1, Unicorn should apply these rules consistently:
+
+1. Only allow provider-requested tools that exist in the Unicorn registry.
+2. Reject unknown tool names immediately.
+3. Reject malformed tool arguments clearly.
+4. Stop the turn on provider errors.
+5. Stop the turn on max iteration overflow.
+6. Always preserve the final answer, tool usage summary, and note in the
+   transcript.
+7. Always preserve detailed turn diagnostics in the client log.
+
+
+Section 6. Recommended Standard Internal Response Shape
+-------------------------------------------------------
+
+Regardless of provider, Unicorn should normalize provider results into one
+internal response shape before rendering.
+
+Recommended internal normalized response:
+
+```json
+{
+  "provider": "mock",
+  "provider_label": "Mock",
+  "provider_mode": "mock",
+  "client_side": true,
+  "answer": "From the current root table scope...",
+  "toolsUsed": [
+    "get_graph_context",
+    "get_table_view"
+  ],
+  "note": "Mock mode only."
+}
+```
+
+This is the same style already used by the current mock adapter and should
+remain the rendering target for future provider integrations.
+
+
+Section 7. V1 Scope Notes
+-------------------------
+
+This document describes the provider turn contract only.
+
+It does not require:
+
+- a backend proxy yet
+- provider OAuth yet
+- persistent account/session storage yet
+
+Those can be added later without changing the core Unicorn tool loop defined
+here.
