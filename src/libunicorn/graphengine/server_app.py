@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -17,6 +20,11 @@ UPLOAD_DIR = Path(os.environ.get("UNICORN_GRAPHENGINE_UPLOAD_DIR", "uploads")).r
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 NODES_FILENAME = os.environ.get("UNICORN_GRAPHENGINE_NODES_FILE", "nodes.dmp")
 NAMES_FILENAME = os.environ.get("UNICORN_GRAPHENGINE_NAMES_FILE", "names.dmp")
+OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
+GOOGLE_INTERACTIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
+AGENT_PROVIDER_LOG_PATH = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_AGENT_LOG", str(UPLOAD_DIR / "graphengine_agent_provider.jsonl"))
+).resolve()
 
 
 app = FastAPI(title="Unicorn Graph Engine Prototype API")
@@ -28,6 +36,24 @@ def _utc_iso(timestamp: float) -> str:
 
 def _clean_name(value: str) -> str:
     return value.strip().strip('"')
+
+
+def _redact_provider_runtime_config(runtime_config: Dict[str, Any]) -> Dict[str, Any]:
+    redacted = dict(runtime_config or {})
+    if "api_key" in redacted and redacted["api_key"]:
+        redacted["api_key"] = "***redacted***"
+    return redacted
+
+
+def _append_agent_provider_log(event: str, payload: Dict[str, Any]) -> None:
+    AGENT_PROVIDER_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    line = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "payload": payload,
+    }
+    with AGENT_PROVIDER_LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line, ensure_ascii=True) + "\n")
 
 
 def _normalize_requested_files(files: Optional[List[str]]) -> List[str]:
@@ -870,6 +896,446 @@ def _error_detail(
     return detail
 
 
+def _resolve_openai_responses_endpoint(base_url: str) -> str:
+    trimmed = str(base_url or "").strip()
+    if not trimmed:
+        return OPENAI_RESPONSES_ENDPOINT
+    without_trailing_slash = trimmed.rstrip("/")
+    if without_trailing_slash.endswith("/v1/responses"):
+        return without_trailing_slash
+    if without_trailing_slash.endswith("/v1"):
+        return f"{without_trailing_slash}/responses"
+    return f"{without_trailing_slash}/v1/responses"
+
+
+def _normalize_openai_input_role(role: str) -> str:
+    if role in {"developer", "assistant", "system"}:
+        return role
+    return "user"
+
+
+def _to_openai_input_message(role: str, content: str) -> Optional[Dict[str, Any]]:
+    normalized_role = _normalize_openai_input_role(role)
+    text = str(content or "").strip()
+    if not text:
+        return None
+    content_type = "output_text" if normalized_role == "assistant" else "input_text"
+    return {
+        "role": normalized_role,
+        "content": [
+            {
+                "type": content_type,
+                "text": text,
+            }
+        ],
+    }
+
+
+def _build_openai_internal_response_format() -> Dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "name": "unicorn_provider_turn_response",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["assistant_message", "tool_call", "final_answer", "error"],
+                },
+                "content": {
+                    "type": ["string", "null"],
+                },
+                "tool_name": {
+                    "type": ["string", "null"],
+                },
+                "args": {
+                    "type": ["object", "null"],
+                    "properties": {
+                        "taxid": {"type": ["integer", "null"]},
+                        "scope": {"type": ["string", "null"], "enum": ["root", "node", None]},
+                        "sort": {"type": ["string", "null"], "enum": ["direct", "subtree", None]},
+                        "limit": {"type": ["integer", "null"]},
+                    },
+                    "required": ["taxid", "scope", "sort", "limit"],
+                    "additionalProperties": False,
+                },
+                "tool_summary": {
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
+                },
+                "notes": {
+                    "type": ["string", "null"],
+                },
+                "code": {
+                    "type": ["string", "null"],
+                },
+                "message": {
+                    "type": ["string", "null"],
+                },
+            },
+            "required": ["type", "content", "tool_name", "args", "tool_summary", "notes", "code", "message"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def _build_unicorn_internal_response_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": ["assistant_message", "tool_call", "final_answer", "error"],
+            },
+            "content": {
+                "type": ["string", "null"],
+            },
+            "tool_name": {
+                "type": ["string", "null"],
+            },
+            "args": {
+                "type": ["object", "null"],
+                "properties": {
+                    "taxid": {"type": ["integer", "null"]},
+                    "scope": {"type": ["string", "null"], "enum": ["root", "node", None]},
+                    "sort": {"type": ["string", "null"], "enum": ["direct", "subtree", None]},
+                    "limit": {"type": ["integer", "null"]},
+                },
+                "required": ["taxid", "scope", "sort", "limit"],
+                "additionalProperties": False,
+            },
+            "tool_summary": {
+                "type": ["array", "null"],
+                "items": {"type": "string"},
+            },
+            "notes": {
+                "type": ["string", "null"],
+            },
+            "code": {
+                "type": ["string", "null"],
+            },
+            "message": {
+                "type": ["string", "null"],
+            },
+        },
+        "required": ["type", "content", "tool_name", "args", "tool_summary", "notes", "code", "message"],
+        "additionalProperties": False,
+    }
+
+
+def _build_openai_developer_context_message(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    developer_envelope = {
+        "graph_context": provider_payload.get("graph_context") if isinstance(provider_payload.get("graph_context"), dict) else None,
+        "tools": provider_payload.get("tools") if isinstance(provider_payload.get("tools"), list) else [],
+        "tool_results": provider_payload.get("tool_results") if isinstance(provider_payload.get("tool_results"), list) else [],
+        "turn_config": provider_payload.get("turn_config") if isinstance(provider_payload.get("turn_config"), dict) else {},
+        "provider_contract": {
+            "reply_mode": "json_only",
+            "orchestrator": "unicorn",
+            "native_provider_tool_calling": False,
+        },
+        "runtime_config": {
+            "runtime_provider": runtime_config.get("runtime_provider") or "openai",
+            "transport_mode": runtime_config.get("transport_mode") or "backend",
+            "base_url": runtime_config.get("base_url") or "",
+        },
+    }
+    return _to_openai_input_message(
+        "developer",
+        "\n\n".join([
+            "Unicorn provider turn context follows as JSON.",
+            "Use only the advertised Unicorn tools.",
+            "Return exactly one JSON object that matches the requested schema.",
+            json.dumps(developer_envelope, indent=2),
+        ]),
+    )
+
+
+def _build_openai_responses_request(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
+    model = str(runtime_config.get("configured_model") or provider_payload.get("provider", {}).get("model") or "gpt-5")
+    input_messages: List[Dict[str, Any]] = []
+    developer_context = _build_openai_developer_context_message(provider_payload, runtime_config)
+    if developer_context:
+        input_messages.append(developer_context)
+    for message in provider_payload.get("conversation", []):
+        if not isinstance(message, dict):
+            continue
+        normalized = _to_openai_input_message(str(message.get("role") or ""), str(message.get("content") or ""))
+        if normalized:
+            input_messages.append(normalized)
+    user_prompt = str(provider_payload.get("user_prompt") or "")
+    if user_prompt:
+        input_messages.append(_to_openai_input_message("user", user_prompt))
+    return {
+        "model": model,
+        "instructions": str(provider_payload.get("system_prompt") or ""),
+        "input": input_messages,
+        "text": {
+            "format": _build_openai_internal_response_format(),
+        },
+    }
+
+
+def _resolve_google_interactions_endpoint(base_url: str) -> str:
+    trimmed = str(base_url or "").strip()
+    if not trimmed:
+        return GOOGLE_INTERACTIONS_ENDPOINT
+    without_trailing_slash = trimmed.rstrip("/")
+    if without_trailing_slash.endswith("/v1beta/interactions"):
+        return without_trailing_slash
+    if without_trailing_slash.endswith("/v1beta"):
+        return f"{without_trailing_slash}/interactions"
+    return f"{without_trailing_slash}/v1beta/interactions"
+
+
+def _build_google_interactions_input(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> str:
+    conversation = provider_payload.get("conversation") if isinstance(provider_payload.get("conversation"), list) else []
+    tool_results = provider_payload.get("tool_results") if isinstance(provider_payload.get("tool_results"), list) else []
+    tools = provider_payload.get("tools") if isinstance(provider_payload.get("tools"), list) else []
+    turn_config = provider_payload.get("turn_config") if isinstance(provider_payload.get("turn_config"), dict) else {}
+    graph_context = provider_payload.get("graph_context") if isinstance(provider_payload.get("graph_context"), dict) else None
+    runtime_provider = runtime_config.get("runtime_provider") or runtime_config.get("configured_provider") or "google"
+
+    sections = [
+        "Unicorn provider turn context follows.",
+        "Return exactly one JSON object matching the requested response schema.",
+        "Use only the advertised Unicorn tools.",
+        "Do not use native provider tool calling.",
+        "",
+        "GRAPH_CONTEXT_JSON",
+        json.dumps(graph_context, indent=2),
+        "",
+        "TOOLS_JSON",
+        json.dumps(tools, indent=2),
+        "",
+        "TOOL_RESULTS_JSON",
+        json.dumps(tool_results, indent=2),
+        "",
+        "TURN_CONFIG_JSON",
+        json.dumps(turn_config, indent=2),
+        "",
+        "RUNTIME_CONFIG_JSON",
+        json.dumps(
+            {
+                "runtime_provider": runtime_provider,
+                "transport_mode": runtime_config.get("transport_mode") or "backend",
+                "base_url": runtime_config.get("base_url") or "",
+            },
+            indent=2,
+        ),
+        "",
+        "CONVERSATION",
+    ]
+
+    for message in conversation:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user")
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        sections.append(f"{role.upper()}: {content}")
+
+    user_prompt = str(provider_payload.get("user_prompt") or "").strip()
+    if user_prompt:
+        sections.extend(["", "LATEST_USER_PROMPT", user_prompt])
+    return "\n".join(sections)
+
+
+def _build_google_interactions_request(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
+    model = str(runtime_config.get("configured_model") or provider_payload.get("provider", {}).get("model") or "gemini-3.5-flash")
+    return {
+        "model": model,
+        "system_instruction": str(provider_payload.get("system_prompt") or ""),
+        "input": _build_google_interactions_input(provider_payload, runtime_config),
+        "response_format": {
+            "type": "text",
+            "mime_type": "application/json",
+            "schema": _build_unicorn_internal_response_schema(),
+        },
+    }
+
+
+def _extract_google_output_text(api_response: Dict[str, Any]) -> str:
+    output_text = api_response.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text
+    steps = api_response.get("steps")
+    if isinstance(steps, list):
+        text_parts: List[str] = []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            content = step.get("content")
+            if not isinstance(content, list):
+                continue
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    text_parts.append(text)
+        if text_parts:
+            return "\n".join(text_parts)
+    return ""
+
+
+def _extract_openai_output_text(api_response: Dict[str, Any]) -> str:
+    output = api_response.get("output")
+    if not isinstance(output, list):
+        return ""
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "message":
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        text_parts = [
+            entry.get("text")
+            for entry in content
+            if isinstance(entry, dict)
+            and entry.get("type") == "output_text"
+            and isinstance(entry.get("text"), str)
+        ]
+        if text_parts:
+            return "\n".join(text_parts)
+    return ""
+
+
+def _normalize_internal_provider_response(response: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(response, dict):
+        raise ValueError("Provider returned an invalid response payload.")
+    response_type = str(response.get("type") or "")
+    if not response_type:
+        raise ValueError("Provider response is missing a type field.")
+    if response_type == "assistant_message":
+        return {
+            "type": response_type,
+            "content": str(response.get("content") or ""),
+        }
+    if response_type == "tool_call":
+        args = response.get("args")
+        return {
+            "type": response_type,
+            "tool_name": str(response.get("tool_name") or ""),
+            "args": args if isinstance(args, dict) else {},
+        }
+    if response_type == "final_answer":
+        tool_summary = response.get("tool_summary")
+        return {
+            "type": response_type,
+            "content": str(response.get("content") or ""),
+            "tool_summary": [str(item) for item in tool_summary] if isinstance(tool_summary, list) else [],
+            "notes": "" if response.get("notes") is None else str(response.get("notes")),
+        }
+    if response_type == "error":
+        return {
+            "type": response_type,
+            "code": "" if response.get("code") is None else str(response.get("code")),
+            "message": str(response.get("message") or "Provider returned an error payload."),
+        }
+    raise ValueError(f"Provider returned unsupported response type: {response_type}")
+
+
+def _call_openai_provider_turn(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
+    api_key = str(runtime_config.get("api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail={"message": "No OpenAI API key was provided for backend-side provider transport."})
+    request_body = _build_openai_responses_request(provider_payload, runtime_config)
+    endpoint = _resolve_openai_responses_endpoint(str(runtime_config.get("base_url") or ""))
+    request = urllib_request.Request(
+        endpoint,
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=45) as response:
+            response_body = response.read().decode("utf-8")
+            response_json = json.loads(response_body)
+    except urllib_error.HTTPError as error:
+        detail_message = f"OpenAI request failed with HTTP {error.code}"
+        try:
+            error_body = error.read().decode("utf-8")
+            error_json = json.loads(error_body)
+            detail_message = str(error_json.get("error", {}).get("message") or detail_message)
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail={"message": detail_message, "code": "openai_http_error"})
+    except urllib_error.URLError as error:
+        raise HTTPException(status_code=502, detail={"message": f"OpenAI request failed before reaching the API: {error.reason}", "code": "openai_network_error"})
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail={"message": "OpenAI request timed out.", "code": "openai_timeout"})
+
+    if isinstance(response_json, dict) and isinstance(response_json.get("error"), dict) and response_json["error"].get("message"):
+        raise HTTPException(status_code=502, detail={"message": str(response_json["error"]["message"]), "code": "openai_api_error"})
+
+    output_text = _extract_openai_output_text(response_json)
+    if not output_text:
+        raise HTTPException(status_code=502, detail={"message": "OpenAI Responses API returned no assistant JSON output.", "code": "openai_empty_output"})
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=502, detail={"message": f"OpenAI Responses API returned non-JSON output: {error}", "code": "openai_invalid_json"})
+    try:
+        return _normalize_internal_provider_response(parsed)
+    except ValueError as error:
+        raise HTTPException(status_code=502, detail={"message": str(error), "code": "openai_invalid_provider_shape"})
+
+
+def _call_google_provider_turn(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
+    api_key = str(runtime_config.get("api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail={"message": "No Google API key was provided for backend-side provider transport."})
+    request_body = _build_google_interactions_request(provider_payload, runtime_config)
+    endpoint = _resolve_google_interactions_endpoint(str(runtime_config.get("base_url") or ""))
+    request = urllib_request.Request(
+        endpoint,
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=45) as response:
+            response_body = response.read().decode("utf-8")
+            response_json = json.loads(response_body)
+    except urllib_error.HTTPError as error:
+        detail_message = f"Google Gemini request failed with HTTP {error.code}"
+        try:
+            error_body = error.read().decode("utf-8")
+            error_json = json.loads(error_body)
+            detail_message = str(error_json.get("error", {}).get("message") or detail_message)
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail={"message": detail_message, "code": "google_http_error"})
+    except urllib_error.URLError as error:
+        raise HTTPException(status_code=502, detail={"message": f"Google Gemini request failed before reaching the API: {error.reason}", "code": "google_network_error"})
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail={"message": "Google Gemini request timed out.", "code": "google_timeout"})
+
+    if isinstance(response_json, dict) and isinstance(response_json.get("error"), dict) and response_json["error"].get("message"):
+        raise HTTPException(status_code=502, detail={"message": str(response_json["error"]["message"]), "code": "google_api_error"})
+
+    output_text = _extract_google_output_text(response_json)
+    if not output_text:
+        raise HTTPException(status_code=502, detail={"message": "Google Gemini Interactions API returned no assistant JSON output.", "code": "google_empty_output"})
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=502, detail={"message": f"Google Gemini Interactions API returned non-JSON output: {error}", "code": "google_invalid_json"})
+    try:
+        return _normalize_internal_provider_response(parsed)
+    except ValueError as error:
+        raise HTTPException(status_code=502, detail={"message": str(error), "code": "google_invalid_provider_shape"})
+
+
 def _node_passes_filter(node: TreeNodeModel, tree: TreeModel, min_reads: int) -> bool:
     return node is tree.root or node.total >= max(0, min_reads)
 
@@ -1314,6 +1780,48 @@ def rank_report(
         },
         "request_context": request_context,
     }
+
+
+@app.post("/agent/provider-turn")
+def agent_provider_turn(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    provider_payload = payload.get("provider_payload")
+    runtime_config = payload.get("runtime_config")
+    if not isinstance(provider_payload, dict):
+        raise HTTPException(status_code=400, detail={"message": "provider_payload is required and must be an object."})
+    if not isinstance(runtime_config, dict):
+        raise HTTPException(status_code=400, detail={"message": "runtime_config is required and must be an object."})
+    provider_name = str(runtime_config.get("runtime_provider") or runtime_config.get("configured_provider") or "mock")
+    log_context = {
+        "provider_name": provider_name,
+        "runtime_config": _redact_provider_runtime_config(runtime_config),
+        "provider_payload": provider_payload,
+    }
+    _append_agent_provider_log("provider_turn_request", log_context)
+    try:
+        if provider_name == "openai":
+            response = _call_openai_provider_turn(provider_payload, runtime_config)
+        elif provider_name == "google":
+            response = _call_google_provider_turn(provider_payload, runtime_config)
+        else:
+            raise HTTPException(status_code=400, detail={"message": f"Unsupported backend provider runtime: {provider_name}"})
+    except HTTPException as error:
+        _append_agent_provider_log(
+            "provider_turn_error",
+            {
+                **log_context,
+                "error": error.detail,
+                "status_code": error.status_code,
+            },
+        )
+        raise
+    _append_agent_provider_log(
+        "provider_turn_response",
+        {
+            **log_context,
+            "response": response,
+        },
+    )
+    return response
 
 
 if __name__ == "__main__":
