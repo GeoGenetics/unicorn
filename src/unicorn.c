@@ -1013,7 +1013,7 @@ static int unicorn_alnfilt(int argc, char **argv)
   opts.minscore            = 0.0f;
   opts.maxscore            = FLT_MAX;
   opts.pct                 = 0.90;
-  opts.alnfiltmode         = UNICORN_ALNFILT_ALLTOP;
+  opts.alnfiltmode         = UNICORN_ALNFILT_ALL;
   //utax_t *utax = NULL;
   unicorn_t *u = NULL;
   char *_argv[64] = {0};
