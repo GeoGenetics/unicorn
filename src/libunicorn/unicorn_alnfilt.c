@@ -274,4 +274,6 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minscore, float maxscore
 int unicorn_alnfiltercompute(unicorn_t *u, uint8_t mode, float minscore, float maxscore, float pct)
 {
   if ( (mode != UNICORN_ALNFILT_ALL) && !unicorn_isqgrouped(u) ) return 6;
+
+
 }
