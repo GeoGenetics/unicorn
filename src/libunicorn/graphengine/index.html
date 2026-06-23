@@ -186,7 +186,6 @@
                     <span>Provider</span>
                     <select id="agentProviderSelect">
                       <option value="openai">OpenAI</option>
-                      <option value="google">Google</option>
                     </select>
                   </label>
                   <label>
@@ -195,10 +194,14 @@
                   </label>
                   <label class="agent-api-key-label">
                     <span>API Key</span>
-                    <input id="agentApiKey" type="password" placeholder="UI only for now" autocomplete="off" spellcheck="false">
+                    <input id="agentApiKey" type="password" placeholder="OpenAI key for upcoming provider wiring" autocomplete="off" spellcheck="false">
+                  </label>
+                  <label>
+                    <span>Base URL</span>
+                    <input id="agentBaseUrl" type="url" placeholder="Optional. Defaults to OpenAI cloud endpoint" autocomplete="off" spellcheck="false">
                   </label>
                 </div>
-                <div id="agentProviderState" class="agent-provider-state">Configuration only for now. Mock adapter remains active until real provider calls are implemented.</div>
+                <div id="agentProviderState" class="agent-provider-state">Configured target and active runtime adapter are tracked separately. V1 transport will run browser-side.</div>
                 <label for="agentPrompt">
                   <span>Prompt</span>
                 </label>
@@ -270,6 +273,7 @@
       </section>
     </main>
 
+    <script src="graphengine_provider_adapter.js"></script>
     <script src="graphengine.js"></script>
   </body>
 </html>

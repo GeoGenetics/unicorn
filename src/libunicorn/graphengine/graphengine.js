@@ -6,10 +6,12 @@ const state = {
   clientLog: [],
   agent: {
     history: [],
-    currentProvider: "mock",
+    runtimeProvider: "mock",
+    transportMode: "browser",
     configuredProvider: "openai",
     configuredModel: "gpt-5",
     apiKey: "",
+    baseUrl: "",
   },
   remote: {
     connected: false,
@@ -58,6 +60,7 @@ const els = {
   agentProviderSelect: document.getElementById("agentProviderSelect"),
   agentModelSelect: document.getElementById("agentModelSelect"),
   agentApiKey: document.getElementById("agentApiKey"),
+  agentBaseUrl: document.getElementById("agentBaseUrl"),
   agentProviderState: document.getElementById("agentProviderState"),
   toggleLogSection: document.getElementById("toggleLogSection"),
   logSectionBody: document.getElementById("logSectionBody"),
@@ -145,18 +148,30 @@ const AGENT_PROVIDER_MODELS = {
     { value: "gpt-5-mini", label: "GPT-5 mini" },
     { value: "gpt-4.1", label: "GPT-4.1" },
   ],
-  google: [
-    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-  ],
 };
+
+const AGENT_V1_PROVIDER_TARGET = "openai";
+const AGENT_V1_READ_ONLY_TOOL_NAMES = [
+  "get_graph_context",
+  "list_selected_datasets",
+  "get_selected_nodes",
+  "get_node_details",
+  "get_table_view",
+];
 
 const AGENT_MAX_TOOL_ITERATIONS = 4;
 
 const unicornAgentRegistry = createUnicornAgentRegistry();
 window.unicornAgentRegistry = unicornAgentRegistry;
-const unicornAgentProviderAdapter = createAgentProviderAdapter();
+if (!window.UnicornAgentProviderModule || typeof window.UnicornAgentProviderModule.createProviderAdapter !== "function") {
+  throw new Error("Unicorn agent provider module failed to load before graphengine.js.");
+}
+const unicornAgentProviderAdapter = window.UnicornAgentProviderModule.createProviderAdapter({
+  runtimeProviderName: state.agent.runtimeProvider,
+  getRuntimeConfig: getAgentRuntimeConfig,
+  extractTaxidFromPrompt,
+  executeTurn: executeAgentProviderTurn,
+});
 window.unicornAgentProviderAdapter = unicornAgentProviderAdapter;
 
 els.renderBtn.addEventListener("click", loadAndRender);
@@ -217,6 +232,9 @@ if (els.agentModelSelect) {
 }
 if (els.agentApiKey) {
   els.agentApiKey.addEventListener("input", handleAgentApiKeyInput);
+}
+if (els.agentBaseUrl) {
+  els.agentBaseUrl.addEventListener("input", handleAgentBaseUrlInput);
 }
 if (els.agentPrompt) {
   els.agentPrompt.addEventListener("keydown", (event) => {
@@ -552,54 +570,13 @@ function createUnicornAgentRegistry() {
   };
 }
 
-function createAgentProviderAdapter() {
-  const providers = {
-    mock: createMockAgentProvider(),
-  };
-
-  return {
-    listProviders() {
-      return Object.keys(providers);
-    },
-    getCurrentProviderName() {
-      return state.agent.currentProvider;
-    },
-    getCurrentProviderImplementation() {
-      return providers[state.agent.currentProvider] || null;
-    },
-    getCurrentProviderMeta() {
-      const provider = providers[state.agent.currentProvider];
-      if (!provider) return null;
-      return {
-        name: provider.name,
-        label: provider.label,
-        mode: provider.mode,
-        client_side: provider.clientSide,
-      };
-    },
-    async runTurn(input) {
-      return executeAgentProviderTurn(input);
-    },
-  };
-}
-
-function createMockAgentProvider() {
-  return {
-    name: "mock",
-    label: "Mock",
-    mode: "mock",
-    clientSide: true,
-    async runRequest(payload) {
-      return runMockProviderRequest(payload);
-    },
-  };
-}
-
 function initAgentControls() {
-  if (!els.agentProviderSelect || !els.agentModelSelect || !els.agentApiKey) return;
+  if (!els.agentProviderSelect || !els.agentModelSelect || !els.agentApiKey || !els.agentBaseUrl) return;
   els.agentProviderSelect.value = state.agent.configuredProvider;
   populateAgentModelOptions(state.agent.configuredProvider, state.agent.configuredModel);
   els.agentApiKey.value = state.agent.apiKey;
+  els.agentBaseUrl.value = state.agent.baseUrl;
+  syncAgentRuntimeProvider();
   renderAgentProviderState();
 }
 
@@ -623,21 +600,61 @@ function populateAgentModelOptions(provider, selectedModel) {
 
 function handleAgentProviderChange() {
   if (!els.agentProviderSelect) return;
-  state.agent.configuredProvider = els.agentProviderSelect.value || "openai";
+  state.agent.configuredProvider = normalizeConfiguredAgentProvider(els.agentProviderSelect.value);
+  els.agentProviderSelect.value = state.agent.configuredProvider;
   populateAgentModelOptions(state.agent.configuredProvider, state.agent.configuredModel);
+  syncAgentRuntimeProvider();
   renderAgentProviderState();
 }
 
 function handleAgentModelChange() {
   if (!els.agentModelSelect) return;
   state.agent.configuredModel = els.agentModelSelect.value || "";
+  syncAgentRuntimeProvider();
   renderAgentProviderState();
 }
 
 function handleAgentApiKeyInput() {
   if (!els.agentApiKey) return;
   state.agent.apiKey = els.agentApiKey.value || "";
+  syncAgentRuntimeProvider();
   renderAgentProviderState();
+}
+
+function handleAgentBaseUrlInput() {
+  if (!els.agentBaseUrl) return;
+  state.agent.baseUrl = normalizeAgentBaseUrl(els.agentBaseUrl.value);
+  els.agentBaseUrl.value = state.agent.baseUrl;
+  syncAgentRuntimeProvider();
+  renderAgentProviderState();
+}
+
+function normalizeConfiguredAgentProvider(provider) {
+  return provider === AGENT_V1_PROVIDER_TARGET ? provider : AGENT_V1_PROVIDER_TARGET;
+}
+
+function normalizeAgentBaseUrl(baseUrl) {
+  return String(baseUrl || "").trim();
+}
+
+function getAgentRuntimeConfig() {
+  return {
+    runtime_provider: state.agent.runtimeProvider,
+    transport_mode: state.agent.transportMode,
+    configured_provider: normalizeConfiguredAgentProvider(state.agent.configuredProvider),
+    configured_model: String(state.agent.configuredModel || ""),
+    api_key: String(state.agent.apiKey || ""),
+    base_url: normalizeAgentBaseUrl(state.agent.baseUrl),
+  };
+}
+
+function shouldUseOpenAIRuntime() {
+  return normalizeConfiguredAgentProvider(state.agent.configuredProvider) === AGENT_V1_PROVIDER_TARGET
+    && Boolean(String(state.agent.apiKey || "").trim());
+}
+
+function syncAgentRuntimeProvider() {
+  state.agent.runtimeProvider = shouldUseOpenAIRuntime() ? "openai" : "mock";
 }
 
 function buildAgentContext() {
@@ -905,7 +922,7 @@ function getActiveNamesFilename() {
 function clearAgentTranscript() {
   state.agent.history = [];
   renderAgentTranscript();
-  setStatus("Cleared mock agent transcript.");
+  setStatus("Cleared agent transcript.");
 }
 
 function pushAgentEntry(entry) {
@@ -923,7 +940,7 @@ function renderAgentTranscript() {
   if (!els.agentTranscript || !els.agentMeta) return;
   const entries = state.agent.history;
   const providerMeta = unicornAgentProviderAdapter.getCurrentProviderMeta();
-  const providerLabel = providerMeta?.label || state.agent.currentProvider || "unknown";
+  const providerLabel = providerMeta?.label || state.agent.runtimeProvider || "unknown";
   const providerMode = providerMeta?.mode || "unknown";
   els.agentMeta.textContent = entries.length
     ? `${entries.length.toLocaleString()} transcript entr${entries.length === 1 ? "y" : "ies"} · provider: ${providerLabel} · ${providerMode} mode · client-side only`
@@ -953,14 +970,26 @@ function renderAgentTranscript() {
 
 function renderAgentProviderState() {
   if (!els.agentProviderState) return;
-  const configuredProvider = state.agent.configuredProvider || "openai";
+  const runtimeConfig = getAgentRuntimeConfig();
+  const configuredProvider = runtimeConfig.configured_provider;
   const configuredModel = state.agent.configuredModel || "unset";
   const hasKey = Boolean(state.agent.apiKey);
-  els.agentProviderState.textContent = `Configured provider: ${configuredProvider} · model: ${configuredModel} · API key ${hasKey ? "entered" : "not entered"}. Configuration only for now; the mock adapter remains the active runtime provider.`;
+  const baseUrlLabel = runtimeConfig.base_url || "default OpenAI endpoint";
+  const runtimeHint = runtimeConfig.runtime_provider === "openai"
+    ? "Browser-side OpenAI transport is active."
+    : "Mock runtime remains active until an OpenAI API key is entered.";
+  els.agentProviderState.textContent = `Configured target: ${configuredProvider} · model: ${configuredModel} · API key ${hasKey ? "entered" : "not entered"} · base URL: ${baseUrlLabel} · runtime adapter: ${runtimeConfig.runtime_provider} · transport: ${runtimeConfig.transport_mode}. ${runtimeHint}`;
 }
 
-function buildProviderToolDefinitions() {
-  return unicornAgentRegistry.listTools().map((name) => ({
+function getProviderExposedToolNames(providerName = AGENT_V1_PROVIDER_TARGET) {
+  if (normalizeConfiguredAgentProvider(providerName) === AGENT_V1_PROVIDER_TARGET) {
+    return AGENT_V1_READ_ONLY_TOOL_NAMES.slice();
+  }
+  return AGENT_V1_READ_ONLY_TOOL_NAMES.slice();
+}
+
+function buildProviderToolDefinitions(providerName = AGENT_V1_PROVIDER_TARGET) {
+  return getProviderExposedToolNames(providerName).map((name) => ({
     name,
     description: describeAgentTool(name),
     input_schema: {},
@@ -982,19 +1011,22 @@ function describeAgentTool(name) {
 }
 
 function buildProviderRequestPayload(providerMeta, input, toolResults, iteration) {
+  const configuredProvider = normalizeConfiguredAgentProvider(state.agent.configuredProvider);
   return {
     provider: {
-      name: String(state.agent.configuredProvider || providerMeta?.name || "mock"),
+      name: String(configuredProvider || providerMeta?.name || AGENT_V1_PROVIDER_TARGET),
       model: String(state.agent.configuredModel || "unset"),
     },
     system_prompt: "You are the Unicorn Graph Engine agent. Answer only from Unicorn context and Unicorn tool outputs. Use only Unicorn-native tools when needed, and do not invent unsupported facts.",
     user_prompt: String(input?.prompt || ""),
     graph_context: input?.context || buildAgentContext(),
-    tools: buildProviderToolDefinitions(),
-    conversation: state.agent.history.map((entry) => ({
-      role: entry.role,
-      content: entry.message,
-    })),
+    tools: buildProviderToolDefinitions(configuredProvider),
+    conversation: state.agent.history
+      .filter((entry) => entry.role === "user" || entry.role === "assistant")
+      .map((entry) => ({
+        role: entry.role,
+        content: entry.message,
+      })),
     tool_results: toolResults.map((toolResult) => ({
       tool_name: toolResult.tool_name,
       args: toolResult.args,
@@ -1027,6 +1059,7 @@ async function executeAgentProviderTurn(input) {
       ...input,
       context: latestContext,
     }, toolResults, iteration);
+    const allowedToolNames = new Set(getProviderExposedToolNames(requestPayload.provider?.name));
     pushAgentEntry({
       role: "provider",
       message: `Provider request payload (iteration ${iteration + 1}).`,
@@ -1034,12 +1067,9 @@ async function executeAgentProviderTurn(input) {
     });
     addClientLog("info", "agent", `Provider request payload prepared for iteration ${iteration + 1}.`, JSON.stringify(requestPayload, null, 2));
 
-    const response = await implementation.runRequest(requestPayload);
+    const rawResponse = await implementation.runRequest(requestPayload);
+    const response = window.UnicornAgentProviderModule.normalizeInternalProviderResponse(rawResponse);
     addClientLog("info", "agent", `Provider responded with ${response?.type || "unknown"} on iteration ${iteration + 1}.`, JSON.stringify(response, null, 2));
-
-    if (!response || typeof response !== "object") {
-      throw new Error("Provider returned an invalid response payload.");
-    }
 
     if (response.type === "assistant_message") {
       pushAgentEntry({
@@ -1053,6 +1083,9 @@ async function executeAgentProviderTurn(input) {
     if (response.type === "tool_call") {
       const toolName = String(response.tool_name || "");
       const args = response.args && typeof response.args === "object" ? response.args : {};
+      if (!allowedToolNames.has(toolName)) {
+        throw new Error(`Provider requested a Unicorn tool outside the V1 read-only scope: ${toolName}`);
+      }
       if (!unicornAgentRegistry.listTools().includes(toolName)) {
         throw new Error(`Provider requested an unknown Unicorn tool: ${toolName}`);
       }
@@ -1092,147 +1125,11 @@ async function executeAgentProviderTurn(input) {
       throw new Error(String(response.message || "Provider returned an error payload."));
     }
 
-    throw new Error(`Provider returned unsupported response type: ${response.type}`);
+    throw new Error(`Provider adapter returned unsupported response type: ${response.type}`);
   }
 
   addClientLog("error", "agent", "Provider turn hit the max tool iteration limit.");
   throw new Error(`Provider turn exceeded the maximum of ${AGENT_MAX_TOOL_ITERATIONS} tool iterations.`);
-}
-
-async function runMockProviderRequest(payload) {
-  const prompt = String(payload?.user_prompt || "");
-  const context = payload?.graph_context || buildAgentContext();
-  const toolResults = Array.isArray(payload?.tool_results) ? payload.tool_results : [];
-  const lower = prompt.trim().toLowerCase();
-
-  if (!context.backend.connected) {
-    return {
-      type: "final_answer",
-      content: "No Unicorn backend connection is active yet. Start the graphengine backend, connect to it, render a tree, then ask me about the current graph state.",
-      tool_summary: ["get_graph_context"],
-      notes: "Mock mode only. Agent grounding now assumes a backend-backed Unicorn session.",
-    };
-  }
-
-  if (!context.tree.loaded) {
-    return {
-      type: "final_answer",
-      content: "No active backend-backed Unicorn tree is loaded yet. Render a tree first, then ask me about the current graph state.",
-      tool_summary: ["get_graph_context"],
-      notes: "Mock mode only. Agent grounding now assumes a backend-backed Unicorn session.",
-    };
-  }
-
-  if (!toolResults.length) {
-    if (lower.includes("selected")) {
-      return {
-        type: "tool_call",
-        tool_name: "get_selected_nodes",
-        args: {},
-      };
-    }
-    if (lower.includes("dataset") || lower.includes("sample")) {
-      return {
-        type: "tool_call",
-        tool_name: "list_selected_datasets",
-        args: {},
-      };
-    }
-    if (lower.includes("damage") || lower.includes("top") || lower.includes("table") || lower.includes("rank")) {
-      return {
-        type: "tool_call",
-        tool_name: "get_table_view",
-        args: {
-          scope: "root",
-          sort: "direct",
-          limit: 5,
-        },
-      };
-    }
-    const taxid = extractTaxidFromPrompt(prompt);
-    if (taxid != null) {
-      return {
-        type: "tool_call",
-        tool_name: "get_node_details",
-        args: { taxid },
-      };
-    }
-    return {
-      type: "final_answer",
-      content: `The current Unicorn session is using ${context.mode} mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
-      tool_summary: ["get_graph_context"],
-      notes: "Mock mode only. This response is grounded in the current backend-backed graph context.",
-    };
-  }
-
-  const latest = toolResults[toolResults.length - 1];
-  if (latest.tool_name === "get_selected_nodes") {
-    const selected = latest.result || {};
-    const rows = Array.isArray(selected.selected) ? selected.selected : [];
-    if (!rows.length) {
-      return {
-        type: "final_answer",
-        content: "No nodes are currently selected in the graph.",
-        tool_summary: ["get_graph_context", "get_selected_nodes"],
-        notes: "Try selecting one or more taxa in the tree, then ask again.",
-      };
-    }
-    const top = rows.slice(0, 3).map((node) => `${node.name} (${node.taxid})`).join(", ");
-    return {
-      type: "final_answer",
-      content: `${Number(selected.count || rows.length)} node${Number(selected.count || rows.length) === 1 ? "" : "s"} ${Number(selected.count || rows.length) === 1 ? "is" : "are"} currently selected. The current selection includes ${top}.`,
-      tool_summary: ["get_graph_context", "get_selected_nodes"],
-      notes: "Mock mode only. This summary comes from Unicorn's current selection state.",
-    };
-  }
-
-  if (latest.tool_name === "list_selected_datasets") {
-    const datasets = latest.result?.datasets || {};
-    const names = Array.isArray(datasets.selected) ? datasets.selected.slice(0, 3).join(", ") : "";
-    return {
-      type: "final_answer",
-      content: `${Number(datasets.count || 0)} dataset${Number(datasets.count || 0) === 1 ? "" : "s"} ${Number(datasets.count || 0) === 1 ? "is" : "are"} active in the current ${latest.result?.mode || context.mode} session. Total reads: ${Number(datasets.total_reads || 0).toLocaleString()}. Direct taxa: ${Number(datasets.direct_taxa || 0).toLocaleString()}.`,
-      tool_summary: ["get_graph_context", "list_selected_datasets"],
-      notes: names ? `Active datasets: ${names}${Array.isArray(datasets.selected) && datasets.selected.length > 3 ? " ..." : ""}` : "No active datasets were reported.",
-    };
-  }
-
-  if (latest.tool_name === "get_table_view") {
-    const rows = Array.isArray(latest.result?.rows) ? latest.result.rows : [];
-    if (!rows.length) {
-      return {
-        type: "final_answer",
-        content: "I could not find any ranked rows in the current table scope.",
-        tool_summary: ["get_graph_context", "get_table_view"],
-        notes: "Mock mode only. The table query returned no rows.",
-      };
-    }
-    const first = rows[0];
-    const preview = rows.slice(0, 3).map((row) => `${row.name} (${Number(row.direct || 0).toLocaleString()} direct)`).join(", ");
-    return {
-      type: "final_answer",
-      content: `From the current root table scope, ${first.name} is the strongest direct-read row with ${Number(first.direct || 0).toLocaleString()} direct reads and ${Number(first.subtree || 0).toLocaleString()} subtree reads.`,
-      tool_summary: ["get_graph_context", "get_table_view"],
-      notes: `Top rows preview: ${preview}`,
-    };
-  }
-
-  if (latest.tool_name === "get_node_details") {
-    const node = latest.result?.node || {};
-    const taxid = Number(node.taxid || extractTaxidFromPrompt(prompt) || 0);
-    return {
-      type: "final_answer",
-      content: `${node.name || taxid} (${taxid}) is currently visible with ${Number(node.direct || 0).toLocaleString()} direct reads and ${Number(node.subtree || 0).toLocaleString()} subtree reads.`,
-      tool_summary: ["get_graph_context", "get_node_details"],
-      notes: `Rank: ${node.rank || "NA"}. Filtered child count: ${Number(node.child_count || 0).toLocaleString()}.`,
-    };
-  }
-
-  return {
-    type: "error",
-    code: "provider_response_invalid",
-    message: "Mock provider could not interpret the latest tool result.",
-  };
 }
 
 async function runMockAgent(prompt, context = buildAgentContext()) {
@@ -1419,7 +1316,9 @@ function handleAgentSend() {
       pushAgentEntry({
         role: "assistant",
         message: `I could not build an agent reply from the current Unicorn state: ${error.message || error}`,
-        note: "Provider adapter mode only. No external model provider is being used yet.",
+        note: state.agent.runtimeProvider === "openai"
+          ? "Browser-side OpenAI transport is active. Check API key, network access, and provider response details in the client log."
+          : "Mock runtime is still active. Enter an OpenAI API key to switch the browser-side runtime adapter to OpenAI.",
       });
       setStatus(`Agent provider reply failed: ${error.message || error}`);
     });

@@ -25,6 +25,23 @@ Operating invariant:
   local-vs-remote execution semantics
 
 
+Frozen V1 scope
+---------------
+
+The first real provider-backed agent pass is intentionally narrow.
+
+- OpenAI is the only real provider target for V1
+- the first real provider path will target the OpenAI Responses API and expect
+  strict Unicorn-shaped JSON replies
+- Unicorn's existing tool loop remains the authority over tool execution
+- V1 provider work is limited to the current normalized read-only contract
+- state-mutating tools are not part of the first real provider surface even
+  though they still exist in the broader internal Unicorn registry
+- if a future provider requests a non-V1 tool such as `select_taxon`,
+  `focus_taxon`, or `center_root`, Unicorn should reject it at the provider
+  boundary rather than execute it
+
+
 Design Goals
 ------------
 
@@ -50,6 +67,87 @@ Instead:
 
 Under the current architecture direction, Unicorn should treat backend-grounded
 state as the authoritative source for graph context and analysis context.
+
+
+Adapter Module Boundary
+-----------------------
+
+The provider integration boundary is now intentionally split in two layers.
+
+`graphengine.js` remains responsible for:
+
+- building Unicorn graph context
+- advertising the allowed Unicorn tool list
+- executing Unicorn tools
+- maintaining transcript and client logging
+- owning the provider turn loop state
+- enforcing V1 read-only tool restrictions
+
+The dedicated provider adapter module is responsible only for:
+
+- request transport
+- provider-specific request mapping
+- provider-specific response parsing
+- returning one Unicorn-internal normalized response shape:
+  - `assistant_message`
+  - `tool_call`
+  - `final_answer`
+  - `error`
+
+Standard adapter entry point:
+
+- input: one Unicorn provider request payload from `buildProviderRequestPayload()`
+- output: exactly one normalized Unicorn-internal response object with type:
+  - `assistant_message`
+  - `tool_call`
+  - `final_answer`
+  - `error`
+
+This is the only response family that `executeAgentProviderTurn()` should
+consume. Any provider-native transport response must be normalized into this
+shape before Unicorn turn-loop handling continues.
+
+For V1 OpenAI work, this means:
+
+- the adapter talks to the OpenAI Responses API
+- the adapter asks for strict JSON-only replies
+- the adapter parses those replies into Unicorn's internal response contract
+- Unicorn itself still decides whether and how tools are executed
+- the adapter maps Unicorn turn payloads into:
+  - OpenAI `instructions`
+  - OpenAI `input` messages
+  - OpenAI `text.format = { type: "json_schema", ... }`
+
+
+Execution configuration state
+-----------------------------
+
+Provider execution config is now tracked explicitly alongside the provider turn
+payload, rather than being left implicit in UI text.
+
+For V1 browser-side OpenAI work, Unicorn tracks:
+
+- configured provider target
+- configured model
+- API key
+- optional base URL
+- active runtime adapter
+- transport mode
+
+Important distinction:
+
+- the configured provider target describes where Unicorn intends to send real
+  provider traffic
+- the active runtime adapter describes what provider implementation is actually
+  executing the turn right now
+
+During transition, these may differ intentionally. For example:
+
+- configured provider target: `openai`
+- active runtime adapter: `mock`
+- transport mode: `browser`
+
+This split is now explicit runtime state, not hidden ambiguity.
 
 
 Section 1. Unicorn -> Provider
@@ -109,9 +207,10 @@ Required request fields
 `provider`
 - selected provider identity
 - selected model identity
-- current prototype caveat: the request payload uses the configured provider/model
-  values from the UI, even though the only live runtime adapter today is still
-  the mock provider
+- frozen V1 target: this should currently be `openai`
+- current transition caveat: the request payload reflects the configured
+  provider/model target, while the active runtime adapter may still be `mock`
+  until real transport is wired
 
 `system_prompt`
 - defines the Unicorn agent behavior
@@ -130,6 +229,13 @@ Required request fields
   - tool name
   - short description
   - input schema
+- frozen V1 scope: the provider-advertised tool list is the read-only subset
+  only:
+  - `get_graph_context`
+  - `list_selected_datasets`
+  - `get_selected_nodes`
+  - `get_node_details`
+  - `get_table_view`
 - current prototype caveat: `input_schema` is present but still an empty object
   for every tool; argument validation currently happens at the tool boundary in
   Unicorn runtime code rather than through a rich provider-facing schema
@@ -462,10 +568,12 @@ When the provider returns a `tool_call` payload:
    - the same graph context or a refreshed one if the tool changed state
    - the updated tool result list
 
-Important rule:
+Important rules:
 
-If a tool changes Unicorn state, such as `select_taxon` or `focus_taxon`,
-Unicorn should rebuild the graph context before the next provider iteration.
+- In the broader Unicorn architecture, if a tool changes state, Unicorn should
+  rebuild the graph context before the next provider iteration.
+- In frozen V1 scope, state-mutating tools are not exposed to the real provider
+  path and should be rejected if requested anyway.
 
 
 Section 4. Logging and Transcript Responsibilities

@@ -16,6 +16,16 @@ New invariant:
 - any remaining local-vs-remote shape differences are transition debt, not
   desired long-term architecture
 
+Frozen V1 provider scope:
+
+- OpenAI is the only first-pass real provider target
+- the live internal Unicorn registry still contains both read-only and
+  state-mutating tools
+- the provider-advertised V1 tool surface is intentionally narrower and includes
+  read-only inspection tools only
+- `select_taxon`, `focus_taxon`, and `center_root` remain available to internal
+  Unicorn code paths, but are outside the first real provider surface
+
 
 Format
 ------
@@ -112,6 +122,7 @@ Live today:
 - provider-normalized read-only tool envelopes for:
   `list_selected_datasets`, `get_selected_nodes`, `get_node_details`, and
   `get_table_view`
+- V1 provider-facing tool exposure is frozen to the read-only subset
 
 Not live yet:
 
