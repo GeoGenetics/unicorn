@@ -74,6 +74,8 @@ const els = {
   subtreeReportBtn: document.getElementById("subtreeReportBtn"),
   rankReportBtn: document.getElementById("rankReportBtn"),
   selectDescendantsBtn: document.getElementById("selectDescendantsBtn"),
+  selectToRankBtn: document.getElementById("selectToRankBtn"),
+  selectToRankValue: document.getElementById("selectToRankValue"),
   clearSelectionBtn: document.getElementById("clearSelectionBtn"),
   lcaInputs: document.getElementById("lcaInputs"),
   lcaListFile: document.getElementById("lcaListFile"),
@@ -97,6 +99,7 @@ const els = {
   namesFile: document.getElementById("namesFile"),
   renderBtn: document.getElementById("renderBtn"),
   centerBtn: document.getElementById("centerBtn"),
+  countViewMode: document.getElementById("countViewMode"),
   toggleTableBtn: document.getElementById("toggleTableBtn"),
   countMode: document.getElementById("countMode"),
   scaleMode: document.getElementById("scaleMode"),
@@ -120,6 +123,7 @@ const els = {
   tablePanel: document.getElementById("tablePanel"),
   tablePanelTitle: document.getElementById("tablePanelTitle") || document.querySelector("#tablePanel h2"),
   tableResize: document.getElementById("tableResize"),
+  barplotBtn: document.getElementById("barplotBtn"),
   exportMatrixBtn: document.getElementById("exportMatrixBtn"),
   subtreeReport: document.getElementById("subtreeReport"),
   sourceLegend: document.getElementById("sourceLegend"),
@@ -141,6 +145,47 @@ const SOURCE_COLORS = [
   "#b24d6d",
   "#4c9f9b",
   "#7f6a58",
+];
+
+const RANK_DISPLAY_ORDER = [
+  "superkingdom",
+  "kingdom",
+  "subkingdom",
+  "superphylum",
+  "phylum",
+  "subphylum",
+  "infraphylum",
+  "superclass",
+  "class",
+  "subclass",
+  "infraclass",
+  "cohort",
+  "superorder",
+  "order",
+  "suborder",
+  "infraorder",
+  "parvorder",
+  "superfamily",
+  "family",
+  "subfamily",
+  "tribe",
+  "subtribe",
+  "genus",
+  "subgenus",
+  "section",
+  "series",
+  "species group",
+  "species subgroup",
+  "species",
+  "subspecies",
+  "varietas",
+  "variety",
+  "subvariety",
+  "forma",
+  "strain",
+  "isolate",
+  "clade",
+  "no rank",
 ];
 
 const AGENT_PROVIDER_MODELS = {
@@ -206,6 +251,11 @@ els.centerBtn.addEventListener("click", () => {
   state.focusTaxid = null;
   centerRoot();
 });
+if (els.countViewMode) {
+  els.countViewMode.addEventListener("change", () => {
+    redraw();
+  });
+}
 els.toggleTableBtn.addEventListener("click", toggleTablePanel);
 els.countMode.addEventListener("change", redraw);
 els.scaleMode.addEventListener("change", redraw);
@@ -254,9 +304,18 @@ if (els.agentPrompt) {
   });
 }
 els.selectDescendantsBtn.addEventListener("click", selectDescendants);
+if (els.selectToRankBtn) {
+  els.selectToRankBtn.addEventListener("click", selectToRank);
+}
+if (els.selectToRankValue) {
+  els.selectToRankValue.addEventListener("change", syncBackendRuntimeUiState);
+}
 els.clearSelectionBtn.addEventListener("click", clearSelection);
 if (els.exportMatrixBtn) {
   els.exportMatrixBtn.addEventListener("click", exportCurrentSubtreeMatrix);
+}
+if (els.barplotBtn) {
+  els.barplotBtn.addEventListener("click", openCurrentCountMatrixBarplot);
 }
 if (els.clearClientLogBtn) {
   els.clearClientLogBtn.addEventListener("click", clearClientLog);
@@ -788,10 +847,13 @@ function updateActiveBackendRequestContext(requestContext, options = {}) {
 function summarizeCurrentAgentReport(reportState) {
   if (!reportState || typeof reportState !== "object") return null;
   if (reportState.type === "subtree") {
+    const summary = reportState.report?.summary && typeof reportState.report.summary === "object"
+      ? reportState.report.summary
+      : {};
     return {
       type: "subtree",
-      target_taxid: Number(reportState.report?.target?.taxid || 0) || null,
-      target_name: String(reportState.report?.target?.name || ""),
+      selected_taxids: Array.isArray(summary.selected_taxids) ? summary.selected_taxids.map((value) => Number(value)) : [],
+      selected_node_count: Number(summary.selected_node_count || 0),
     };
   }
   if (reportState.type === "rank") {
@@ -1959,13 +2021,15 @@ async function fetchRemoteTableView(options = {}) {
 }
 
 async function fetchRemoteSubtreeReport(taxid, options = {}) {
-  const response = await fetch(buildRemoteContextUrl("subtree-report", {
-    query: {
-      taxid,
-      descendant_limit: options.descendantLimit || 25,
-      matrix_limit: options.matrixLimit || 12,
-    },
-  }).toString(), { method: "GET" });
+  const url = buildRemoteContextUrl("subtree-report");
+  if (Array.isArray(options.taxids) && options.taxids.length) {
+    for (const selectedTaxid of options.taxids) {
+      url.searchParams.append("taxids", String(selectedTaxid));
+    }
+  } else if (taxid != null) {
+    url.searchParams.set("taxid", String(taxid));
+  }
+  const response = await fetch(url.toString(), { method: "GET" });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(payload?.detail?.message || `Remote subtree-report request failed with HTTP ${response.status}`);
@@ -2289,12 +2353,19 @@ async function refreshRemoteServerStatus() {
 function syncBackendRuntimeUiState() {
   const backendTreeReady = hasBackendTree();
   const hasSelection = state.selected.size > 0;
+  const hasTargetRank = Boolean(String(els.selectToRankValue?.value || "").trim());
   els.renderBtn.disabled = !canRenderRemoteTree();
   els.centerBtn.disabled = !backendTreeReady;
   els.toggleTableBtn.disabled = !backendTreeReady;
   els.subtreeReportBtn.disabled = !backendTreeReady;
   els.rankReportBtn.disabled = !backendTreeReady;
   els.selectDescendantsBtn.disabled = !backendTreeReady || !hasSelection;
+  if (els.selectToRankBtn) {
+    els.selectToRankBtn.disabled = !backendTreeReady || !hasSelection || !hasTargetRank;
+  }
+  if (els.selectToRankValue) {
+    els.selectToRankValue.disabled = !backendTreeReady;
+  }
   els.clearSelectionBtn.disabled = !backendTreeReady || !hasSelection;
   els.uncollapseBtn.disabled = !backendTreeReady || !hasSelection;
   els.uncollapseTipsBtn.disabled = !backendTreeReady || !hasSelection;
@@ -2308,6 +2379,57 @@ function syncBackendRuntimeUiState() {
 
 function updateRenderAvailability() {
   syncBackendRuntimeUiState();
+}
+
+function getCountViewMode() {
+  const mode = String(els.countViewMode?.value || "both");
+  return mode === "direct" || mode === "subtree" ? mode : "both";
+}
+
+function formatNodeCountSummary(node) {
+  const direct = Number(node?.direct || 0).toLocaleString();
+  const subtree = Number((node?.subtree ?? node?.total) || 0).toLocaleString();
+  const mode = getCountViewMode();
+  if (mode === "direct") return `${direct} direct`;
+  if (mode === "subtree") return `${subtree} cumulative`;
+  return `${direct} direct / ${subtree} cumulative`;
+}
+
+function getCountViewLabel() {
+  const mode = getCountViewMode();
+  if (mode === "direct") return "direct";
+  if (mode === "subtree") return "cumulative";
+  return "direct + cumulative";
+}
+
+function rankSortKey(rank) {
+  const normalized = String(rank || "no rank").trim().toLowerCase();
+  const index = RANK_DISPLAY_ORDER.indexOf(normalized);
+  return index >= 0 ? index : RANK_DISPLAY_ORDER.length + normalized.charCodeAt(0);
+}
+
+function updateSelectToRankOptions() {
+  if (!els.selectToRankValue) return;
+  const previousValue = String(els.selectToRankValue.value || "");
+  const rankSet = new Set();
+  for (const node of state.flat) {
+    const rank = String(node.rank || "no rank").trim();
+    if (!rank) continue;
+    rankSet.add(rank);
+  }
+  const ranks = Array.from(rankSet).sort((a, b) => {
+    const aKey = rankSortKey(a);
+    const bKey = rankSortKey(b);
+    if (aKey !== bKey) return aKey - bKey;
+    return a.localeCompare(b);
+  });
+  els.selectToRankValue.innerHTML = [
+    `<option value="">Choose rank</option>`,
+    ...ranks.map((rank) => `<option value="${escapeHtml(rank)}">${escapeHtml(rank)}</option>`),
+  ].join("");
+  if (ranks.includes(previousValue)) {
+    els.selectToRankValue.value = previousValue;
+  }
 }
 
 function getSelectedRemoteDatasets() {
@@ -2349,6 +2471,7 @@ function redraw() {
   collectVisible(state.tree, null, visible, links, leaves, minReads);
   layoutVisible(state.tree, new Set(visible));
   state.flat = visible;
+  updateSelectToRankOptions();
   renderSvg(visible, links, search);
   renderSummary(visible);
   renderTopTable();
@@ -2442,7 +2565,7 @@ function renderSvg(nodes, links, search) {
       class: "count",
       x: radius + 8,
       y: 10,
-    }, `${node.direct.toLocaleString()} direct / ${node.total.toLocaleString()} subtree`));
+    }, formatNodeCountSummary(node)));
     group.addEventListener("click", (event) => {
       if (performance.now() < state.suppressClicksUntil) return;
       if (event.ctrlKey || event.metaKey) {
@@ -2622,6 +2745,43 @@ function selectDescendants() {
     addDescendantsToSelection(node);
   }
   redraw();
+}
+
+function selectToRank() {
+  if (!state.selected.size) {
+    setStatus("Select one or more nodes first, then use Select To Rank.");
+    return;
+  }
+  const targetRank = String(els.selectToRankValue?.value || "").trim();
+  if (!targetRank) {
+    setStatus("Choose a target rank first, then use Select To Rank.");
+    return;
+  }
+  const selectedNodes = getSelectedNodes();
+  if (!selectedNodes.length) {
+    setStatus("The current selection could not be resolved in the active tree.");
+    return;
+  }
+  const nextSelection = new Set();
+  for (const node of selectedNodes) {
+    addDescendantsAtRankToSelection(node, targetRank, nextSelection);
+  }
+  if (!nextSelection.size) {
+    setStatus(`No visible descendant nodes at rank ${targetRank} were found below the current selection.`);
+    return;
+  }
+  state.selected = nextSelection;
+  redraw();
+  setStatus(`Selected ${nextSelection.size.toLocaleString()} visible node${nextSelection.size === 1 ? "" : "s"} at rank ${targetRank}.`);
+}
+
+function addDescendantsAtRankToSelection(node, targetRank, selection) {
+  for (const child of node.children || []) {
+    if (String(child.rank || "").trim() === targetRank) {
+      selection.add(child.taxid);
+    }
+    addDescendantsAtRankToSelection(child, targetRank, selection);
+  }
 }
 
 function addDescendantsToSelection(node) {
@@ -2806,14 +2966,18 @@ async function showBackendTooltip(event, node) {
     if (requestId !== state.remote.tooltipRequestId) return;
     if (state.tooltipNode !== node) return;
     const remoteNode = payload.node || {};
+    const countMode = getCountViewMode();
     const breakdown = Array.isArray(remoteNode.datasets)
       ? remoteNode.datasets
         .filter((entry) => Number(entry.subtree || 0) > 0 || Number(entry.direct || 0) > 0)
-        .sort((a, b) => Number(b.subtree || 0) - Number(a.subtree || 0))
+        .sort((a, b) => {
+          if (countMode === "direct") return Number(b.direct || 0) - Number(a.direct || 0);
+          return Number(b.subtree || 0) - Number(a.subtree || 0);
+        })
         .map((entry, index) => `
           <div class="tooltip-source">
-            <span class="tooltip-swatch" style="background:${state.series[index]?.color || "#9cad9f"}"></span>
-            <span>${escapeHtml(entry.dataset)}: ${Number(entry.direct || 0).toLocaleString()} direct / ${Number(entry.subtree || 0).toLocaleString()} subtree</span>
+            <span class="tooltip-swatch" style="background:${getDatasetColor(entry.dataset, index)}"></span>
+            <span>${escapeHtml(entry.dataset)}: ${formatNodeCountSummary(entry)}</span>
           </div>
         `)
         .join("")
@@ -2824,8 +2988,7 @@ async function showBackendTooltip(event, node) {
       <strong>${escapeHtml(remoteNode.name || node.name)}</strong>
       taxid: ${Number(remoteNode.taxid ?? node.taxid)}<br>
       rank: ${escapeHtml(remoteNode.rank || node.rank || "NA")}<br>
-      direct reads: ${Number(remoteNode.direct || 0).toLocaleString()}<br>
-      subtree reads: ${Number(remoteNode.subtree || 0).toLocaleString()}<br>
+      counts: ${escapeHtml(formatNodeCountSummary(remoteNode))}<br>
       children: ${Number(remoteNode.child_count || 0).toLocaleString()}<br>
       ${breakdown ? `<div class="tooltip-breakdown"><em>per dataset</em>${breakdown}</div>` : ""}
     `;
@@ -2891,6 +3054,9 @@ function clearSubtreeReportView(options = {}) {
   if (els.exportMatrixBtn) {
     els.exportMatrixBtn.hidden = true;
   }
+  if (els.barplotBtn) {
+    els.barplotBtn.hidden = true;
+  }
   if (els.topTableWrap) {
     els.topTableWrap.hidden = false;
   }
@@ -2898,31 +3064,27 @@ function clearSubtreeReportView(options = {}) {
 
 async function openSelectedSubtreeReport() {
   if (!hasBackendTree()) {
-    setStatus("Render a backend-backed tree first, then request a subtree report.");
+    setStatus("Render a backend-backed tree first, then request a count matrix.");
     return;
   }
   const selectedNodes = getSelectedNodes();
   if (!selectedNodes.length) {
-    setStatus("Select one node first, then use Subtree Report.");
+    setStatus("Select one or more nodes first, then use Count Matrix.");
     return;
   }
-  if (selectedNodes.length > 1) {
-    setStatus("Select exactly one node for a subtree report.");
-    return;
-  }
-  const target = selectedNodes[0];
+  const taxids = selectedNodes.map((node) => node.taxid);
   setTablePanelVisible(true);
   const requestId = ++state.remote.tableRequestId;
   if (!els.subtreeReport || !els.tablePanelTitle) {
-    setStatus("Subtree report UI is not available in the current HTML shell. Try a hard refresh.");
+    setStatus("Count matrix UI is not available in the current HTML shell. Try a hard refresh.");
     return;
   }
-  els.tablePanelTitle.textContent = "Subtree report";
+  els.tablePanelTitle.textContent = "Count matrix";
   els.subtreeReport.hidden = false;
-  els.subtreeReport.innerHTML = `<div class="subtree-report-card">Loading subtree report for ${escapeHtml(target.name)}...</div>`;
+  els.subtreeReport.innerHTML = `<div class="subtree-report-card">Loading count matrix for ${taxids.length} selected node(s)...</div>`;
   els.topTable.innerHTML = "";
   try {
-    const payload = await fetchRemoteSubtreeReport(target.taxid);
+    const payload = await fetchRemoteSubtreeReport(null, { taxids });
     if (requestId !== state.remote.tableRequestId) return;
     renderSubtreeReport(payload.report || null);
   } catch (error) {
@@ -2930,7 +3092,7 @@ async function openSelectedSubtreeReport() {
     els.subtreeReport.hidden = false;
     els.subtreeReport.innerHTML = `
       <div class="subtree-report-card">
-        ${escapeHtml(error.message || "Could not load subtree report.")}
+        ${escapeHtml(error.message || "Could not load count matrix.")}
       </div>
     `;
     els.topTable.innerHTML = "";
@@ -2977,9 +3139,11 @@ async function openSelectedRankReport() {
 async function refreshCurrentReportIfNeeded() {
   if (!hasBackendTree() || !state.remote.currentReport) return;
   if (state.remote.currentReport.type === "subtree") {
-    const taxid = state.remote.currentReport.report?.target?.taxid;
-    if (taxid == null) return;
-    const payload = await fetchRemoteSubtreeReport(taxid);
+    const taxids = Array.isArray(state.remote.currentReport.report?.summary?.selected_taxids)
+      ? state.remote.currentReport.report.summary.selected_taxids
+      : [];
+    if (!taxids.length) return;
+    const payload = await fetchRemoteSubtreeReport(null, { taxids });
     renderSubtreeReport(payload.report || null);
     return;
   }
@@ -2994,24 +3158,35 @@ async function refreshCurrentReportIfNeeded() {
 }
 
 function renderCurrentReportView() {
-  refreshCurrentReportIfNeeded().catch((error) => {
-    setStatus(`Could not refresh the current subtree report: ${error.message || error}`);
-  });
+  const active = state.remote.currentReport;
+  if (!active) return;
+  if (active.type === "subtree") {
+    renderSubtreeReport(active.report);
+    return;
+  }
+  if (active.type === "rank") {
+    const taxids = Array.isArray(active.report?.summary?.selected_taxids) ? active.report.summary.selected_taxids : [];
+    renderRankReport(active.report, taxids);
+  }
 }
 
 function renderSubtreeReport(report) {
   if (!els.subtreeReport || !els.tablePanelTitle) return;
-  if (!report || !report.target) {
+  if (!report || !report.summary || !report.matrix) {
     els.subtreeReport.hidden = false;
-    els.subtreeReport.innerHTML = `<div class="subtree-report-card">No subtree report was returned by the backend.</div>`;
+    els.subtreeReport.innerHTML = `<div class="subtree-report-card">No count matrix was returned by the backend.</div>`;
     els.topTable.innerHTML = "";
     return;
   }
   state.remote.currentReport = { type: "subtree", report };
-  const target = report.target;
-  els.tablePanelTitle.textContent = `Subtree report: ${target.name}`;
+  const countViewMode = getCountViewMode();
+  const countViewLabel = getCountViewLabel();
+  els.tablePanelTitle.textContent = `Count matrix (${Number(report.summary.selected_node_count || 0).toLocaleString()} selected)`;
   if (els.exportMatrixBtn) {
     els.exportMatrixBtn.hidden = false;
+  }
+  if (els.barplotBtn) {
+    els.barplotBtn.hidden = countViewMode === "both";
   }
   if (els.topTableWrap) {
     els.topTableWrap.hidden = true;
@@ -3019,20 +3194,16 @@ function renderSubtreeReport(report) {
   els.subtreeReport.hidden = false;
   els.subtreeReport.innerHTML = `
     <div class="subtree-report-card">
-      <h3>${escapeHtml(target.name)} (${target.taxid})</h3>
+      <h3>Selected-node ${escapeHtml(countViewLabel)} count matrix</h3>
       <div class="subtree-report-meta">
-        <span>rank: ${escapeHtml(target.rank || "NA")}</span>
-        <span>direct: ${Number(target.direct || 0).toLocaleString()}</span>
-        <span>children: ${Number(target.child_count || 0).toLocaleString()}</span>
+        <span>selected nodes: ${Number(report.summary.selected_node_count || 0).toLocaleString()}</span>
+        <span>${escapeHtml(formatCountSummaryLabel(countViewMode))}: ${escapeHtml(formatCountSummaryValue(report.summary, countViewMode))}</span>
+        <span>datasets: ${Array.isArray(report.summary.dataset_names) ? report.summary.dataset_names.length.toLocaleString() : "0"}</span>
       </div>
     </div>
     <div class="subtree-report-grid">
-      <div class="subtree-report-card">
-        <h3>Per-dataset summary</h3>
-        ${renderDatasetBreakdownTable(report.per_dataset_summary?.rows || [], true)}
-      </div>
       <div class="subtree-report-card subtree-report-matrix">
-        <h3>Per-child direct count matrix</h3>
+        <h3>Selected-node ${escapeHtml(countViewLabel)} counts by dataset</h3>
         ${renderSubtreeMatrix(report.matrix || {})}
       </div>
     </div>
@@ -3054,6 +3225,9 @@ function renderRankReport(report, taxids) {
   els.tablePanelTitle.textContent = `Rank report (${report.summary.selected_node_count} selected)`;
   if (els.exportMatrixBtn) {
     els.exportMatrixBtn.hidden = false;
+  }
+  if (els.barplotBtn) {
+    els.barplotBtn.hidden = true;
   }
   if (els.topTableWrap) {
     els.topTableWrap.hidden = true;
@@ -3136,15 +3310,22 @@ function renderDatasetBreakdownTable(rows, directOnly = false) {
 function renderSubtreeMatrix(matrix) {
   const rows = Array.isArray(matrix.rows) ? matrix.rows : [];
   const datasetNames = Array.isArray(matrix.dataset_names) ? matrix.dataset_names : [];
+  const countViewMode = getCountViewMode();
   if (!rows.length || !datasetNames.length) {
-    return `<div class="subtree-report-empty">No count matrix rows available for this subtree.</div>`;
+    return `<div class="subtree-report-empty">No count matrix rows available for the current selection.</div>`;
   }
+  const valueHeader = countViewMode === "direct"
+    ? "Direct"
+    : countViewMode === "subtree"
+      ? "Cumulative"
+      : "Direct / Cumulative";
   return `
     <table>
       <thead>
         <tr>
           <th>Node</th>
           <th>Rank</th>
+          <th>${valueHeader}</th>
           ${datasetNames.map((name) => `<th>${escapeHtml(name)}</th>`).join("")}
         </tr>
       </thead>
@@ -3153,14 +3334,184 @@ function renderSubtreeMatrix(matrix) {
           <tr>
             <td>${escapeHtml(row.name || "")}</td>
             <td>${escapeHtml(row.rank || "NA")}</td>
+            <td>${escapeHtml(formatMatrixCountCell(row, countViewMode))}</td>
             ${(Array.isArray(row.datasets) ? row.datasets : []).map((entry) => `
-              <td>${Number(entry.direct || 0).toLocaleString()}</td>
+              <td>${escapeHtml(formatMatrixCountCell(entry, countViewMode))}</td>
             `).join("")}
           </tr>
         `).join("")}
       </tbody>
     </table>
   `;
+}
+
+function getDatasetColor(datasetName, index) {
+  const matched = state.series.find((source) => source.label === datasetName);
+  if (matched?.color) return matched.color;
+  return SOURCE_COLORS[index % SOURCE_COLORS.length];
+}
+
+function formatCountSummaryLabel(mode) {
+  if (mode === "direct") return "total direct reads";
+  if (mode === "subtree") return "total cumulative reads";
+  return "total counts";
+}
+
+function formatCountSummaryValue(summary, mode) {
+  const direct = Number(summary?.total_direct || 0).toLocaleString();
+  const subtree = Number(summary?.total_subtree || 0).toLocaleString();
+  if (mode === "direct") return direct;
+  if (mode === "subtree") return subtree;
+  return `${direct} direct / ${subtree} cumulative`;
+}
+
+function formatMatrixCountCell(entry, mode) {
+  const direct = Number(entry?.direct || 0).toLocaleString();
+  const subtree = Number(entry?.subtree || 0).toLocaleString();
+  if (mode === "direct") return direct;
+  if (mode === "subtree") return subtree;
+  return `${direct} / ${subtree}`;
+}
+
+async function fetchComputedBarplotSpec(taxids, countMode) {
+  const activeRequestContext = getActiveBackendRequestContext();
+  const datasetColors = Object.fromEntries(
+    state.series.map((source, index) => [source.label, source.color || SOURCE_COLORS[index % SOURCE_COLORS.length]]),
+  );
+  const payload = {
+    taxids: Array.isArray(taxids) ? taxids.map((value) => Number(value)) : [],
+    files: activeRequestContext?.dataset_names?.length ? activeRequestContext.dataset_names.slice() : getSelectedRemoteDatasets(),
+    nodes_file: activeRequestContext?.nodes_file ?? getActiveNodesFilename(),
+    names_file: activeRequestContext?.names_file ?? getActiveNamesFilename(),
+    min_reads: activeRequestContext && Number.isFinite(activeRequestContext.min_reads)
+      ? Number(activeRequestContext.min_reads)
+      : getMinReadsValue(),
+    count_mode: countMode,
+    dataset_colors: datasetColors,
+  };
+  const response = await fetch("http://localhost:8000/compute/barplot", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const responsePayload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(responsePayload?.detail?.message || `Remote compute/barplot request failed with HTTP ${response.status}`);
+  }
+  return responsePayload?.spec || null;
+}
+
+async function openCurrentCountMatrixBarplot() {
+  const active = state.remote.currentReport;
+  if (!active || active.type !== "subtree") {
+    setStatus("Open a count matrix first, then use Barplot.");
+    return;
+  }
+  if (getCountViewMode() === "both") {
+    setStatus("Barplot is available only in Direct or Cumulative view. Choose one count view first.");
+    return;
+  }
+  const taxids = Array.isArray(active.report?.summary?.selected_taxids)
+    ? active.report.summary.selected_taxids.map((value) => Number(value))
+    : [];
+  const spec = await fetchComputedBarplotSpec(taxids, getCountViewMode());
+  if (!spec) {
+    setStatus("No count matrix data is currently available for plotting.");
+    return;
+  }
+  const popup = window.open("", "unicornCountMatrixBarplot", "popup=yes,width=1180,height=760,resizable=yes,scrollbars=yes");
+  if (!popup) {
+    setStatus("Could not open the barplot popup. Check whether your browser blocked popups for this page.");
+    return;
+  }
+  const traces = Array.isArray(spec.traces)
+    ? spec.traces.map((trace) => ({
+      type: "bar",
+      name: String(trace.name || ""),
+      x: Array.isArray(spec.x) ? spec.x : [],
+      y: Array.isArray(trace.y) ? trace.y.map((value) => Number(value || 0)) : [],
+      marker: {
+        color: trace.color || "#9cad9f",
+      },
+    }))
+    : [];
+  const layout = {
+    title: String(spec.title || "Unicorn count matrix barplot"),
+    barmode: "group",
+    paper_bgcolor: "#ffffff",
+    plot_bgcolor: "#ffffff",
+    font: {
+      family: "system-ui, sans-serif",
+      size: 13,
+      color: "#172026",
+    },
+    xaxis: {
+      title: "Selected nodes",
+      tickangle: -30,
+      automargin: true,
+    },
+    yaxis: {
+      title: `${getCountViewLabel()} reads`,
+      automargin: true,
+      separatethousands: true,
+    },
+    legend: {
+      orientation: "h",
+      y: 1.12,
+    },
+    margin: {
+      l: 72,
+      r: 24,
+      t: 88,
+      b: 140,
+    },
+  };
+  const config = {
+    responsive: true,
+    displaylogo: false,
+  };
+  const tracesJson = JSON.stringify(traces).replace(/<\/script/gi, "<\\/script");
+  const layoutJson = JSON.stringify(layout).replace(/<\/script/gi, "<\\/script");
+  const configJson = JSON.stringify(config).replace(/<\/script/gi, "<\\/script");
+  popup.document.open();
+  popup.document.write(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Unicorn Count Matrix Barplot</title>
+    <script src="https://cdn.plot.ly/plotly-3.6.0.min.js" charset="utf-8"></script>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #f4f0e8;
+        color: #172026;
+        font-family: system-ui, sans-serif;
+      }
+      #plot {
+        width: 100%;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="plot"></div>
+    <script>
+      const traces = ${tracesJson};
+      const layout = ${layoutJson};
+      const config = ${configJson};
+      Plotly.newPlot("plot", traces, layout, config);
+    </script>
+  </body>
+</html>`);
+  popup.document.close();
+  popup.focus();
+  setStatus("Opened count matrix barplot in a popup window.");
 }
 
 function exportCurrentSubtreeMatrix() {
@@ -3177,35 +3528,61 @@ function exportCurrentSubtreeMatrix() {
   const matrix = report?.matrix;
   const rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
   const datasetNames = Array.isArray(matrix?.dataset_names) ? matrix.dataset_names : [];
+  const countViewMode = getCountViewMode();
   if (!report || !rows.length || !datasetNames.length) {
-    setStatus("No subtree count matrix is currently available to export.");
+    setStatus("No count matrix is currently available to export.");
     return;
   }
-  const header = ["taxid", "name", "rank", ...datasetNames];
+  const header = ["taxid", "name", "rank"];
+  if (countViewMode === "direct" || countViewMode === "both") {
+    header.push("direct");
+  }
+  if (countViewMode === "subtree" || countViewMode === "both") {
+    header.push("subtree");
+  }
+  datasetNames.forEach((datasetName) => {
+    if (countViewMode === "direct" || countViewMode === "both") {
+      header.push(countViewMode === "both" ? `${datasetName}_direct` : datasetName);
+    }
+    if (countViewMode === "subtree" || countViewMode === "both") {
+      header.push(countViewMode === "both" ? `${datasetName}_subtree` : datasetName);
+    }
+  });
   const lines = [header.join("\t")];
   for (const row of rows) {
     const values = [
       String(row.taxid ?? ""),
       String(row.name ?? ""),
       String(row.rank ?? ""),
-      ...datasetNames.map((datasetName, index) => {
-        const entry = Array.isArray(row.datasets) ? row.datasets[index] : null;
-        return String(Number(entry?.direct || 0));
-      }),
     ];
+    if (countViewMode === "direct" || countViewMode === "both") {
+      values.push(String(Number(row.direct || 0)));
+    }
+    if (countViewMode === "subtree" || countViewMode === "both") {
+      values.push(String(Number(row.subtree || 0)));
+    }
+    datasetNames.forEach((datasetName, index) => {
+      const entry = Array.isArray(row.datasets) ? row.datasets[index] : null;
+      if (countViewMode === "direct" || countViewMode === "both") {
+        values.push(String(Number(entry?.direct || 0)));
+      }
+      if (countViewMode === "subtree" || countViewMode === "both") {
+        values.push(String(Number(entry?.subtree || 0)));
+      }
+    });
     lines.push(values.join("\t"));
   }
   const blob = new Blob([lines.join("\n") + "\n"], { type: "text/tab-separated-values;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
-  const safeName = String(report.target?.name || "subtree").replace(/[^A-Za-z0-9._-]+/g, "_");
+  const safeName = "selected_nodes";
   anchor.href = url;
-  anchor.download = `${safeName}_${report.target?.taxid || "taxid"}_direct_matrix.tsv`;
+  anchor.download = `${safeName}_${getCountViewMode()}_matrix.tsv`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
-  setStatus(`Exported direct count matrix for ${report.target?.name || "selected subtree"}.`);
+  setStatus(`Exported ${getCountViewLabel()} count matrix for the current selection.`);
 }
 
 function exportCurrentRankMatrix(report) {

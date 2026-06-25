@@ -13,6 +13,8 @@ from urllib import request as urllib_request
 from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from unicorn_compute.barplot import build_count_matrix_barplot_spec
+
 
 HOST = os.environ.get("UNICORN_GRAPHENGINE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("UNICORN_GRAPHENGINE_PORT", "8000"))
@@ -1480,6 +1482,46 @@ def _normalize_taxids(values: Optional[List[int]]) -> List[int]:
     return out
 
 
+def _selected_count_matrix_report(
+    selection: "SelectionModel",
+    selected_nodes: List["TreeNodeModel"],
+) -> Dict[str, Any]:
+    matrix_rows = []
+    for node in selected_nodes:
+        matrix_rows.append(
+            {
+                "taxid": node.taxid,
+                "name": node.name,
+                "rank": node.rank,
+                "direct": node.direct,
+                "subtree": node.total,
+                "datasets": [
+                    {
+                        "dataset": dataset.fileinfo.name,
+                        "direct": node.direct_by_source[index] if index < len(node.direct_by_source) else 0,
+                        "subtree": node.total_by_source[index] if index < len(node.total_by_source) else 0,
+                    }
+                    for index, dataset in enumerate(selection.datasets)
+                ],
+            }
+        )
+
+    return {
+        "summary": {
+            "selected_taxids": [int(node.taxid) for node in selected_nodes],
+            "selected_node_count": len(selected_nodes),
+            "dataset_names": [dataset.fileinfo.name for dataset in selection.datasets],
+            "total_direct": sum(int(node.direct) for node in selected_nodes),
+            "total_subtree": sum(int(node.total) for node in selected_nodes),
+        },
+        "matrix": {
+            "rows": matrix_rows,
+            "dataset_names": [dataset.fileinfo.name for dataset in selection.datasets],
+            "row_count": len(matrix_rows),
+        },
+    }
+
+
 @app.get("/root-view")
 def root_view(
     files: Optional[List[str]] = Query(default=None),
@@ -1650,68 +1692,41 @@ def table_view(
 
 @app.get("/subtree-report")
 def subtree_report(
-    taxid: int = Query(...),
+    taxid: Optional[int] = Query(default=None),
+    taxids: Optional[List[int]] = Query(default=None),
     files: Optional[List[str]] = Query(default=None),
     nodes_file: Optional[str] = Query(default=None),
     names_file: Optional[str] = Query(default=None),
     min_reads: int = Query(default=0, ge=0),
-    descendant_limit: int = Query(default=25, ge=1, le=500),
-    matrix_limit: int = Query(default=12, ge=1, le=250),
 ) -> Dict[str, Any]:
     selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
     request_context = _response_context(selection, taxonomy, min_reads, [])
-    node = _resolve_node_in_context(tree, taxid, min_reads, request_context)
-
-    top_children = _top_children_rows(node, min_reads=min_reads, limit=descendant_limit)
-    matrix_rows = top_children[:matrix_limit]
-    matrix = []
-    for row in matrix_rows:
-        child = node.find_taxid(int(row["taxid"]))
-        if child is None:
-            continue
-        matrix.append(
-            {
-                "taxid": child.taxid,
-                "name": child.name,
-                "rank": child.rank,
-                "direct": child.direct,
-                "datasets": [
-                    {
-                        "dataset": dataset.fileinfo.name,
-                        "direct": child.direct_by_source[index] if index < len(child.direct_by_source) else 0,
-                    }
-                    for index, dataset in enumerate(selection.datasets)
-                ],
-            }
+    requested_taxids = _normalize_taxids(taxids)
+    if taxid is not None:
+        try:
+            single_taxid = int(taxid)
+        except (TypeError, ValueError):
+            single_taxid = None
+        if single_taxid is not None and single_taxid not in requested_taxids:
+            requested_taxids.append(single_taxid)
+    if not requested_taxids:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "At least one taxid is required for a count matrix report.",
+                code="missing_taxids",
+                request_context=request_context,
+            ),
         )
+    selected_nodes = [
+        _resolve_node_in_context(tree, selected_taxid, min_reads, request_context)
+        for selected_taxid in requested_taxids
+    ]
+    report = _selected_count_matrix_report(selection, selected_nodes)
 
     return {
         "ok": True,
-        "report": {
-            "target": {
-                "taxid": node.taxid,
-                "name": node.name,
-                "rank": node.rank,
-                "depth": node.depth,
-                "parent": node.parent,
-                "direct": node.direct,
-                "child_count": _filtered_child_count(node, min_reads),
-            },
-            "per_dataset_summary": {
-                "rows": [
-                    {
-                        "dataset": dataset.fileinfo.name,
-                        "direct": node.direct_by_source[index] if index < len(node.direct_by_source) else 0,
-                    }
-                    for index, dataset in enumerate(selection.datasets)
-                ]
-            },
-            "matrix": {
-                "rows": matrix,
-                "dataset_names": [dataset.fileinfo.name for dataset in selection.datasets],
-                "row_count": len(matrix),
-            },
-        },
+        "report": report,
         "request_context": request_context,
     }
 
@@ -1778,6 +1793,61 @@ def rank_report(
             },
             "rows": rows,
         },
+        "request_context": request_context,
+    }
+
+
+@app.post("/compute/barplot")
+def compute_barplot(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    taxids = _normalize_taxids(payload.get("taxids") if isinstance(payload, dict) else None)
+    if not taxids:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "At least one taxid is required for a barplot compute request.",
+                code="missing_taxids",
+            ),
+        )
+    files = payload.get("files") if isinstance(payload.get("files"), list) else None
+    nodes_file = str(payload.get("nodes_file") or "") or None
+    names_file = str(payload.get("names_file") or "") or None
+    min_reads_value = payload.get("min_reads", 0)
+    try:
+        min_reads = max(0, int(min_reads_value))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "min_reads must be an integer.",
+                code="invalid_min_reads",
+                min_reads=min_reads_value,
+            ),
+        )
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    request_context = _response_context(selection, taxonomy, min_reads, [])
+    selected_nodes = [
+        _resolve_node_in_context(tree, taxid, min_reads, request_context)
+        for taxid in taxids
+    ]
+    report = _selected_count_matrix_report(selection, selected_nodes)
+    try:
+        spec = build_count_matrix_barplot_spec(
+            report,
+            count_mode=payload.get("count_mode"),
+            dataset_colors=payload.get("dataset_colors"),
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                str(error),
+                code="invalid_barplot_request",
+                request_context=request_context,
+            ),
+        )
+    return {
+        "ok": True,
+        "spec": spec,
         "request_context": request_context,
     }
 

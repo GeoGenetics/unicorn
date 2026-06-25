@@ -175,3 +175,119 @@ Recommended next order
 5. Add `expand_taxon` and optional highlight tools
 6. Improve transcript/evidence clarity
 7. Decide when provider calls should move behind the backend
+
+
+Compact provider interaction
+----------------------------
+
+Goal
+
+- reduce provider token usage sharply
+- move provider grounding closer to backend-owned truth
+- keep the base provider snapshot compact, stable, and tool-oriented
+
+Why this now
+
+- current provider turns still send a larger context envelope than needed
+- repeated turns multiply the cost of large context quickly
+- backend-authoritative graphengine should also become backend-authoritative in
+  how provider grounding is assembled
+
+Scope boundary
+
+- planning and implementation should focus on the provider grounding snapshot
+  and its assembly path
+- this does not require expanding the tool contract first
+- this does not require adding state-mutating provider actions
+- this should preserve the current Unicorn-owned tool loop
+
+Todo list
+
+1. Map the current provider payload against the compact schema.
+Tasks:
+- compare `buildAgentContext()` field-by-field against
+  `compact_provider_context.schema.txt`
+- mark each field as:
+  - keep
+  - shrink
+  - move to backend
+  - drop
+- identify current duplicated values between:
+  - `datasets`
+  - `taxonomy`
+  - `tree`
+  - `backend.request_context`
+
+2. Define the exact V1 compact snapshot that we will actually ship.
+Tasks:
+- freeze the first live compact top-level shape
+- decide which optional sections remain in V1:
+  - `table`
+  - `report`
+  - `capabilities`
+- freeze default caps for:
+  - dataset names
+  - selected-node preview
+  - expanded taxids
+
+3. Decide the assembly split between backend and browser.
+Tasks:
+- mark every compact field as one of:
+  - backend-owned
+  - browser-owned UI state
+  - transitional
+- minimize browser-owned fields as much as possible
+- make explicit whether `focused_taxid`, `focused_name`, `count_mode`,
+  `scale_mode`, and `search` remain browser-supplied in V1
+
+4. Add a dedicated compact-context builder path without removing the old one.
+Tasks:
+- keep the current large `buildAgentContext()` during transition
+- add a parallel compact builder path for comparison
+- choose where the first builder lives:
+  - browser `buildCompactAgentContext()`
+  - backend `build_compact_provider_context(...)`
+- prefer backend assembly as the target architecture
+
+5. Compare large-context and compact-context behavior side by side.
+Tasks:
+- log both shapes during the transition period
+- compare prompt quality on a small fixed evaluation set
+- note which prompts still answer directly
+- note which prompts now trigger tools earlier
+
+6. Switch provider payload construction to the compact snapshot.
+Tasks:
+- replace large `graph_context` usage in provider requests once validated
+- keep compatibility long enough to debug regressions
+- update any provider request mappers that still assume the old shape
+
+7. Update the read-only tool contract docs to match the new compact base.
+Tasks:
+- update `provider_turn_contract.txt`
+- update `graphengine_agent_registry.txt`
+- make clear that `get_graph_context` may return the legacy/full shape while
+  provider grounding uses the compact base snapshot
+
+8. Tighten token discipline after the compact switch.
+Tasks:
+- cap large repeated arrays
+- remove empty or always-null provider fields
+- trim repeated conversation/tool-result reinjection if still needed
+- measure whether one-turn read-only prompts now consume materially fewer
+  tokens
+
+9. Validate the compact provider path on representative prompts.
+Suggested prompts:
+- "What datasets am I looking at?"
+- "What filters are active right now?"
+- "Tell me about node 1648030"
+- "What is currently selected?"
+- "What subtree report is currently open?"
+
+10. Decide what comes next after the compact pass is stable.
+Possible follow-up directions:
+- backend-only compact-context assembly
+- compact server-side session summaries
+- additional read-only tools such as `get_subtree_report`
+- provider payload caching or memoization only if measurements justify it

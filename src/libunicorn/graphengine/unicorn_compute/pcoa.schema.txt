@@ -1,0 +1,192 @@
+Unicorn Compute PCoA Schema
+===========================
+
+Purpose
+-------
+
+This document defines the first compute-side input/output contract for
+principal coordinates analysis (PCoA).
+
+The goal is to let `unicorn_compute` transform backend-authoritative Unicorn
+count-matrix data into an ordination-ready payload, while leaving popup
+lifecycle and Plotly scatter rendering in the frontend runtime.
+
+
+Input contract
+--------------
+
+The PCoA compute routine accepts:
+
+```json
+{
+  "report": {
+    "summary": {
+      "selected_taxids": [4565, 4571, 4480],
+      "selected_node_count": 3,
+      "dataset_names": [
+        "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+        "Lib_sim1_collapsed.bdamage.txt"
+      ],
+      "total_direct": 1234,
+      "total_subtree": 5678
+    },
+    "matrix": {
+      "rows": [
+        {
+          "taxid": 4565,
+          "name": "Triticum",
+          "rank": "genus",
+          "direct": 120,
+          "subtree": 600,
+          "datasets": [
+            {
+              "dataset": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+              "direct": 100,
+              "subtree": 500
+            },
+            {
+              "dataset": "Lib_sim1_collapsed.bdamage.txt",
+              "direct": 20,
+              "subtree": 100
+            }
+          ]
+        }
+      ],
+      "dataset_names": [
+        "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+        "Lib_sim1_collapsed.bdamage.txt"
+      ],
+      "row_count": 1
+    }
+  },
+  "count_mode": "subtree",
+  "distance_metric": "bray_curtis",
+  "dataset_colors": {
+    "Lib_sim1_collapsed.alnfilt.bdamage.txt": "#c85f43",
+    "Lib_sim1_collapsed.bdamage.txt": "#255f75"
+  }
+}
+```
+
+Rules:
+
+- `report` must be a backend-authoritative selected-node count matrix payload
+- `count_mode` must be either:
+  - `direct`
+  - `subtree`
+- `distance_metric` must be one of:
+  - `jaccard`
+  - `bray_curtis`
+  - `log_cord`
+  - `chao`
+- `dataset_colors` is optional
+- if a dataset color is not provided, the compute layer may leave `color` null
+- each selected node becomes one feature column
+- each dataset becomes one ordination point
+- feature values must be taken from the selected `count_mode`
+
+Metric notes:
+
+- `jaccard` is presence/absence oriented
+- `bray_curtis` is abundance sensitive
+- `log_cord` is the V1 contract name for the log-cord distance requested by
+  Unicorn; any future internal aliasing must still preserve this external name
+- `chao` is abundance-aware and intended for sparse community comparisons
+
+
+Output contract
+---------------
+
+The compute routine returns:
+
+```json
+{
+  "compute_version": "v1",
+  "plot_type": "pcoa",
+  "count_mode": "subtree",
+  "distance_metric": "bray_curtis",
+  "title": "PCoA of selected-node cumulative counts",
+  "axes": [
+    {
+      "id": "PC1",
+      "explained_fraction": 0.61
+    },
+    {
+      "id": "PC2",
+      "explained_fraction": 0.24
+    }
+  ],
+  "points": [
+    {
+      "dataset": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "label": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "color": "#c85f43",
+      "x": -0.31,
+      "y": 0.14
+    },
+    {
+      "dataset": "Lib_sim1_collapsed.bdamage.txt",
+      "label": "Lib_sim1_collapsed.bdamage.txt",
+      "color": "#255f75",
+      "x": 0.31,
+      "y": -0.14
+    }
+  ],
+  "distance_matrix": {
+    "labels": [
+      "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "Lib_sim1_collapsed.bdamage.txt"
+    ],
+    "values": [
+      [0.0, 0.42],
+      [0.42, 0.0]
+    ]
+  },
+  "feature_labels": [
+    "Triticum (4565)",
+    "Aegilops (4480)",
+    "Triticeae (4479)"
+  ],
+  "summary": {
+    "dataset_count": 2,
+    "feature_count": 3
+  }
+}
+```
+
+Rules:
+
+- `compute_version` identifies the compute schema version
+- `plot_type` is always `pcoa`
+- `count_mode` echoes the selected mode
+- `distance_metric` echoes the selected metric
+- `axes` lists the plotted dimensions in order
+- `points` contains one point per dataset
+- `distance_matrix` is included in V1 so downstream tools can inspect or export
+  the exact pairwise distances used by the ordination
+- `feature_labels` preserves the feature ordering used to build the input matrix
+- `summary` is intentionally compact
+
+
+Non-goals
+---------
+
+- no Plotly-specific popup or window handling here
+- no raw frontend DOM concerns here
+- no mixed direct+subtree PCoA mode in V1
+- no clustering, hulls, biplot vectors, or confidence ellipses in V1
+- no dimensionality beyond the first ordination plane in the initial render
+
+
+V1 policy
+---------
+
+- V1 supports only `direct` and `subtree`
+- `both` remains a frontend display mode, not a compute PCoA mode
+- V1 standardizes four distance metrics:
+  - `jaccard`
+  - `bray_curtis`
+  - `log_cord`
+  - `chao`
+- the first compute implementation should target a 2D ordination payload, even
+  if it internally computes more axes

@@ -13,6 +13,14 @@
         <p class="subtitle">Backend-authoritative taxonomic placement tree from LCA counts and NCBI taxonomy nodes.</p>
       </div>
       <div class="topbar-actions">
+        <label class="topbar-control">
+          <span>Count View</span>
+          <select id="countViewMode">
+            <option value="both">Direct + Cumulative</option>
+            <option value="direct">Direct</option>
+            <option value="subtree">Cumulative</option>
+          </select>
+        </label>
         <button id="renderBtn" class="primary">Render Tree</button>
         <button id="centerBtn" class="secondary">Center Root</button>
         <button id="toggleTableBtn" class="secondary" aria-expanded="false">Show Counts</button>
@@ -143,10 +151,17 @@
               </label>
               <div class="selection-tools" aria-label="Selection tools">
                 <span class="selection-tools-label">Selection</span>
+                <label>
+                  <span>Target rank</span>
+                  <select id="selectToRankValue">
+                    <option value="">Choose rank</option>
+                  </select>
+                </label>
                 <div class="selection-tools-actions">
                   <button id="uncollapseBtn" class="secondary compact-btn" type="button">Uncollapse</button>
                   <button id="uncollapseTipsBtn" class="secondary compact-btn" type="button">Uncollapse Tips</button>
                   <button id="selectDescendantsBtn" class="secondary compact-btn" type="button">Select Descendants</button>
+                  <button id="selectToRankBtn" class="secondary compact-btn" type="button">Select To Rank</button>
                   <button id="clearSelectionBtn" class="secondary compact-btn" type="button">Clear Selection</button>
                 </div>
               </div>
@@ -163,7 +178,7 @@
               <div class="selection-tools" aria-label="Report tools">
                 <span class="selection-tools-label">Reports</span>
                 <div class="selection-tools-actions">
-                  <button id="subtreeReportBtn" class="secondary compact-btn" type="button">Subtree Report</button>
+                  <button id="subtreeReportBtn" class="secondary compact-btn" type="button">Count Matrix</button>
                   <button id="rankReportBtn" class="secondary compact-btn" type="button">Rank Report</button>
                 </div>
               </div>
@@ -255,6 +270,7 @@
       <section id="tablePanel" class="table-panel hidden" aria-label="Top LCA placements" hidden>
         <div class="table-panel-head">
           <h2 id="tablePanelTitle">Top direct placements</h2>
+          <button id="barplotBtn" class="secondary compact-btn" type="button" hidden>Barplot</button>
           <button id="exportMatrixBtn" class="secondary compact-btn" type="button" hidden>Export Matrix</button>
         </div>
         <div id="tableResize" class="table-resize" role="separator" aria-orientation="horizontal" title="Drag to resize report"></div>
