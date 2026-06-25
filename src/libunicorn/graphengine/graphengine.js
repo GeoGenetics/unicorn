@@ -123,6 +123,8 @@ const els = {
   tablePanel: document.getElementById("tablePanel"),
   tablePanelTitle: document.getElementById("tablePanelTitle") || document.querySelector("#tablePanel h2"),
   tableResize: document.getElementById("tableResize"),
+  pcoaMetric: document.getElementById("pcoaMetric"),
+  pcoaBtn: document.getElementById("pcoaBtn"),
   barplotBtn: document.getElementById("barplotBtn"),
   exportMatrixBtn: document.getElementById("exportMatrixBtn"),
   subtreeReport: document.getElementById("subtreeReport"),
@@ -313,6 +315,9 @@ if (els.selectToRankValue) {
 els.clearSelectionBtn.addEventListener("click", clearSelection);
 if (els.exportMatrixBtn) {
   els.exportMatrixBtn.addEventListener("click", exportCurrentSubtreeMatrix);
+}
+if (els.pcoaBtn) {
+  els.pcoaBtn.addEventListener("click", openCurrentCountMatrixPcoa);
 }
 if (els.barplotBtn) {
   els.barplotBtn.addEventListener("click", openCurrentCountMatrixBarplot);
@@ -3054,6 +3059,12 @@ function clearSubtreeReportView(options = {}) {
   if (els.exportMatrixBtn) {
     els.exportMatrixBtn.hidden = true;
   }
+  if (els.pcoaMetric) {
+    els.pcoaMetric.hidden = true;
+  }
+  if (els.pcoaBtn) {
+    els.pcoaBtn.hidden = true;
+  }
   if (els.barplotBtn) {
     els.barplotBtn.hidden = true;
   }
@@ -3185,6 +3196,12 @@ function renderSubtreeReport(report) {
   if (els.exportMatrixBtn) {
     els.exportMatrixBtn.hidden = false;
   }
+  if (els.pcoaMetric) {
+    els.pcoaMetric.hidden = countViewMode === "both";
+  }
+  if (els.pcoaBtn) {
+    els.pcoaBtn.hidden = countViewMode === "both";
+  }
   if (els.barplotBtn) {
     els.barplotBtn.hidden = countViewMode === "both";
   }
@@ -3225,6 +3242,12 @@ function renderRankReport(report, taxids) {
   els.tablePanelTitle.textContent = `Rank report (${report.summary.selected_node_count} selected)`;
   if (els.exportMatrixBtn) {
     els.exportMatrixBtn.hidden = false;
+  }
+  if (els.pcoaMetric) {
+    els.pcoaMetric.hidden = true;
+  }
+  if (els.pcoaBtn) {
+    els.pcoaBtn.hidden = true;
   }
   if (els.barplotBtn) {
     els.barplotBtn.hidden = true;
@@ -3403,6 +3426,37 @@ async function fetchComputedBarplotSpec(taxids, countMode) {
   return responsePayload?.spec || null;
 }
 
+async function fetchComputedPcoaSpec(taxids, countMode, distanceMetric) {
+  const activeRequestContext = getActiveBackendRequestContext();
+  const datasetColors = Object.fromEntries(
+    state.series.map((source, index) => [source.label, source.color || SOURCE_COLORS[index % SOURCE_COLORS.length]]),
+  );
+  const payload = {
+    taxids: Array.isArray(taxids) ? taxids.map((value) => Number(value)) : [],
+    files: activeRequestContext?.dataset_names?.length ? activeRequestContext.dataset_names.slice() : getSelectedRemoteDatasets(),
+    nodes_file: activeRequestContext?.nodes_file ?? getActiveNodesFilename(),
+    names_file: activeRequestContext?.names_file ?? getActiveNamesFilename(),
+    min_reads: activeRequestContext && Number.isFinite(activeRequestContext.min_reads)
+      ? Number(activeRequestContext.min_reads)
+      : getMinReadsValue(),
+    count_mode: countMode,
+    distance_metric: distanceMetric,
+    dataset_colors: datasetColors,
+  };
+  const response = await fetch("http://localhost:8000/compute/pcoa", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const responsePayload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(responsePayload?.detail?.message || `Remote compute/pcoa request failed with HTTP ${response.status}`);
+  }
+  return responsePayload?.spec || null;
+}
+
 async function openCurrentCountMatrixBarplot() {
   const active = state.remote.currentReport;
   if (!active || active.type !== "subtree") {
@@ -3512,6 +3566,156 @@ async function openCurrentCountMatrixBarplot() {
   popup.document.close();
   popup.focus();
   setStatus("Opened count matrix barplot in a popup window.");
+}
+
+async function openCurrentCountMatrixPcoa() {
+  const active = state.remote.currentReport;
+  if (!active || active.type !== "subtree") {
+    setStatus("Open a count matrix first, then use PCoA.");
+    return;
+  }
+  if (getCountViewMode() === "both") {
+    setStatus("PCoA is available only in Direct or Cumulative view. Choose one count view first.");
+    return;
+  }
+  const taxids = Array.isArray(active.report?.summary?.selected_taxids)
+    ? active.report.summary.selected_taxids.map((value) => Number(value))
+    : [];
+  const metric = String(els.pcoaMetric?.value || "jaccard");
+  const spec = await fetchComputedPcoaSpec(taxids, getCountViewMode(), metric);
+  if (!spec) {
+    setStatus("No count matrix data is currently available for PCoA.");
+    return;
+  }
+  const popup = window.open("", "unicornCountMatrixPcoa", "popup=yes,width=1180,height=760,resizable=yes,scrollbars=yes");
+  if (!popup) {
+    setStatus("Could not open the PCoA popup. Check whether your browser blocked popups for this page.");
+    return;
+  }
+  const points = Array.isArray(spec.points) ? spec.points : [];
+  const axes = Array.isArray(spec.axes) ? spec.axes : [];
+  const pc1 = axes[0] || { id: "PC1", explained_fraction: 0 };
+  const pc2 = axes[1] || { id: "PC2", explained_fraction: 0 };
+  const trace = {
+    type: "scatter",
+    mode: "markers+text",
+    textposition: "top center",
+    textfont: {
+      family: "system-ui, sans-serif",
+      size: 11,
+      color: "#172026",
+    },
+    x: points.map((point) => Number(point.x || 0)),
+    y: points.map((point) => Number(point.y || 0)),
+    text: points.map((point) => String(point.label || point.dataset || "")),
+    hovertemplate: [
+      "<b>%{text}</b>",
+      `${pc1.id}: %{x:.5f}`,
+      `${pc2.id}: %{y:.5f}`,
+      `<extra>${String(spec.distance_metric || "").replaceAll("_", "-")}</extra>`,
+    ].join("<br>"),
+    marker: {
+      size: 14,
+      color: points.map((point) => point.color || "#9cad9f"),
+      line: {
+        color: "#172026",
+        width: 1,
+      },
+    },
+  };
+  const diagnostics = spec.diagnostics && typeof spec.diagnostics === "object" ? spec.diagnostics : {};
+  const correctionText = diagnostics.correction_applied
+    ? `Correction: ${diagnostics.correction_applied} (c=${Number(diagnostics.correction_constant || 0).toPrecision(4)})`
+    : diagnostics.correction_required
+      ? "Correction still required"
+      : "No correction needed";
+  const layout = {
+    title: String(spec.title || "Unicorn count matrix PCoA"),
+    paper_bgcolor: "#ffffff",
+    plot_bgcolor: "#ffffff",
+    font: {
+      family: "system-ui, sans-serif",
+      size: 13,
+      color: "#172026",
+    },
+    xaxis: {
+      title: `${pc1.id} (${(Number(pc1.explained_fraction || 0) * 100).toFixed(2)}%)`,
+      zeroline: true,
+      automargin: true,
+    },
+    yaxis: {
+      title: `${pc2.id} (${(Number(pc2.explained_fraction || 0) * 100).toFixed(2)}%)`,
+      zeroline: true,
+      automargin: true,
+    },
+    annotations: [
+      {
+        xref: "paper",
+        yref: "paper",
+        x: 0,
+        y: 1.12,
+        xanchor: "left",
+        yanchor: "bottom",
+        showarrow: false,
+        font: {
+          family: "system-ui, sans-serif",
+          size: 11,
+          color: "#5b6570",
+        },
+        text: correctionText,
+      },
+    ],
+    margin: {
+      l: 72,
+      r: 32,
+      t: 104,
+      b: 72,
+    },
+  };
+  const config = {
+    responsive: true,
+    displaylogo: false,
+  };
+  const traceJson = JSON.stringify(trace).replace(/<\/script/gi, "<\\/script");
+  const layoutJson = JSON.stringify(layout).replace(/<\/script/gi, "<\\/script");
+  const configJson = JSON.stringify(config).replace(/<\/script/gi, "<\\/script");
+  popup.document.open();
+  popup.document.write(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Unicorn Count Matrix PCoA</title>
+    <script src="https://cdn.plot.ly/plotly-3.6.0.min.js" charset="utf-8"></script>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #f4f0e8;
+        color: #172026;
+        font-family: system-ui, sans-serif;
+      }
+      #plot {
+        width: 100%;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="plot"></div>
+    <script>
+      const trace = ${traceJson};
+      const layout = ${layoutJson};
+      const config = ${configJson};
+      Plotly.newPlot("plot", [trace], layout, config);
+    </script>
+  </body>
+</html>`);
+  popup.document.close();
+  popup.focus();
+  setStatus(`Opened count matrix PCoA (${metric.replaceAll("_", "-")}) in a popup window.`);
 }
 
 function exportCurrentSubtreeMatrix() {

@@ -14,6 +14,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from unicorn_compute.barplot import build_count_matrix_barplot_spec
+from unicorn_compute.pcoa import build_count_matrix_pcoa_spec
 
 
 HOST = os.environ.get("UNICORN_GRAPHENGINE_HOST", "127.0.0.1")
@@ -1842,6 +1843,71 @@ def compute_barplot(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             detail=_error_detail(
                 str(error),
                 code="invalid_barplot_request",
+                request_context=request_context,
+            ),
+        )
+    return {
+        "ok": True,
+        "spec": spec,
+        "request_context": request_context,
+    }
+
+
+@app.post("/compute/pcoa")
+def compute_pcoa(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    taxids = _normalize_taxids(payload.get("taxids") if isinstance(payload, dict) else None)
+    if not taxids:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "At least one taxid is required for a PCoA compute request.",
+                code="missing_taxids",
+            ),
+        )
+    files = payload.get("files") if isinstance(payload.get("files"), list) else None
+    nodes_file = str(payload.get("nodes_file") or "") or None
+    names_file = str(payload.get("names_file") or "") or None
+    min_reads_value = payload.get("min_reads", 0)
+    try:
+        min_reads = max(0, int(min_reads_value))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "min_reads must be an integer.",
+                code="invalid_min_reads",
+                min_reads=min_reads_value,
+            ),
+        )
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    request_context = _response_context(selection, taxonomy, min_reads, [])
+    selected_nodes = [
+        _resolve_node_in_context(tree, taxid, min_reads, request_context)
+        for taxid in taxids
+    ]
+    report = _selected_count_matrix_report(selection, selected_nodes)
+    try:
+        spec = build_count_matrix_pcoa_spec(
+            report,
+            count_mode=payload.get("count_mode"),
+            distance_metric=payload.get("distance_metric"),
+            dataset_colors=payload.get("dataset_colors"),
+        )
+    except NotImplementedError as error:
+        raise HTTPException(
+            status_code=501,
+            detail=_error_detail(
+                str(error),
+                code="unimplemented_pcoa_request",
+                request_context=request_context,
+            ),
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                str(error),
+                code="invalid_pcoa_request",
                 request_context=request_context,
             ),
         )

@@ -1,11 +1,30 @@
-I added the detailed schema plan in [compact_provider_context.schema.txt](/Users/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/unicorn_agent/compact_provider_context.schema.txt).
-It covers:
-why the compact context exists
-the backend-first assembly mechanism
-the exact proposed top-level schema
-which fields belong in session, datasets, taxonomy, filters, tree, selection, table, report, and capabilities
-which large-context fields should be removed
-token-budget and truncation strategy
-implementation order and validation prompts
-The core idea in the doc is: the provider should receive a small backend-owned grounding snapshot, and use Unicorn tools for detail instead of getting a giant upfront context envelope.
-If you want, the next step can be very concrete: I can map this schema against the current buildAgentContext() field-by-field and show exactly what stays, what shrinks, and what moves to the backend.
+The PCoA path is now wired end to end.
+What changed:
+Added backend route: [server_app.py](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/server_app.py)POST /compute/pcoa
+rebuilds the selected-node count matrix on the backend
+calls build_count_matrix_pcoa_spec(...)
+
+Added UI controls: [index.html](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/index.html)PCoA button
+metric selector with:Jaccard
+Bray-Curtis
+Log-chord
+Chao
+
+
+Wired popup rendering: [graphengine.js](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine.js)fetches POST /compute/pcoa
+opens a Plotly scatter popup
+labels axes with explained variance
+shows correction status in the plot header
+hides PCoA when count view is Direct + Cumulative
+hides PCoA controls for rank reports and plain top-table mode
+
+Updated progress tracker: [todo.txt](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/unicorn_compute/todo.txt)
+Checks I ran:
+Python import check for [pcoa.py](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/unicorn_compute/pcoa.py)
+py_compile on [server_app.py](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/server_app.py)
+JS parse check on [graphengine.js](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine.js)
+What to do before trying it:
+Restart the backend server so POST /compute/pcoa is live.
+Hard refresh the app so the new PCoA button and metric selector appear.
+Open a count matrix, choose Direct or Cumulative, pick a metric, and click PCoA.
+If you want, next we can tune the popup aesthetics or add sample-group overlays once you’ve had a first spin.

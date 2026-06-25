@@ -1,0 +1,152 @@
+Unicorn Graph Engine TODO
+
+Current status
+- Graphengine now has one intended operating model: backend-required mode.
+- If a user is working on one machine, they should run the backend locally and
+  connect the UI to `localhost`.
+- Remote tree rendering is server-authoritative.
+- Backend owns dataset loading, taxonomy loading, visible tree slicing, tooltip data, table data, and subtree reports.
+- Client renders tree, requests visible slices from the backend, and now supports:
+  - delayed tooltips
+  - drag-to-pan
+  - root/expand interaction
+  - server-backed tooltip
+  - server-backed top table
+  - subtree report
+  - subtree matrix export
+  - linear/log minimum subtree read slider
+- Agent panel exists in the UI and already supports:
+  - client-side transcript/history
+  - provider/model configuration controls
+  - constrained Unicorn-native tools
+  - client-side provider turn loop
+  - mock provider runtime for agentic prototyping
+
+API and semantics
+- Keep the backend as the source of truth for all graphengine operation.
+- Do not preserve a separate local dataset/tree/report execution path.
+- Preserve the current visible-tree semantics:
+  - root is always returned
+  - visible nodes are those that survive filters and lie on the expanded frontier
+  - `child_count` is filtered child count, not raw taxonomy child count
+  - collapsed nodes still carry subtree totals
+- Keep dataset/taxonomy changes invalidating expanded state.
+- Keep `min_reads` preserving the expansion request while allowing the backend to prune branches.
+
+Near-term next steps
+1. Finish the backend-only cleanup.
+Current state:
+- the codebase still contains local-vs-remote branching
+- the intended product direction is now one backend-required path
+Why:
+- this removes the biggest source of semantic drift before more agent work
+
+2. Finish the first real provider-backed agent path.
+Current state:
+- the UI contract and client-side turn loop are already implemented
+- the remaining gap is replacing mock runtime with one real provider adapter
+Why:
+- this is the most important next milestone for the new agentic flow
+
+3. Selected-node matrix views by rank.
+Current direction:
+- from one or more selected nodes, build a count matrix of directly assigned reads collapsed by rank
+- keep this as a report type alongside subtree report
+Why:
+- this is especially relevant for the wheat simulation because it can show where optimal-alignment filtering pushes reads deeper in the taxonomy
+
+4. Add subtree report variants.
+Ideas:
+- rank-collapsed subtree report
+- compare two selected subtree reports
+- optional toggle between direct counts and subtree counts
+- optional export of per-dataset summary as TSV
+
+5. Improve selection-driven analysis.
+Ideas:
+- count matrix for a selected set of nodes
+- union/intersection style reporting across selected nodes
+- selected-clade summary table
+- ability to treat selected nodes as a reporting scope for `/table-view`
+
+6. Add backend analysis endpoints that call into libunicorn.
+Goal:
+- expose metagenomic engine functions directly from the backend
+- let the graph engine ask for analyses instead of only displaying precomputed `.bdamage` files
+Possible directions:
+- run filtering/reporting functions from libunicorn on selected datasets
+- compare alternative alignment-score or filtering strategies
+- compute rank-collapsed or taxon-focused summaries backend-side
+
+7. Improve backend-scale behavior before caching.
+Observed:
+- interaction is smooth now, but uncollapsing to tips and large visible slices introduce some lag
+- this is acceptable for now, but likely matters at larger scale
+Tasks:
+- measure expand latency
+- measure subtree-report latency
+- measure payload sizes for root view, expanded view, tooltip, table, and subtree report
+- identify which calls dominate as dataset count grows
+
+Caching and performance
+Do not implement yet unless a real bottleneck is identified by measurement.
+When ready, cache:
+- visible tree by selected files + taxonomy files + expanded set + `min_reads`
+- tooltip by taxid + same context
+- table by scope + taxid + same context
+- subtree report by taxid + same context
+
+Potential performance upgrades after measurement
+- prefetch likely next expansions
+- prefetch tooltip payloads for visible nodes near the cursor path
+- prefetch subtree report for the currently selected node
+- delta transport for visible tree updates
+- avoid fetching `/tree-model` for remote `Uncollapse Tips`
+
+UI improvements
+1. Make report/table views and agent traces feel more analysis-oriented.
+Ideas:
+- tabs for top placements / subtree report / selected-node matrix
+- clearer active-view labeling
+- keep subtree report visible while filters update
+- show more explicit evidence/tool traces for agent answers
+
+2. Improve slider ergonomics.
+Ideas:
+- presets for max range
+- auto-fit max range to total reads with optional manual override
+- display current filter threshold more prominently
+
+3. Improve report export workflow.
+Ideas:
+- export per-dataset summary
+- export rank-collapsed matrices
+- export selected-node matrices
+
+Backend robustness
+1. Session/lifecycle policy
+- decide whether the backend stays global, per-user, or explicit-session based
+- decide how agent conversation state should relate to graph session state
+
+2. Error conventions
+- keep structured `code` + `message`
+- extend consistently to future analysis endpoints and future provider failures
+
+3. Large-scale data model
+Ultimate target:
+- support millions of `.bdamage` files
+Questions to answer later:
+- what stays in memory
+- what gets indexed on disk
+- what aggregation can be streamed
+- what query patterns deserve materialized summaries
+
+Recommended next implementation order
+1. Finish backend-only cleanup
+2. Ship one real provider-backed agent path
+3. Finish and refine selected-node direct-read count matrix by rank
+4. Rank-collapsed subtree report
+5. Selected-node analysis endpoints
+6. libunicorn-backed backend analysis hooks
+7. Performance instrumentation
+8. Cache only after the real hot paths are clear

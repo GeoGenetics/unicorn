@@ -1,0 +1,161 @@
+migration target
+
+This document shows what needs to be done in order to migrate compute tasks to a separate execution space/abstraction
+
+Current progress
+
+- barplot compute input/output schema now exists in `barplot.schema.txt`
+- first compute module now exists in `barplot.py`
+- first backend endpoint now exists as `POST /compute/barplot`
+- selected-node count-matrix report assembly is now shared backend logic rather
+  than being duplicated only inside `/subtree-report`
+- frontend barplot popup now requests backend-computed plot specs instead of
+  building traces locally
+- first PCoA compute contract now exists in `pcoa.schema.txt`
+
+1. Boundry freeze
+
+Goal:
+unicorn_compute prepares plot-ready analytical payloads
+graphengine.js only handles UI events, popup lifecycle, and Plotly rendering
+
+Rule of thumb:
+if logic transforms report data into plotting coordinates/traces, it belongs in unicorn_compute
+if logic opens windows, injects Plotly, or updates DOM, it stays in frontend JS
+
+2. Define the first compute contract around count-matrix barplots
+Status: initial schema drafted and implemented
+
+Task - count matrix barplot
+
+Input:
+  count matrix report payload
+  selected count mode: direct, cumulative
+  dataset color map
+  optional plot settings later
+Output:
+  plot-ready spec, not raw report data munging
+
+Suggested output shape:
+{
+  "plot_type": "barplot",
+  "count_mode": "direct",
+  "title": "Selected-node direct counts",
+  "x": ["Triticum (4565)", "Aegilops (4480)"],
+  "traces": [
+    {
+      "name": "sample1",
+      "color": "#c85f43",
+      "y": [123, 456]
+    }
+  ]
+}
+
+3. Create a first compute module just for matrix-to-plot transforms
+Status: first implementation done in `barplot.py`
+  Inside src/libunicorn/graphengine/unicorn_compute, start with something narrow like: barplot.py
+Responsibilities:
+  validate the count matrix payload
+  normalize direct vs cumulative
+  build labels for selected nodes
+  assemble one series per dataset
+  return a clean plot spec
+  Do not put Plotly code here yet.
+
+4. Decide how frontend calls compute
+For V1, I recommend:
+  backend endpoint calls Python compute
+  frontend requests plot spec from backend
+  frontend renders returned spec with Plotly
+
+Why:
+  keeps Python compute real from day one
+  avoids duplicating transform logic in JS
+  makes PCoA later much easier, since that definitely belongs in compute/backend
+
+5. Add a dedicated backend compute endpoint
+Example direction:
+  GET /compute/barplot
+  or
+  POST /compute/barplot
+Current status:
+  first implementation uses POST /compute/barplot
+  I’d lean POST if the payload is the full report shape.
+  I’d lean GET if it rebuilds from selected taxids + current request context.
+  Better long-term choice:
+  backend recomputes from current session/request context
+  not from frontend-sent report blobs
+  That keeps backend authoritative.
+
+6. Keep current frontend implementation briefly as fallback
+Current status:
+  popup rendering still lives in `graphengine.js`
+  plot-spec assembly no longer does
+
+7. Define reusable compute conventions now
+  So PCoA becomes easy later, standardize:
+  input validation
+  output schema version
+  count mode handling
+  node label normalization
+  dataset ordering
+  color passthrough vs color assignment
+Suggested convention:
+{
+  "compute_version": "v1",
+  "plot_type": "barplot",
+  "count_mode": "cumulative",
+  "data": { ... }
+}
+
+8. Barplot-specific implementation order
+  Create unicorn_compute/barplot.py
+  Move matrix-to-trace transformation there
+  Add backend endpoint returning plot spec
+  Update graphengine.js popup to consume backend plot spec
+  Remove JS trace-building logic
+Status:
+  all listed barplot migration steps are now complete
+
+9. Make PCoA the next addon
+  Once barplot migration works, PCoA becomes much cleaner:
+  new module:unicorn_compute/pcoa.py
+Status:
+  first schema drafted in `pcoa.schema.txt`
+  first compute module now exists in `pcoa.py`
+  current metric coverage:
+    Jaccard
+    Bray-Curtis
+    Log-chord
+    Chao - TODO refine against a reference package or paper
+  Lingoes/Cailliez correction logic now exists in compute
+  backend endpoint now exists as `POST /compute/pcoa`
+  frontend popup path now requests backend-computed PCoA specs
+
+  same backend compute pattern
+  same frontend popup/render pattern
+  likely Plotly scatter instead of bar
+
+So we reuse:
+  compute endpoint structure
+  plot spec transport
+  popup rendering shell
+  dataset color conventions
+  selected-node count matrix as compute input
+
+Initial V1 metric set:
+  Jaccard
+  Bray-Curtis
+  Log-Cord
+  Chao
+
+10. Suggested target architecture
+  unicorn_compute/barplot.py
+  later pcoa.py
+  later shared helpers like matrix_utils.py
+
+server_app.python route layer
+calls compute modules
+
+graphengine.js asks backend for plot spec
+renders Plotly popup

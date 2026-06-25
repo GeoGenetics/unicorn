@@ -270,6 +270,13 @@
       <section id="tablePanel" class="table-panel hidden" aria-label="Top LCA placements" hidden>
         <div class="table-panel-head">
           <h2 id="tablePanelTitle">Top direct placements</h2>
+          <select id="pcoaMetric" class="secondary compact-btn" hidden>
+            <option value="jaccard">PCoA: Jaccard</option>
+            <option value="bray_curtis">PCoA: Bray-Curtis</option>
+            <option value="log_chord">PCoA: Log-chord</option>
+            <option value="chao">PCoA: Chao</option>
+          </select>
+          <button id="pcoaBtn" class="secondary compact-btn" type="button" hidden>PCoA</button>
           <button id="barplotBtn" class="secondary compact-btn" type="button" hidden>Barplot</button>
           <button id="exportMatrixBtn" class="secondary compact-btn" type="button" hidden>Export Matrix</button>
         </div>

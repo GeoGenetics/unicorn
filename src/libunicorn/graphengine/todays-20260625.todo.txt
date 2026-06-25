@@ -1,0 +1,183 @@
+.ROBOT.NO.EDIT
+DONE 1. Freeze local VS remote modes
+    Define the new invariant: graphengine always requires a backend connection.
+    Remove local dataset/tree/report code paths from the agent tool layer.
+    Remove local render/build fallbacks from the main graph runtime.
+    Simplify UI copy so it always speaks in backend terms.
+    Do one pass for dead state and dead helpers.
+DONE 2. Add a provider-facing normalization layer so get_node_details and get_table_view return one stable schema in both local and remote modes.
+DONE 3. Add get_subtree_report to the live registry and wire it through the current turn loop.
+DONE 4. Audit provider_turn_contract.txt against the current tool/result shapes before we wire in the first real provider.
+IN_PROGRESS 5. Start wiring the first real provider adapter against this now-stable read-only contract
+	  DONE 1. Define V1 scope boundaries
+	  - Wire one real provider only.
+	  - Keep the existing Unicorn tool loop as the authority.
+	  - Limit V1 to the current read-only tool contract.
+	  - Keep all state-mutating tools either disabled or explicitly unsupported for the first real provider pass.
+
+	  DONE 2. Choose the first provider target
+	  - Decide which provider goes first.
+	  - Lock the exact API style we will support first:
+	    - plain chat/completions style with Unicorn-managed tool loop
+	    - or native tool-calling style if we want to map into Unicorn’s internal contract
+	  - My recommendation: start with a plain text/JSON response contract and let Unicorn keep full control of the tool loop.
+
+	  DONE 3. Define the adapter module boundary
+	  - Introduce a dedicated provider adapter module/interface.
+	  - Keep `graphengine.js` responsible for:
+	    - context building
+	    - tool execution
+	    - transcript/logging
+	    - turn loop state
+	  - Keep the provider adapter responsible only for:
+	    - request transport
+	    - provider-specific payload mapping
+	    - parsing provider response into Unicorn’s internal response shape
+
+	  DONE 4. Freeze the Unicorn-internal provider interface
+	  - Standardize the adapter entry point:
+	    - input: provider request payload from Unicorn
+	    - output: one of `assistant_message`, `tool_call`, `final_answer`, `error`
+	  - Document this as the only shape `executeAgentProviderTurn()` consumes.
+
+	  DONE 5. Add provider configuration state for real execution
+	  - Decide what config is truly needed for V1:
+	    - provider name
+	    - model
+	    - API key
+	    - optional base URL
+	  - Separate:
+	    - configured provider target
+	    - active runtime adapter
+	  - Remove the current ambiguity where UI config can say one thing while mock is still running underneath.
+
+	  6. Implement transport plumbing
+	  - Add the actual HTTP request path for the first provider.
+	  - Decide whether transport lives:
+	    - directly in browser runtime, or
+	    - behind Unicorn backend proxy
+	  - Since you want backend-as-truth, my recommendation is to strongly prefer a backend proxy soon, but for the
+		  first integration pass we can still wire browser-side if that keeps momentum high.
+
+	  7. Build provider request mapping
+	  - Convert Unicorn’s provider request payload into the provider’s native API request.
+	  - Map:
+	    - `system_prompt`
+	    - `user_prompt`
+	    - optional conversation
+	    - tool descriptions
+	    - tool results
+	  - Decide how normalized read-only tool results are rendered back into provider-visible context.
+
+	  8. Build provider response parsing
+	  - Parse provider output back into Unicorn’s four allowed response types:
+	    - `assistant_message`
+	    - `tool_call`
+	    - `final_answer`
+	    - `error`
+	  - Be strict here.
+	  - Reject malformed payloads early and surface clean errors.
+
+	  9. Decide the tool-call encoding strategy
+	  - Choose one of these:
+	    - provider emits strict JSON matching Unicorn contract
+	    - provider native tool call gets mapped into Unicorn `tool_call`
+	  - My recommendation: support one canonical Unicorn `tool_call` parser first, then add native provider tool-calling later if needed.
+
+	  10. Harden argument validation
+	  - Right now `input_schema` is still empty.
+	  - Before real provider use, define minimal schemas at least for read-only tools:
+	    - `get_node_details.taxid`
+	    - `get_table_view.scope`
+	    - `get_table_view.taxid`
+	    - `get_table_view.sort`
+	    - `get_table_view.limit`
+	  - This can stay lightweight, but it should stop malformed provider calls cleanly.
+
+	  11. Tighten transcript vs debug logging
+	  - Move raw provider payloads and raw tool JSON out of the human transcript by default.
+	  - Keep them in client log / debug log.
+	  - Transcript should mainly show:
+	    - user prompt
+	    - assistant answer
+	    - tool badges
+	    - short note/caveat
+
+	  12. Add explicit provider error taxonomy
+	  - Normalize common failures into stable Unicorn errors:
+	    - auth failure
+	    - rate limit
+	    - network failure
+	    - invalid provider response
+	    - invalid tool call
+	    - max iterations exceeded
+	  - Make sure each has:
+	    - user-facing message
+	    - debug-facing detail
+
+	  13. Add a provider capability guard
+	  - Gate the first real provider to read-only tools only.
+	  - If the provider tries `select_taxon`, `focus_taxon`, or `center_root`, either:
+	    - reject clearly, or
+	    - omit those tools from the advertised registry for V1
+
+	  14. Create deterministic smoke tests
+	  - Test these flows end to end:
+	    - no backend connected
+	    - backend connected but no tree loaded
+	    - ask for selected nodes
+	    - ask for datasets
+	    - ask for node details by taxid
+	    - ask for top table rows
+	    - malformed tool call
+	    - provider returns invalid JSON / invalid shape
+	    - iteration overflow
+	  - Even if these are manual first, define the cases now.
+
+	  15. Add a provider debug mode
+	  - Keep a way to inspect:
+	    - outgoing provider payload
+	    - raw provider response
+	    - parsed Unicorn response
+	  - This will save a lot of time during first integration.
+
+	  16. Roll out behind an explicit switch
+	  - Keep mock provider intact.
+	  - Add a clear toggle so we can compare:
+	    - mock adapter
+	    - real provider adapter
+	  - This makes debugging much safer.
+
+	  17. Update docs immediately with first live behavior
+	  - As soon as the first real provider is wired:
+	    - update `provider_turn_contract.txt`
+	    - update `graphengine_agent_registry.txt` if tool exposure changes
+	    - add a short provider integration note in the graphengine docs
+
+	  18. Do a post-wire audit pass
+	  - Verify:
+	    - actual provider payload matches contract
+	    - tool results remain normalized
+	    - transcript UX is acceptable
+	    - no local-only assumptions leaked back in
+
+	  **Recommended execution order**
+	  1. Freeze V1 scope and first provider target
+	  2. Freeze adapter interface
+	  3. Add real provider config/runtime separation
+	  4. Implement request mapping
+	  5. Implement response parsing
+	  6. Add minimal tool schemas and validation
+	  7. Restrict V1 to read-only tools
+	  8. Tighten transcript/debug split
+	  9. Run smoke tests
+	  10. Update docs
+
+**My recommendation for the very first cut**
+- One provider
+- Read-only tools only
+- Unicorn-managed tool loop
+- Strict JSON response parsing
+- Mock adapter kept side-by-side for comparison
+
+If you want, next I can turn this into a tighter “implementation sequence” version that is easier to paste directly into your todo file as short action bullets.
