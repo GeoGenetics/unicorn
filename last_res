@@ -1,24 +1,11 @@
-Yes, 30k tokens is plausible.
-Why it makes sense:
-Gemini counts all input and output tokens, not just the short user prompt. Google’s docs say usage includes input, output, thinking, cached, and tool-use tokens, and that system instructions count as input too. Source: https://ai.google.dev/gemini-api/docs/tokens
-In our current design, each provider turn sends a large payload:system_prompt
-full graph_context
-full tool definitions
-conversation history
-tool results
-
-We also did multi-turn loops. Google documents that multi-turn usage can include prior context, so later turns can be more expensive than they look. Source: https://ai.google.dev/gemini-api/docs/tokens
-Your logs showed repeated tool calls and retries, which multiply the cost fast.
-So even a tiny prompt like Tell me about node 1648030 can burn a surprising number of tokens if the request envelope is large.
-Rough intuition:
-30k tokens is only about 120k characters of effective counted context
-a few repeated turns with big JSON context can absolutely get there
-The biggest contributors in our setup are probably:
-full graph context every turn
-full transcript every turn
-full tool result payloads every turn
-repeated provider iterations
-Good news:
-the fixes we already made should reduce this
-the next big optimization would be trimming the provider payload, especially graph_context and repeated history/tool-result content
-If you want, next I can make a focused token-reduction pass on the provider payload so Gemini usage drops sharply without changing behavior much.
+I added the detailed schema plan in [compact_provider_context.schema.txt](/Users/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/unicorn_agent/compact_provider_context.schema.txt).
+It covers:
+why the compact context exists
+the backend-first assembly mechanism
+the exact proposed top-level schema
+which fields belong in session, datasets, taxonomy, filters, tree, selection, table, report, and capabilities
+which large-context fields should be removed
+token-budget and truncation strategy
+implementation order and validation prompts
+The core idea in the doc is: the provider should receive a small backend-owned grounding snapshot, and use Unicorn tools for detail instead of getting a giant upfront context envelope.
+If you want, the next step can be very concrete: I can map this schema against the current buildAgentContext() field-by-field and show exactly what stays, what shrinks, and what moves to the backend.
