@@ -10,7 +10,7 @@
     <header class="topbar">
       <div>
         <h1>Unicorn LCA Graph Engine</h1>
-        <p class="subtitle">Taxonomic placement tree from LCA counts and NCBI taxonomy nodes.</p>
+        <p class="subtitle">Backend-authoritative taxonomic placement tree from LCA counts and NCBI taxonomy nodes.</p>
       </div>
       <div class="topbar-actions">
         <button id="renderBtn" class="primary">Render Tree</button>
@@ -22,13 +22,13 @@
     <main id="app" class="app">
       <aside id="sidebar" class="sidebar" aria-label="Input controls">
         <section id="controls" class="controls" aria-label="Input controls">
-          <section class="panel-section" aria-label="Remote server section">
+          <section class="panel-section" aria-label="Backend server section">
             <div class="panel-section-head">
-              <h2>Remote Server</h2>
+              <h2>Backend Server</h2>
               <button id="toggleRemoteSection" class="secondary compact-btn section-toggle" type="button" aria-expanded="true">Hide</button>
             </div>
             <div id="remoteSectionBody" class="panel-section-body">
-              <section class="remote-panel" aria-label="Remote server connection">
+              <section class="remote-panel" aria-label="Backend server connection">
                 <label>
                   <span>Username</span>
                   <input id="remoteUser" type="text" placeholder="youruser" autocomplete="username">
@@ -47,10 +47,10 @@
                   </div>
                   <pre id="tunnelCommand" class="tunnel-command">ssh -L 8000:localhost:8000 youruser@remote-server</pre>
                 </div>
-                <small id="tunnelHint" class="hint">Open the SSH tunnel, afterwards start unicorn's graph engine server app (python unicorn/src/libunicorn/graphengine/server_app.py), then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.</small>
-                <section id="remoteDatasetsPanel" class="remote-datasets" aria-label="Remote datasets" hidden>
+                <small id="tunnelHint" class="hint">Start the graphengine backend and connect this UI to it. If the backend runs on another machine, open the SSH tunnel first, then use <strong>Test Tunnel</strong> to verify the backend HTTP endpoint.</small>
+                <section id="remoteDatasetsPanel" class="remote-datasets" aria-label="Backend datasets" hidden>
                   <div class="remote-datasets-head">
-                    <h3>Remote Datasets</h3>
+                    <h3>Backend Datasets</h3>
                     <button id="remoteRefreshBtn" class="secondary compact-btn" type="button">Refresh</button>
                   </div>
                   <div class="remote-dataset-actions">
@@ -178,7 +178,7 @@
             <div id="agentSectionBody" class="panel-section-body">
               <div class="agent-shell">
                 <div class="agent-shell-head">
-                  <div id="agentMeta" class="agent-meta">Mock mode. Client-side only.</div>
+                  <div id="agentMeta" class="agent-meta">Backend-backed agent panel. Render a tree to begin.</div>
                   <button id="agentClearBtn" class="secondary compact-btn" type="button">Clear</button>
                 </div>
                 <div class="agent-config">
@@ -211,7 +211,7 @@
                   <button id="agentSendBtn" class="primary" type="button">Send</button>
                 </div>
                 <div id="agentTranscript" class="agent-transcript" aria-live="polite">
-                  <div class="agent-empty">Mock agent replies will appear here.</div>
+                  <div class="agent-empty">Render a backend-backed tree, then agent replies will appear here.</div>
                 </div>
               </div>
             </div>
@@ -245,7 +245,7 @@
       </section>
 
       <section class="workspace">
-        <div id="status" class="status">Load an LCA output file and nodes.dmp to begin.</div>
+        <div id="status" class="status">Connect to the graphengine backend, upload or select datasets, and render a tree to begin.</div>
         <div id="chartWrap" class="chart-wrap">
           <svg id="treeSvg" role="img" aria-label="Taxonomic LCA tree"></svg>
           <div id="tooltip" class="tooltip" hidden></div>

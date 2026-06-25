@@ -1,0 +1,669 @@
+Unicorn Compact Provider Context Schema
+=======================================
+
+Purpose
+-------
+
+This document defines the compact backend-authoritative context snapshot that
+Unicorn should send to model providers instead of the current larger
+frontend-built `graph_context` envelope.
+
+The goal is not just "fewer fields".
+
+The goal is:
+
+1. send only the smallest useful grounding snapshot for the current Unicorn
+   analysis state
+2. ensure that snapshot is assembled from backend-owned truth
+3. push detailed inspection into Unicorn-native tool calls rather than the
+   initial provider prompt
+
+
+Why this exists
+---------------
+
+The current prototype request payload still sends a relatively large provider
+context containing:
+
+- browser-assembled graph context
+- duplicated backend-derived values
+- UI-adjacent state that is not always provider-relevant
+- data that the provider does not need unless it explicitly asks for it via a
+  tool call
+
+This costs tokens every turn.
+
+It also creates architectural drift:
+
+- the browser ends up acting like the canonical context assembler
+- the provider sees a verbose mixed-origin envelope
+- detailed data is pushed proactively instead of requested on demand
+
+
+Design principle
+----------------
+
+The provider should receive:
+
+- a compact snapshot of the current backend-backed Unicorn session
+- enough state to answer simple questions directly
+- enough state to decide which Unicorn tool to call next
+
+The provider should not receive:
+
+- full tree payloads
+- full report payloads
+- duplicated client/UI state
+- frontend-derived summaries that the backend already owns
+- large repeated arrays unless they are essential to reasoning
+
+
+Target architecture
+-------------------
+
+The compact context should be assembled by the backend, not by the browser.
+
+Preferred flow:
+
+1. browser sends:
+   - prompt
+   - provider selection/runtime config
+   - minimal UI-only state that the backend does not already own
+2. backend builds compact provider context from active backend request context
+   and active backend analysis state
+3. backend sends that compact snapshot to the provider
+4. provider requests more detail only through Unicorn tools
+
+During transition, the browser may still call a local helper to preview this
+shape, but the schema itself is defined as backend-owned.
+
+
+Context assembly invariant
+--------------------------
+
+Every field in the compact provider context should fall into exactly one of
+these categories:
+
+1. backend-owned active analysis context
+2. backend-owned active tree/report summary
+3. transient UI state that is necessary for interpretation
+
+If a field does not fit one of those categories, it should not be in the
+compact provider context.
+
+
+Top-level shape
+---------------
+
+Proposed top-level object:
+
+```json
+{
+  "captured_at": "2026-06-24T12:34:56.000Z",
+  "context_version": "v1-compact",
+  "session": {},
+  "datasets": {},
+  "taxonomy": {},
+  "filters": {},
+  "tree": {},
+  "selection": {},
+  "table": {},
+  "report": {},
+  "capabilities": {}
+}
+```
+
+Field-by-field intent is described below.
+
+
+Section 1. Session
+------------------
+
+Purpose:
+
+- identify the active Unicorn runtime mode
+- make backend authority explicit
+- allow later schema evolution
+
+Shape:
+
+```json
+"session": {
+  "mode": "backend",
+  "backend_connected": true,
+  "backend_tree_ready": true,
+  "transport": "backend-authoritative"
+}
+```
+
+Rules:
+
+- `mode` should always be `backend`
+- `backend_connected` is a coarse readiness bit
+- `backend_tree_ready` means a backend-backed tree is currently active
+- no provider runtime/auth data belongs here
+
+Do not include:
+
+- provider name
+- provider model
+- UI panel state
+
+
+Section 2. Datasets
+-------------------
+
+Purpose:
+
+- tell the provider what active data scope it is reasoning about
+- provide only compact aggregate facts
+
+Shape:
+
+```json
+"datasets": {
+  "selected_names": [
+    "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+    "Lib_sim1_collapsed.bdamage.txt"
+  ],
+  "selected_count": 2,
+  "total_reads": 79234328,
+  "direct_taxa": 1630
+}
+```
+
+Rules:
+
+- all dataset names should come from backend `request_context.dataset_names`
+- `selected_count` should be derived from that backend list
+- `total_reads` should come from backend tree/selection payloads
+- `direct_taxa` should come from backend tree/selection payloads
+
+Do not include:
+
+- full dataset file metadata
+- bytes
+- modification timestamps
+- per-dataset counts
+
+If the provider needs per-dataset detail, it should use a Unicorn tool such as
+`get_table_view`, `get_node_details`, or a future dedicated dataset/report
+tool.
+
+
+Section 3. Taxonomy
+-------------------
+
+Purpose:
+
+- make active taxonomy provenance explicit
+
+Shape:
+
+```json
+"taxonomy": {
+  "nodes_file": "nodes.dmp",
+  "names_file": "names.dmp"
+}
+```
+
+Rules:
+
+- filenames must come from backend `request_context`
+- this is only active taxonomy identity, not taxonomy metadata
+
+Do not include:
+
+- node count
+- name count
+- taxonomy cache internals
+
+
+Section 4. Filters
+------------------
+
+Purpose:
+
+- tell the provider what filters shape the current backend view
+
+Shape:
+
+```json
+"filters": {
+  "min_reads": 1000,
+  "count_mode": "total",
+  "scale_mode": "sqrt",
+  "search": ""
+}
+```
+
+Rules:
+
+- `min_reads` must come from backend `request_context.min_reads`
+- `count_mode`, `scale_mode`, and `search` are UI interpretation settings and
+  may still come from the browser
+- only include these because they affect how a human is seeing the graph
+
+Important distinction:
+
+- `min_reads` affects backend tree/report scope and is therefore analysis state
+- `count_mode` and `scale_mode` affect rendering interpretation and are
+  currently UI state
+
+
+Section 5. Tree
+---------------
+
+Purpose:
+
+- give the provider a compact summary of the current backend-backed tree view
+
+Shape:
+
+```json
+"tree": {
+  "visible_root": {
+    "taxid": 1,
+    "name": "root",
+    "rank": "no rank",
+    "direct": 2442,
+    "subtree": 79234328,
+    "child_count": 1
+  },
+  "visible_node_count": 50,
+  "expanded_taxids": [2759, 33090, 35493],
+  "focused_taxid": 33090,
+  "focused_name": "Viridiplantae"
+}
+```
+
+Rules:
+
+- `visible_root` should come from the active backend tree payload already
+  normalized into the frontend render model
+- `visible_node_count` can remain frontend-derived because it is a render-view
+  count, not an analysis summary the backend currently returns directly
+- `expanded_taxids` must come from backend `request_context.expanded_taxids`
+- `focused_taxid` and `focused_name` are allowed UI state because graph focus
+  is currently client-side interaction state
+
+Keep:
+
+- one root summary
+- one visible node count
+- effective expanded taxids
+
+Do not include:
+
+- the full visible tree
+- child lists
+- lineage arrays
+- per-node breakdowns
+
+If the provider needs more, it should use tools.
+
+
+Section 6. Selection
+--------------------
+
+Purpose:
+
+- tell the provider what the human currently has selected
+
+Shape:
+
+```json
+"selection": {
+  "selected_taxids": [33090, 4565],
+  "selected_count": 2,
+  "selected_preview": [
+    {
+      "taxid": 33090,
+      "name": "Viridiplantae",
+      "rank": "kingdom"
+    },
+    {
+      "taxid": 4565,
+      "name": "Triticum",
+      "rank": "genus"
+    }
+  ]
+}
+```
+
+Rules:
+
+- `selected_taxids` may come from current client-side selected node state
+- `selected_preview` should be capped
+- suggested cap: at most 5 nodes
+- preview entries should be short summaries only
+
+Rationale:
+
+- selection is a UI-owned state that strongly affects user intent
+- the provider often needs to know what the human is pointing at
+
+Do not include:
+
+- deep node detail
+- subtree counts for every selected node
+
+That belongs in `get_selected_nodes` or `get_node_details`.
+
+
+Section 7. Table
+----------------
+
+Purpose:
+
+- summarize the active backend-normalized top-table scope without sending rows
+
+Shape:
+
+```json
+"table": {
+  "scope": "root",
+  "target": {
+    "taxid": 1,
+    "name": "root",
+    "rank": "no rank"
+  },
+  "sort": "direct",
+  "limit": 40,
+  "row_count": 40
+}
+```
+
+Rules:
+
+- this should be included only if a backend table scope is active or known
+- values should come from backend table payloads where possible
+- this is a scope summary, not table content
+
+Do not include:
+
+- full row arrays
+- top-N row detail unless deliberately added as a tiny preview
+
+Optional future addition:
+
+- `top_row_preview`
+  - one to three rows max
+  - only if direct-answer quality clearly improves enough to justify the tokens
+
+
+Section 8. Report
+-----------------
+
+Purpose:
+
+- describe the currently active backend report scope compactly
+
+Shape for subtree report:
+
+```json
+"report": {
+  "type": "subtree",
+  "target": {
+    "taxid": 4565,
+    "name": "Triticum",
+    "rank": "genus"
+  },
+  "summary": {
+    "child_count": 12,
+    "matrix_row_count": 10,
+    "dataset_count": 2
+  }
+}
+```
+
+Shape for rank report:
+
+```json
+"report": {
+  "type": "rank",
+  "summary": {
+    "selected_taxids": [33090, 4565],
+    "selected_node_count": 2,
+    "total_direct": 10432,
+    "rank_count": 6,
+    "dataset_count": 2
+  }
+}
+```
+
+Rules:
+
+- include report block only when a report is active
+- all report facts should come from backend report payloads
+- report block should summarize scope and size, not embed matrices
+
+Do not include:
+
+- full matrix payloads
+- per-rank rows
+- per-dataset tables
+
+Those remain tool-driven or UI-rendered data.
+
+
+Section 9. Capabilities
+-----------------------
+
+Purpose:
+
+- optionally remind the provider what category of grounding/actions exist
+- keep this compact and stable
+
+Shape:
+
+```json
+"capabilities": {
+  "tool_contract": "v1-read-only",
+  "can_query_graph": true,
+  "can_query_table": true,
+  "can_query_reports": false
+}
+```
+
+Rules:
+
+- this is optional
+- if included, it should be short and static
+- avoid duplicating the actual tool list here
+
+
+Recommended full compact example
+--------------------------------
+
+```json
+{
+  "captured_at": "2026-06-24T18:12:44.000Z",
+  "context_version": "v1-compact",
+  "session": {
+    "mode": "backend",
+    "backend_connected": true,
+    "backend_tree_ready": true,
+    "transport": "backend-authoritative"
+  },
+  "datasets": {
+    "selected_names": [
+      "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "Lib_sim1_collapsed.bdamage.txt"
+    ],
+    "selected_count": 2,
+    "total_reads": 79234328,
+    "direct_taxa": 1630
+  },
+  "taxonomy": {
+    "nodes_file": "nodes.dmp",
+    "names_file": "names.dmp"
+  },
+  "filters": {
+    "min_reads": 1000,
+    "count_mode": "total",
+    "scale_mode": "sqrt",
+    "search": ""
+  },
+  "tree": {
+    "visible_root": {
+      "taxid": 1,
+      "name": "root",
+      "rank": "no rank",
+      "direct": 2442,
+      "subtree": 79234328,
+      "child_count": 1
+    },
+    "visible_node_count": 50,
+    "expanded_taxids": [2759, 33090, 35493],
+    "focused_taxid": null,
+    "focused_name": null
+  },
+  "selection": {
+    "selected_taxids": [33090],
+    "selected_count": 1,
+    "selected_preview": [
+      {
+        "taxid": 33090,
+        "name": "Viridiplantae",
+        "rank": "kingdom"
+      }
+    ]
+  },
+  "table": {
+    "scope": "root",
+    "target": {
+      "taxid": 1,
+      "name": "root",
+      "rank": "no rank"
+    },
+    "sort": "direct",
+    "limit": 40,
+    "row_count": 40
+  },
+  "report": null,
+  "capabilities": {
+    "tool_contract": "v1-read-only",
+    "can_query_graph": true,
+    "can_query_table": true,
+    "can_query_reports": false
+  }
+}
+```
+
+
+Fields that should be removed from the current large context
+------------------------------------------------------------
+
+The compact schema is explicitly meant to replace or shrink these categories:
+
+- duplicated backend block plus taxonomy block plus dataset block overlap
+- large conversation-independent frontend context wrappers
+- empty placeholders such as always-empty `collapsed_taxids`
+- anything equivalent to full visible-tree structure
+- report structures beyond minimal active report summary
+- large arrays unless capped and semantically necessary
+
+
+Token budget strategy
+---------------------
+
+Suggested token discipline for the compact context:
+
+1. full dataset name list is acceptable while small
+2. if dataset count grows large, include:
+   - first N names
+   - `selected_count`
+   - `dataset_names_truncated: true`
+3. selected node preview should be capped
+4. expanded taxids may need capping if expansion becomes large
+5. active report summary should stay scalar-heavy and matrix-light
+
+Suggested default caps:
+
+- dataset name preview: 12
+- selected node preview: 5
+- expanded taxids: 64
+
+If a cap is applied, add a boolean flag such as:
+
+- `selected_names_truncated`
+- `selected_preview_truncated`
+- `expanded_taxids_truncated`
+
+
+Assembly rules
+--------------
+
+Priority order for each field:
+
+1. active backend request context
+2. active backend payload summaries
+3. current frontend UI-only state, only when backend does not own the concept
+
+Examples:
+
+- dataset names:
+  - source: backend request context
+- taxonomy filenames:
+  - source: backend request context
+- min_reads:
+  - source: backend request context
+- expanded taxids:
+  - source: backend request context
+- total_reads:
+  - source: backend tree/selection payload summary
+- direct_taxa:
+  - source: backend tree/selection payload summary
+- visible node count:
+  - source: frontend render state
+- selected taxids:
+  - source: frontend selection state
+
+
+Implementation plan
+-------------------
+
+Suggested implementation sequence:
+
+1. Add a backend helper that builds `compact_provider_context`.
+2. Keep the current large `buildAgentContext()` temporarily for debugging.
+3. Add a second builder path:
+   - `buildCompactAgentContext()`
+   - or backend-side `build_compact_provider_context(...)`
+4. Log both shapes side-by-side during transition.
+5. Compare provider quality on representative prompts.
+6. Remove the larger context from provider payloads once the compact version is
+   validated.
+
+
+Validation questions
+--------------------
+
+Before fully switching, validate these prompt types:
+
+1. "What taxa show the most damage?"
+2. "What is currently selected?"
+3. "What datasets am I looking at?"
+4. "What subtree report is currently open?"
+5. "What filters are active right now?"
+
+Success criterion:
+
+- simple prompts should still work without tool calls when the compact snapshot
+  already contains enough information
+- deeper prompts should trigger Unicorn-native tool calls rather than bloating
+  the base provider context
+
+
+Non-goals
+---------
+
+This schema is not meant to:
+
+- replace Unicorn-native tools
+- encode full analysis payloads inline
+- capture every UI detail
+- become a second hidden tree serialization format
+
+It is a compact grounding snapshot, not a transport for full analysis data.

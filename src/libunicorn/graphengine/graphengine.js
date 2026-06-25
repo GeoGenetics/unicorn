@@ -1,7 +1,6 @@
 "use strict";
 
 const state = {
-  counts: new Map(),
   series: [],
   clientLog: [],
   agent: {
@@ -17,6 +16,7 @@ const state = {
     connected: false,
     datasets: [],
     selectedDatasets: new Set(),
+    requestContext: null,
     backendNodesFile: "",
     backendNamesFile: "",
     expandedTaxids: new Set(),
@@ -26,6 +26,7 @@ const state = {
     tooltipRequestId: 0,
     tableRequestId: 0,
     currentReport: null,
+    currentTable: null,
   },
   tree: null,
   flat: [],
@@ -192,9 +193,9 @@ els.remoteRefreshBtn.addEventListener("click", async () => {
   try {
     await refreshRemoteDatasets();
     const count = state.remote.datasets.length;
-    setStatus(`Remote dataset list refreshed. ${count.toLocaleString()} file${count === 1 ? "" : "s"} available on the backend.`);
+    setStatus(`Backend dataset list refreshed. ${count.toLocaleString()} file${count === 1 ? "" : "s"} available.`);
   } catch (error) {
-    setStatus(`Could not refresh remote datasets: ${error.message || error}`);
+    setStatus(`Could not refresh backend datasets: ${error.message || error}`);
   }
 });
 els.remoteSelectAllBtn.addEventListener("click", selectAllRemoteDatasets);
@@ -280,7 +281,7 @@ function initRemotePanel() {
   updateTunnelHint();
   updateConnectionState(false, "Not connected");
   renderRemoteDatasets();
-  updateRenderAvailability();
+  syncBackendRuntimeUiState();
   renderClientLog();
 }
 
@@ -367,7 +368,10 @@ async function handleMinReadsScaleChange() {
   syncMinReadsControl();
   if (hasBackendTree()) {
     try {
-      const payload = await fetchRemoteVisibleTree();
+      const payload = await fetchRemoteVisibleTree({
+        minReads: getMinReadsValue(),
+        expandedTaxids: Array.from(state.remote.expandedTaxids),
+      });
       applyRemoteVisiblePayload(payload);
       await refreshCurrentReportIfNeeded();
       redraw();
@@ -389,7 +393,10 @@ async function handleMinReadsMaxChange() {
   syncMinReadsControl();
   if (hasBackendTree()) {
     try {
-      const payload = await fetchRemoteVisibleTree();
+      const payload = await fetchRemoteVisibleTree({
+        minReads: getMinReadsValue(),
+        expandedTaxids: Array.from(state.remote.expandedTaxids),
+      });
       applyRemoteVisiblePayload(payload);
       await refreshCurrentReportIfNeeded();
       redraw();
@@ -687,12 +694,15 @@ function syncAgentRuntimeProvider() {
 
 function buildAgentContext() {
   const backendConnected = Boolean(state.remote.connected);
+  const activeRequestContext = getActiveBackendRequestContext();
   const backendTreeReady = Boolean(backendConnected && state.remote.serverTreeActive && state.tree);
-  const selectedDatasets = backendConnected
-    ? getSelectedRemoteDatasets()
-    : [];
-  const expandedTaxids = backendTreeReady
-    ? Array.from(state.remote.expandedTaxids)
+  const selectedDatasets = activeRequestContext?.dataset_names?.length
+    ? activeRequestContext.dataset_names.slice()
+    : backendConnected
+      ? getSelectedRemoteDatasets()
+      : [];
+  const expandedTaxids = activeRequestContext?.expanded_taxids?.length
+    ? activeRequestContext.expanded_taxids.slice()
     : [];
   const selectedTaxids = backendTreeReady ? Array.from(state.selected) : [];
   const focusNode = backendTreeReady && state.focusTaxid != null
@@ -726,7 +736,9 @@ function buildAgentContext() {
       names_file: getActiveNamesFilename(),
     },
     filters: {
-      min_reads: getMinReadsValue(),
+      min_reads: activeRequestContext && Number.isFinite(activeRequestContext.min_reads)
+        ? Number(activeRequestContext.min_reads)
+        : getMinReadsValue(),
       count_mode: String(els.countMode?.value || "total"),
       scale_mode: String(els.scaleMode?.value || "sqrt"),
       search: String(els.searchBox?.value || "").trim(),
@@ -747,8 +759,30 @@ function buildAgentContext() {
       connected: backendConnected,
       backend_nodes_file: state.remote.backendNodesFile || null,
       backend_names_file: state.remote.backendNamesFile || null,
+      request_context: activeRequestContext,
     },
   };
+}
+
+function getActiveBackendRequestContext() {
+  return normalizeProviderRequestContext(state.remote.requestContext);
+}
+
+function updateActiveBackendRequestContext(requestContext, options = {}) {
+  const normalized = normalizeProviderRequestContext(requestContext);
+  if (!normalized) return;
+  const preserveExpandedTaxids = options.preserveExpandedTaxids !== false;
+  const previous = getActiveBackendRequestContext();
+  if (preserveExpandedTaxids && previous && (!normalized.expanded_taxids || !normalized.expanded_taxids.length)) {
+    normalized.expanded_taxids = previous.expanded_taxids.slice();
+  }
+  state.remote.requestContext = normalized;
+  if (normalized.nodes_file) {
+    state.remote.backendNodesFile = normalized.nodes_file;
+  }
+  if (normalized.names_file || normalized.names_file === null) {
+    state.remote.backendNamesFile = normalized.names_file || "";
+  }
 }
 
 function summarizeCurrentAgentReport(reportState) {
@@ -761,9 +795,12 @@ function summarizeCurrentAgentReport(reportState) {
     };
   }
   if (reportState.type === "rank") {
+    const summary = reportState.report?.summary && typeof reportState.report.summary === "object"
+      ? reportState.report.summary
+      : {};
     return {
       type: "rank",
-      selected_taxids: Array.isArray(reportState.taxids) ? reportState.taxids.map((value) => Number(value)) : [],
+      selected_taxids: Array.isArray(summary.selected_taxids) ? summary.selected_taxids.map((value) => Number(value)) : [],
       rank_count: Array.isArray(reportState.report?.rows) ? reportState.report.rows.length : 0,
     };
   }
@@ -936,12 +973,16 @@ function requireAgentBackendTree() {
 }
 
 function getActiveNodesFilename() {
+  const requestContext = getActiveBackendRequestContext();
+  if (requestContext?.nodes_file) return requestContext.nodes_file;
   if (els.nodesFile?.files?.[0]) return els.nodesFile.files[0].name;
   if (state.remote.backendNodesFile) return state.remote.backendNodesFile;
   return null;
 }
 
 function getActiveNamesFilename() {
+  const requestContext = getActiveBackendRequestContext();
+  if (requestContext?.names_file) return requestContext.names_file;
   if (els.namesFile?.files?.[0]) return els.namesFile.files[0].name;
   if (state.remote.backendNamesFile) return state.remote.backendNamesFile;
   return null;
@@ -975,7 +1016,7 @@ function renderAgentTranscript() {
     ? `${entries.length.toLocaleString()} transcript entr${entries.length === 1 ? "y" : "ies"} · provider: ${providerLabel} · ${providerMode} mode · ${transportLabel}`
     : `Provider: ${providerLabel} · ${providerMode} mode · ${transportLabel}.`;
   if (!entries.length) {
-    els.agentTranscript.innerHTML = `<div class="agent-empty">Mock agent replies will appear here.</div>`;
+    els.agentTranscript.innerHTML = `<div class="agent-empty">Render a backend-backed tree, then agent replies will appear here.</div>`;
     return;
   }
   els.agentTranscript.innerHTML = entries.map((entry) => `
@@ -1531,7 +1572,7 @@ async function connectRemote() {
 
   if (!user || !host) {
     updateConnectionState(false, "Enter username and host");
-    setStatus("Enter a remote username and host, open the SSH tunnel, then test the connection.");
+    setStatus("Enter a backend username and host, open the SSH tunnel if needed, then test the connection.");
     return;
   }
 
@@ -1562,8 +1603,8 @@ async function connectRemote() {
       await refreshRemoteDatasets({ selectAll: true });
       setStatus(backendConnectionReadyMessage(user, host));
     } catch (error) {
-      addClientLog("error", "datasets", `Remote dataset refresh failed after tunnel check.`, errorToDetail(error));
-      setStatus(`Tunnel check succeeded for ${user}@${host}, but the remote dataset list could not be loaded yet. ${error.message || error}`);
+      addClientLog("error", "datasets", "Backend dataset refresh failed after tunnel check.", errorToDetail(error));
+      setStatus(`Tunnel check succeeded for ${user}@${host}, but the backend dataset list could not be loaded yet. ${error.message || error}`);
     }
   } catch (error) {
     updateConnectionState(false, "Tunnel check failed");
@@ -1572,7 +1613,7 @@ async function connectRemote() {
     updateRemoteServerStatus(null);
     renderRemoteDatasets();
     addClientLog("error", "tunnel", `Tunnel check failed for ${user}@${host}.`, errorToDetail(error));
-    setStatus(`Tunnel check failed for ${user}@${host}. Make sure the SSH tunnel is open and the remote HTTP server is running on port 8000.`);
+    setStatus(`Tunnel check failed for ${user}@${host}. Make sure the SSH tunnel is open if needed and the backend HTTP server is running on port 8000.`);
   }
 }
 
@@ -1581,12 +1622,13 @@ function updateTunnelHint() {
   const host = els.remoteHost.value.trim() || "remote-server";
   const command = `ssh -L 8000:localhost:8000 ${user}@${host}`;
   els.tunnelCommand.textContent = command;
-  els.tunnelHint.innerHTML = `Open the SSH tunnel, afterwards start unicorn's graph engine server app (python unicorn/src/libunicorn/graphengine/server_app.py), then use <strong>Test Tunnel</strong> to check whether the remote HTTP endpoint is reachable.`;
+  els.tunnelHint.innerHTML = `Start the graphengine backend and connect this UI to it. If the backend runs on another machine, open the SSH tunnel first, then use <strong>Test Tunnel</strong> to verify the backend HTTP endpoint.`;
 }
 
 function updateConnectionState(connected, message) {
   state.remote.connected = connected;
   if (!connected) {
+    state.remote.requestContext = null;
     state.remote.backendNodesFile = "";
     state.remote.backendNamesFile = "";
   }
@@ -1594,7 +1636,7 @@ function updateConnectionState(connected, message) {
   els.connectionState.classList.toggle("online", connected);
   els.connectionState.classList.toggle("offline", !connected);
   els.remoteDatasetsPanel.hidden = !connected;
-  updateRenderAvailability();
+  syncBackendRuntimeUiState();
 }
 
 async function uploadLoadedFiles() {
@@ -1603,7 +1645,7 @@ async function uploadLoadedFiles() {
   const localFiles = getLocalRemoteUploadFiles();
 
   if (!user || !host) {
-    setStatus("Enter a remote username and host before uploading files.");
+    setStatus("Enter a backend username and host before uploading files.");
     return;
   }
   if (!localFiles.length) {
@@ -1627,7 +1669,7 @@ async function uploadLoadedFiles() {
     await refreshRemoteServerStatus();
     await refreshRemoteDatasets();
     addClientLog("success", "upload", `Uploaded ${uploaded.toLocaleString()} file(s) successfully.`);
-    setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the remote server for ${user}@${host}.`);
+    setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the backend server for ${user}@${host}.`);
   } catch (error) {
     addClientLog("error", "upload", "Upload stopped.", errorToDetail(error));
     setStatus(`Upload stopped. ${error.message || error}`);
@@ -1732,10 +1774,16 @@ async function loadAndRenderBackend() {
     `Requesting backend root tree view for ${files.length.toLocaleString()} dataset${files.length === 1 ? "" : "s"}.`,
     files.join("\n"),
   );
-  const payload = await fetchRemoteVisibleTree();
+  const payload = await fetchRemoteVisibleTree({
+    datasetNames: files,
+    nodesFile: els.nodesFile.files[0] ? els.nodesFile.files[0].name : null,
+    namesFile: els.namesFile.files[0] ? els.namesFile.files[0].name : null,
+    minReads: getMinReadsValue(),
+    expandedTaxids: [],
+  });
   if (!payload.tree) {
-    addClientLog("error", "tree", "The remote backend returned no tree payload.");
-    setStatus("The remote backend returned no tree to render.");
+    addClientLog("error", "tree", "The backend returned no tree payload.");
+    setStatus("The backend returned no tree to render.");
     return;
   }
 
@@ -1755,22 +1803,16 @@ function clearRemoteDatasetInputs() {
   }
 }
 
-function buildSeriesFromRemoteDatasets(datasets, treePayload) {
-  const countMaps = datasets.map(() => new Map());
-  const walk = (node) => {
-    const values = Array.isArray(node.direct_by_source) ? node.direct_by_source : [];
-    for (let i = 0; i < countMaps.length; i++) {
-      const value = Number(values[i] || 0);
-      if (value > 0) countMaps[i].set(Number(node.taxid), value);
-    }
-    for (const child of node.children || []) walk(child);
-  };
-  walk(treePayload);
+function buildSeriesFromRemoteDatasets(datasets) {
+  const previousVisibility = new Map(
+    state.series.map((source) => [source.label, Boolean(source.visible)]),
+  );
   return datasets.map((dataset, index) => ({
     label: dataset.filename || dataset.id || `remote-dataset-${index + 1}`,
     color: colorForSource(index),
-    counts: countMaps[index],
-    visible: true,
+    visible: previousVisibility.has(dataset.filename || dataset.id || `remote-dataset-${index + 1}`)
+      ? previousVisibility.get(dataset.filename || dataset.id || `remote-dataset-${index + 1}`)
+      : true,
   }));
 }
 
@@ -1805,7 +1847,10 @@ async function handleMinReadsChange() {
   setMinReadsValue(valueFromSliderPosition(els.minReads.value));
   if (hasBackendTree()) {
     try {
-      const payload = await fetchRemoteVisibleTree();
+      const payload = await fetchRemoteVisibleTree({
+        minReads: getMinReadsValue(),
+        expandedTaxids: Array.from(state.remote.expandedTaxids),
+      });
       applyRemoteVisiblePayload(payload);
       await refreshCurrentReportIfNeeded();
       redraw();
@@ -1824,13 +1869,29 @@ function hasBackendTree() {
 
 function buildRemoteContextUrl(path, options = {}) {
   const url = new URL(`http://localhost:8000/${path}`);
-  const files = getSelectedRemoteDatasets();
+  const activeRequestContext = getActiveBackendRequestContext();
+  const files = Array.isArray(options.datasetNames)
+    ? options.datasetNames
+    : activeRequestContext?.dataset_names?.length
+      ? activeRequestContext.dataset_names
+      : getSelectedRemoteDatasets();
   for (const file of files) url.searchParams.append("files", file);
-  if (els.nodesFile.files[0]) url.searchParams.set("nodes_file", els.nodesFile.files[0].name);
-  if (els.namesFile.files[0]) url.searchParams.set("names_file", els.namesFile.files[0].name);
-  url.searchParams.set("min_reads", String(getMinReadsValue()));
+  const nodesFile = options.nodesFile ?? activeRequestContext?.nodes_file ?? (els.nodesFile.files[0] ? els.nodesFile.files[0].name : null);
+  const namesFile = options.namesFile ?? activeRequestContext?.names_file ?? (els.namesFile.files[0] ? els.namesFile.files[0].name : null);
+  const minReads = options.minReads != null
+    ? Number(options.minReads)
+    : activeRequestContext && Number.isFinite(activeRequestContext.min_reads)
+      ? Number(activeRequestContext.min_reads)
+      : getMinReadsValue();
+  if (nodesFile) url.searchParams.set("nodes_file", nodesFile);
+  if (namesFile) url.searchParams.set("names_file", namesFile);
+  url.searchParams.set("min_reads", String(minReads));
   if (Array.isArray(options.expandedTaxids)) {
     for (const taxid of options.expandedTaxids) {
+      url.searchParams.append("expanded", String(taxid));
+    }
+  } else if (activeRequestContext?.expanded_taxids?.length) {
+    for (const taxid of activeRequestContext.expanded_taxids) {
       url.searchParams.append("expanded", String(taxid));
     }
   }
@@ -1845,7 +1906,14 @@ async function fetchRemoteVisibleTree(options = {}) {
   const endpoint = options.taxid != null ? "expand-node" : "root-view";
   const url = buildRemoteContextUrl(endpoint, {
     expandedTaxids: options.expandedTaxids || Array.from(state.remote.expandedTaxids),
-    query: options.taxid != null ? { taxid: options.taxid } : {},
+    datasetNames: options.datasetNames,
+    nodesFile: options.nodesFile,
+    namesFile: options.namesFile,
+    minReads: options.minReads,
+    query: {
+      ...(options.query && typeof options.query === "object" ? options.query : {}),
+      ...(options.taxid != null ? { taxid: options.taxid } : {}),
+    },
   }).toString();
   addClientLog("info", "tree", `GET /${endpoint}`, url);
   let response;
@@ -1938,11 +2006,18 @@ async function fetchRemoteFullTreeModel() {
 
 function applyRemoteVisiblePayload(payload) {
   const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
-  state.series = buildSeriesFromRemoteDatasets(datasets, payload.tree);
+  state.series = buildSeriesFromRemoteDatasets(datasets);
   state.tree = buildRemoteTree(payload.tree);
-  state.counts = aggregateSeriesCounts(state.series);
   state.missingTaxids = new Set(Array.isArray(payload.missing_taxids) ? payload.missing_taxids : []);
-  state.remote.expandedTaxids = new Set(Array.isArray(payload.expanded_taxids) ? payload.expanded_taxids.map((value) => Number(value)) : []);
+  updateActiveBackendRequestContext(payload?.request_context, { preserveExpandedTaxids: false });
+  const activeRequestContext = getActiveBackendRequestContext();
+  state.remote.expandedTaxids = new Set(
+    Array.isArray(activeRequestContext?.expanded_taxids)
+      ? activeRequestContext.expanded_taxids.map((value) => Number(value))
+      : Array.isArray(payload.expanded_taxids)
+        ? payload.expanded_taxids.map((value) => Number(value))
+        : [],
+  );
   state.remote.serverTreeActive = true;
   state.remote.totalReads = Number(payload.total_reads || 0);
   state.remote.directTaxa = Number(payload.direct_taxa || 0);
@@ -1957,19 +2032,19 @@ async function refreshRemoteDatasets(options = {}) {
   }
 
   const { selectAll = false } = options;
-  addClientLog("info", "datasets", "Refreshing remote dataset list.", "GET http://localhost:8000/datasets");
+  addClientLog("info", "datasets", "Refreshing backend dataset list.", "GET http://localhost:8000/datasets");
   let response;
   try {
     response = await fetch("http://localhost:8000/datasets", {
       method: "GET",
     });
   } catch (error) {
-    addClientLog("error", "datasets", "Remote datasets fetch failed.", errorToDetail(error));
+    addClientLog("error", "datasets", "Backend datasets fetch failed.", errorToDetail(error));
     throw error;
   }
   if (!response.ok) {
-    addClientLog("error", "datasets", "Remote datasets request failed.", `HTTP ${response.status}`);
-    throw new Error(`Remote datasets request failed with HTTP ${response.status}`);
+    addClientLog("error", "datasets", "Backend datasets request failed.", `HTTP ${response.status}`);
+    throw new Error(`Backend datasets request failed with HTTP ${response.status}`);
   }
 
   const payload = await response.json();
@@ -1996,14 +2071,14 @@ async function refreshRemoteDatasets(options = {}) {
   }
 
   renderRemoteDatasets();
-  addClientLog("success", "datasets", `Loaded ${state.remote.datasets.length.toLocaleString()} remote dataset${state.remote.datasets.length === 1 ? "" : "s"}.`);
+  addClientLog("success", "datasets", `Loaded ${state.remote.datasets.length.toLocaleString()} backend dataset${state.remote.datasets.length === 1 ? "" : "s"}.`);
 }
 
 function renderRemoteDatasets() {
   els.remoteDatasetsList.innerHTML = "";
 
   if (!state.remote.connected) {
-    els.remoteDatasetsMeta.textContent = "Connect to browse remote files";
+    els.remoteDatasetsMeta.textContent = "Connect to browse backend files";
     updateRenderAvailability();
     return;
   }
@@ -2032,10 +2107,11 @@ function renderRemoteDatasets() {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = selected.has(dataset.filename);
-    checkbox.addEventListener("change", () => {
+    checkbox.addEventListener("change", async () => {
       if (checkbox.checked) state.remote.selectedDatasets.add(dataset.filename);
       else state.remote.selectedDatasets.delete(dataset.filename);
       renderRemoteDatasets();
+      await refreshTreeForDatasetSelectionChange();
     });
 
     const copy = document.createElement("div");
@@ -2065,11 +2141,78 @@ function selectAllRemoteDatasets() {
     state.remote.datasets.map((dataset) => dataset.filename),
   );
   renderRemoteDatasets();
+  refreshTreeForDatasetSelectionChange();
 }
 
 function clearRemoteDatasets() {
   state.remote.selectedDatasets.clear();
   renderRemoteDatasets();
+  refreshTreeForDatasetSelectionChange();
+}
+
+function resetBackendTreeState() {
+  state.tree = null;
+  state.flat = [];
+  state.series = [];
+  state.remote.serverTreeActive = false;
+  state.remote.totalReads = 0;
+  state.remote.directTaxa = 0;
+  state.remote.currentReport = null;
+  state.remote.requestContext = null;
+  state.remote.expandedTaxids.clear();
+  state.selected.clear();
+  state.focusTaxid = null;
+  state.missingTaxids.clear();
+  if (els.svg) {
+    els.svg.innerHTML = "";
+  }
+  clearSubtreeReportView();
+  renderSourceLegend();
+  renderSummary([]);
+  syncBackendRuntimeUiState();
+}
+
+function reconcileTreeStateAfterDatasetChange() {
+  if (!state.tree) return;
+  state.selected = new Set(
+    Array.from(state.selected).filter((taxid) => Boolean(findNodeByTaxid(state.tree, taxid))),
+  );
+  if (state.focusTaxid != null && !findNodeByTaxid(state.tree, state.focusTaxid)) {
+    state.focusTaxid = null;
+  }
+  if (state.remote.currentReport) {
+    clearSubtreeReportView();
+  }
+}
+
+async function refreshTreeForDatasetSelectionChange() {
+  if (!state.remote.connected || !state.remote.serverTreeActive) {
+    return;
+  }
+  const datasetNames = getSelectedRemoteDatasets();
+  if (!datasetNames.length) {
+    resetBackendTreeState();
+    setStatus("No backend datasets are selected. Choose one or more datasets to render a tree.");
+    return;
+  }
+  try {
+    addClientLog(
+      "info",
+      "tree",
+      `Refreshing backend tree after dataset selection changed to ${datasetNames.length.toLocaleString()} dataset${datasetNames.length === 1 ? "" : "s"}.`,
+      datasetNames.join("\n"),
+    );
+    const payload = await fetchRemoteVisibleTree({
+      datasetNames,
+      expandedTaxids: Array.from(state.remote.expandedTaxids),
+    });
+    applyRemoteVisiblePayload(payload);
+    reconcileTreeStateAfterDatasetChange();
+    redraw();
+  } catch (error) {
+    addClientLog("error", "tree", "Could not refresh backend tree after dataset selection change.", errorToDetail(error));
+    setStatus(`Could not refresh the backend tree after changing datasets: ${error.message || error}`);
+  }
 }
 
 function hasLocalRemoteTaxonomyOverride() {
@@ -2098,7 +2241,7 @@ function remoteRenderUnavailableMessage() {
       ? "Select one or more backend datasets before rendering."
       : "No backend .bdamage datasets are available to render.";
   }
-  return "Backend taxonomy is not ready yet. Upload or select nodes.dmp on the client, or place nodes.dmp in the backend uploads directory.";
+  return "Backend taxonomy is not ready yet. Upload nodes.dmp from this UI, or place nodes.dmp in the backend uploads directory.";
 }
 
 function backendConnectionReadyMessage(user, host) {
@@ -2107,26 +2250,26 @@ function backendConnectionReadyMessage(user, host) {
   const datasetLabel = selected === 1 ? "dataset" : "datasets";
   if (canRenderRemoteTree()) {
     const taxonomySource = hasLocalRemoteTaxonomyOverride()
-      ? `local taxonomy override (${els.nodesFile.files[0].name}${els.namesFile.files[0] ? `, ${els.namesFile.files[0].name}` : ""})`
+      ? `uploaded taxonomy staged from this UI (${els.nodesFile.files[0].name}${els.namesFile.files[0] ? `, ${els.namesFile.files[0].name}` : ""})`
       : `backend taxonomy (${state.remote.backendNodesFile}${state.remote.backendNamesFile ? `, ${state.remote.backendNamesFile}` : ""})`;
     if (selected > 0) {
-      return `Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable, ${selected.toLocaleString()} ${datasetLabel} ${selected === 1 ? "is" : "are"} selected, and ${taxonomySource} is ready for rendering.`;
+      return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${selected.toLocaleString()} ${datasetLabel} ${selected === 1 ? "is" : "are"} selected, and ${taxonomySource} is ready for rendering.`;
     }
-    return `Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable, ${pendingUploads.toLocaleString()} local dataset${pendingUploads === 1 ? "" : "s"} ${pendingUploads === 1 ? "is" : "are"} queued for upload, and ${taxonomySource} is ready for rendering.`;
+    return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${pendingUploads.toLocaleString()} local dataset${pendingUploads === 1 ? "" : "s"} ${pendingUploads === 1 ? "is" : "are"} queued for upload, and ${taxonomySource} is ready for rendering.`;
   }
   if (pendingUploads > 0) {
-    return `Tunnel check succeeded for ${user}@${host}. Local datasets are queued for upload, but remote rendering is waiting for taxonomy. Upload or select nodes.dmp to enable Render Tree.`;
+    return `Tunnel check succeeded for ${user}@${host}. Local datasets are queued for upload, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree.`;
   }
   if (selected > 0) {
-    return `Tunnel check succeeded for ${user}@${host}. Remote datasets are visible, but remote rendering is waiting for taxonomy. Upload or select nodes.dmp to enable Render Tree.`;
+    return `Tunnel check succeeded for ${user}@${host}. Backend datasets are visible, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree.`;
   }
-  return `Tunnel check succeeded for ${user}@${host}. Remote HTTP endpoint is reachable; choose one or more datasets to enable Render Tree.`;
+  return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable; choose one or more datasets to enable Render Tree.`;
 }
 
 function updateRemoteServerStatus(ping) {
   state.remote.backendNodesFile = String(ping?.taxonomy?.nodes_file || "");
   state.remote.backendNamesFile = String(ping?.taxonomy?.names_file || "");
-  updateRenderAvailability();
+  syncBackendRuntimeUiState();
 }
 
 async function refreshRemoteServerStatus() {
@@ -2143,12 +2286,28 @@ async function refreshRemoteServerStatus() {
   return payload;
 }
 
-function updateRenderAvailability() {
-  if (state.remote.connected) {
-    els.renderBtn.disabled = !canRenderRemoteTree();
-    return;
+function syncBackendRuntimeUiState() {
+  const backendTreeReady = hasBackendTree();
+  const hasSelection = state.selected.size > 0;
+  els.renderBtn.disabled = !canRenderRemoteTree();
+  els.centerBtn.disabled = !backendTreeReady;
+  els.toggleTableBtn.disabled = !backendTreeReady;
+  els.subtreeReportBtn.disabled = !backendTreeReady;
+  els.rankReportBtn.disabled = !backendTreeReady;
+  els.selectDescendantsBtn.disabled = !backendTreeReady || !hasSelection;
+  els.clearSelectionBtn.disabled = !backendTreeReady || !hasSelection;
+  els.uncollapseBtn.disabled = !backendTreeReady || !hasSelection;
+  els.uncollapseTipsBtn.disabled = !backendTreeReady || !hasSelection;
+  if (els.agentPrompt) {
+    els.agentPrompt.disabled = !backendTreeReady;
   }
-  els.renderBtn.disabled = !els.nodesFile.files[0];
+  if (els.agentSendBtn) {
+    els.agentSendBtn.disabled = !backendTreeReady;
+  }
+}
+
+function updateRenderAvailability() {
+  syncBackendRuntimeUiState();
 }
 
 function getSelectedRemoteDatasets() {
@@ -2180,19 +2339,8 @@ function formatBytes(bytes) {
   return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
-function aggregateSeriesCounts(series) {
-  const total = new Map();
-  for (const source of series) {
-    for (const [taxid, count] of source.counts) {
-      total.set(taxid, (total.get(taxid) || 0) + count);
-    }
-  }
-  return total;
-}
-
 function redraw() {
   if (!state.tree) return;
-  state.counts = collectDirectCountsFromVisibleTree(state.tree);
   const minReads = 0;
   const search = els.searchBox.value.trim().toLowerCase();
   const visible = [];
@@ -2204,17 +2352,10 @@ function redraw() {
   renderSvg(visible, links, search);
   renderSummary(visible);
   renderTopTable();
+  syncBackendRuntimeUiState();
   const activeSeries = getVisibleSeries().length;
-  setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from ${state.counts.size.toLocaleString()} direct taxa across ${activeSeries.toLocaleString()} active dataset${activeSeries === 1 ? "" : "s"}.`);
-}
-
-function collectDirectCountsFromVisibleTree(root) {
-  const counts = new Map();
-  if (!root) return counts;
-  walkTree(root, (node) => {
-    if (node.direct > 0) counts.set(node.taxid, node.direct);
-  });
-  return counts;
+  const directTaxa = Number(state.remote.directTaxa || 0);
+  setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from a backend tree with ${directTaxa.toLocaleString()} direct taxa across ${activeSeries.toLocaleString()} active dataset${activeSeries === 1 ? "" : "s"}.`);
 }
 
 function collectVisible(node, parent, nodes, links, leaves, minReads) {
@@ -2727,18 +2868,25 @@ function renderTopTable() {
     renderCurrentReportView();
     return;
   }
-  clearSubtreeReportView();
+  clearSubtreeReportView({ preserveTableContext: true });
   renderBackendTopTable();
 }
 
-function clearSubtreeReportView() {
+function clearSubtreeReportView(options = {}) {
+  const preserveTableContext = Boolean(options.preserveTableContext);
   state.remote.currentReport = null;
+  if (!preserveTableContext) {
+    state.remote.currentTable = null;
+  }
   if (els.subtreeReport) {
     els.subtreeReport.hidden = true;
     els.subtreeReport.innerHTML = "";
   }
   if (els.tablePanelTitle) {
-    els.tablePanelTitle.textContent = "Top direct placements";
+    const targetName = state.remote.currentTable?.target?.name;
+    els.tablePanelTitle.textContent = targetName
+      ? `Top direct placements: ${targetName}`
+      : "Top direct placements";
   }
   if (els.exportMatrixBtn) {
     els.exportMatrixBtn.hidden = true;
@@ -2769,7 +2917,7 @@ async function openSelectedSubtreeReport() {
     setStatus("Subtree report UI is not available in the current HTML shell. Try a hard refresh.");
     return;
   }
-  els.tablePanelTitle.textContent = `Subtree report: ${target.name}`;
+  els.tablePanelTitle.textContent = "Subtree report";
   els.subtreeReport.hidden = false;
   els.subtreeReport.innerHTML = `<div class="subtree-report-card">Loading subtree report for ${escapeHtml(target.name)}...</div>`;
   els.topTable.innerHTML = "";
@@ -2806,7 +2954,7 @@ async function openSelectedRankReport() {
     setStatus("Rank report UI is not available in the current HTML shell. Try a hard refresh.");
     return;
   }
-  els.tablePanelTitle.textContent = `Rank report (${taxids.length} selected)`;
+  els.tablePanelTitle.textContent = "Rank report";
   els.subtreeReport.hidden = false;
   els.subtreeReport.innerHTML = `<div class="subtree-report-card">Loading rank report for ${taxids.length} selected node(s)...</div>`;
   els.topTable.innerHTML = "";
@@ -2836,7 +2984,9 @@ async function refreshCurrentReportIfNeeded() {
     return;
   }
   if (state.remote.currentReport.type === "rank") {
-    const taxids = Array.isArray(state.remote.currentReport.taxids) ? state.remote.currentReport.taxids : [];
+    const taxids = Array.isArray(state.remote.currentReport.report?.summary?.selected_taxids)
+      ? state.remote.currentReport.report.summary.selected_taxids
+      : [];
     if (!taxids.length) return;
     const payload = await fetchRemoteRankReport(taxids);
     renderRankReport(payload.report || null, taxids);
@@ -2900,7 +3050,6 @@ function renderRankReport(report, taxids) {
   state.remote.currentReport = {
     type: "rank",
     report,
-    taxids: Array.isArray(taxids) ? [...taxids] : [],
   };
   els.tablePanelTitle.textContent = `Rank report (${report.summary.selected_node_count} selected)`;
   if (els.exportMatrixBtn) {
@@ -3106,6 +3255,24 @@ async function renderBackendTopTable() {
       limit: 40,
     });
     if (requestId !== state.remote.tableRequestId) return;
+    state.remote.currentTable = {
+      scope: String(payload.scope || "root"),
+      target: payload.target && typeof payload.target === "object"
+        ? {
+          taxid: Number(payload.target.taxid || 0),
+          name: String(payload.target.name || ""),
+          rank: String(payload.target.rank || ""),
+        }
+        : null,
+      row_count: Number(payload.row_count || 0),
+      request_context: normalizeProviderRequestContext(payload.request_context),
+    };
+    if (els.tablePanelTitle) {
+      const targetName = state.remote.currentTable.target?.name;
+      els.tablePanelTitle.textContent = targetName
+        ? `Top direct placements: ${targetName}`
+        : "Top direct placements";
+    }
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     els.topTable.innerHTML = rows.map((row) => `
       <tr>
