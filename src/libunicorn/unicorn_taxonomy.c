@@ -315,7 +315,9 @@ static emap_chr2int_t *_csv2_chr2intmap(const char *in,
 																				uint8_t nthreads,
 																				int *ret)
 {
-  *ret = 1;
+  fprintf(stderr, "PENE\n");
+	fflush(stderr);
+	*ret = 1;
   emap_chr2int_t *map =  NULL;
   BGZF *fp = bgzf_open(in, "r");
   if (!fp) goto exit;
