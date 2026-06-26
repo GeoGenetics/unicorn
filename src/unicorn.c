@@ -1226,7 +1226,7 @@ static int unicorn_alntag(int argc, char **argv)
   clock_gettime(CLOCK_MONOTONIC, &stop);
   ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
-
+  fflush(stderr);
   fprintf(stderr, "[unicorn::%s] Retagging alignment records\n", __func__);
   clock_gettime(CLOCK_MONOTONIC, &start);
   uint64_t nalns, nreads;
