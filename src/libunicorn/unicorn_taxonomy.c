@@ -61,13 +61,30 @@ static inline char *strpop(char **str, char split)
 // usefull little function to remove tab and newlines
 static inline void strip(char *line)
 {
-    uint32_t at = 0;
-    for (uint32_t i = 0; i < strlen(line); i++)
-        if (line[i] == '\t' || line[i] == '\n')
-            continue;
-        else
-            line[at++] = line[i];
-    line[at] = '\0';
+    char *src = line;
+    char *dst = line;
+    while (*src) {
+        if (*src != '\t' && *src != '\n')
+            *dst++ = *src;
+        src++;
+    }
+    *dst = '\0';
+}
+
+static inline uint8_t _parse_acc2tax_line(char *line, char **key, uint32_t *val)
+{
+    char *tab1, *tab2;
+    if (!line || !key || !val) return 0;
+    tab1 = strchr(line, '\t');
+    if (!tab1) return 0;
+    *tab1++ = '\0';
+    tab2 = strchr(tab1, '\t');
+    if (!tab2) return 0;
+    *tab2++ = '\0';
+    while (*tab2 == ' ' || *tab2 == '\t') tab2++;
+    *key = tab1;
+    *val = (uint32_t)strtoul(tab2, NULL, 10);
+    return 1;
 }
 
 const char *unicornranks[8] = {
@@ -217,22 +234,16 @@ static tdataq_t *_loaddqueue(kstream_t *ks, uint8_t bits, uint32_t *_nacc)
 	for (uint8_t i = 0; i < 1U<<bits; i++)
 		kv_resize(data_t, dataq[i], MAXLOAD);
 	kstring_t kstr = {0};
-	char *tok, *key;
+	char *key;
 	uint32_t val;
 	uint8_t low;
-	uint32_t __nacc = 0;
 	while ( (ks_getuntil(ks, '\n', &kstr, 0)) >= 0 ) {
-		__nacc++;
-		if (__nacc % 10000 == 0) {
-			fprintf(stderr, "[libunicorn::%s] Loaded %u accessions\n", __func__, __nacc);
-		  fflush(stderr);
-		}
 		if (kstr.l == 0)
 			break;
-		tok = strtok(kstr.s, "\t\n ");
-		key = strtok(NULL, "\t\n ");
-		tok = strtok(NULL, "\t\n ");
-		val = strtoul(tok, NULL, 10);
+    if (!_parse_acc2tax_line(kstr.s, &key, &val)) {
+      kstr.l = 0;
+      continue;
+    }
 		low = kh_hash_str(key) & ((1U<<bits) - 1);
 		data_t a = {strdup(key), val};
 		kv_push(data_t, dataq[low], a);
@@ -316,12 +327,11 @@ static emap_chr2int_t *_csv2_chr2intmap(const char *in,
 																				uint8_t nthreads,
 																				int *ret)
 {
-  fprintf(stderr, "PENE\n");
-	fflush(stderr);
 	*ret = 1;
   emap_chr2int_t *map =  NULL;
   BGZF *fp = bgzf_open(in, "r");
   if (!fp) goto exit;
+  if (nthreads > 1) bgzf_mt(fp, nthreads, 0);
 	map = _csvload(fp, nthreads);
 	*ret = 2;
 	if (!map) goto exit;
