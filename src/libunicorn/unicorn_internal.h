@@ -39,6 +39,22 @@ SOFTWARE.
 #include "klib/kthread.h"
 #include "klib/kavl.h"
 #include "klib/kvec.h"
+
+/*Constants*/
+
+/*Filter modes*/
+#define UNICORN_ALNFILT_ALLTOP 0
+#define UNICORN_ALNFILT_RNDTOP 1
+#define UNICORN_ALNFILT_PCTTOP 2
+#define UNICORN_ALNFILT_ALL    3
+
+/*Sort values for bam files*/
+#define UNSRTED      0x00
+#define QUERYSORTED  0x01
+#define QUERYGROUPED 0x02
+#define COORDSORTED  0x04
+#define XRSORTED     0x08
+
 typedef struct {
   float  score;
   uint32_t al; //Alignment length
@@ -86,18 +102,13 @@ static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
 typedef kvec_t(_urangeevent) ueventq_t;
 void unicorn_sorturange(uint32_t n, _urangeevent *a);
 
-/*Sort values for bam files*/
-#define UNSRTED 0x00
-#define QUERYSORTED  0x01
-#define QUERYGROUPED 0x02
-#define COORDSORTED  0x04
-#define XRSORTED     0x08
+
 
 typedef struct values_t {
   uint64_t naln;   //Number of alignments
-  uint64_t nfaln;  //Number of filtered alignments
+  uint64_t nfaln;  //Number of alignments written after filtering
   uint64_t nread;  //Number of reads
-  uint64_t nfread; //Number of filtered reads
+  uint64_t nfread; //Number of reads written after filtering
   uint32_t nref;   //Number of references
   uint32_t nfref;  //Number of filtered references
 } values_t;
@@ -122,12 +133,6 @@ typedef struct {
 	uint8_t adnascore; //Whether to recompute alignment score for ancient DNA damage
 	uint32_t qsize; //Queue size
 } unicorn_t;
-
-uint8_t unicorn_isqgrouped(unicorn_t *u);
-int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q);
-int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q);
-dataq_t *unicorn_qloadqueue(unicorn_t *u, uint64_t *naln);
-uint8_t unicorn_rewind(unicorn_t *u);
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 //Check if reference is too short
@@ -554,7 +559,8 @@ typedef struct utax_t {
   int2chr_t  *namemap;    // Map of taxid to names
   emap_chr2int_t *accmap; // Map of accession to taxid
   const char *rank;
-	uint32_t nmissing;     // Number of references with missing taxids, for reporting purposes
+	uint32q_t keeptaxa;     // Set of taxids to keep, if empty all taxa are kept
+	uint32_t nmissing;      // Number of references with missing taxids, for reporting purposes
 } utax_t;
 
 uint32_t utax_gettaxid(const utax_t *utax, const char *acc, int *absent);
@@ -573,3 +579,16 @@ uint64_t _getcovbases(ueventq_t events,
                      uint64_t *_depthsum,
             uint64_t *_sumsqdepth);
 
+uint8_t unicorn_isqgrouped(unicorn_t *u);
+int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q);
+int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q);
+dataq_t *unicorn_qloadqueue(unicorn_t *u, uint64_t *naln);
+uint8_t unicorn_rewind(unicorn_t *u);
+void unicorn_loadbyqname(bamq_t *q,
+	                       uint8_t *_nq,
+                         unicorn_t *u,
+                         const utax_t *utax,
+                         char **last_q,
+												 uint32_t *_nalns,
+												 uint32_t *_nreads);
+float _alignment_score_or_xj(const bam1_t *b);

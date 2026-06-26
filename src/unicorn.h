@@ -203,8 +203,9 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
 utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
-                             const char *rank,
-                             int *ret);
+														 const char *rank,
+														 const char *keeptaxa,
+														 int *ret);
 
 void unicorn_closetaxonomy(utax_t *utax);
 
@@ -279,7 +280,13 @@ unicorn's alnfilt routines
 
 
 ****************************************************/
-int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct, uint8_t strictb);
+int unicorn_alnfilter(unicorn_t *u,
+	                    utax_t *utax,
+											uint8_t mode,
+											float minani,
+											float maxani,
+											float pct,
+											uint8_t strictb);
 
 
 /****************************************************

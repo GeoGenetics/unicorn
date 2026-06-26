@@ -383,6 +383,7 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
                              const char *names,
                              const char *nodes,
 														 const char *rank,
+														 const char *keeptaxa,
 														 int *ret)
 {
 	*ret = 8;
@@ -402,6 +403,19 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 		utax->accmap = NULL;
 		utax->numaccs = 0;
 	}
+
+  if (keeptaxa) {
+		kv_init(utax->keeptaxa);
+		char *kt = strdup(keeptaxa);
+		char *token = strtok(kt, ",");
+		while (token) {
+			uint32_t taxid = strtoul(token, NULL, 10);
+			kv_push(uint32_t, utax->keeptaxa, taxid);
+			token = strtok(NULL, ",");
+		}
+		free(kt);
+	}
+
 	if (rank) {
 		khint_t k;
 		k = chr2int_get(utax->nodes.levelmap, rank);

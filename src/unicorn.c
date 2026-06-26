@@ -250,6 +250,7 @@ static void alnfilt_usage(FILE *fp)
             "                                           percentage of best absolute score.\n"\
             "                                ALL     - Select all alignments.\n"\
             "  --pct <float>                Percentage threshold for PCTTOP mode [0.90]\n"\
+						"  --keeptaxa <int, int,..>     Comma-separated list of taxids to keep\n"\
             "  --minscore <float>           Minimum absolute alignment score [0.0]\n"\
             "  --maxscore <float>           Maximum absolute alignment score [FLT_MAX]\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
@@ -639,6 +640,7 @@ static int unicorn_refstats(int argc, char **argv)
                                 opts.names,
                                 opts.nodes,
                                 opts.rank,
+                                opts.keeptaxa,
                                 &tret);
     if (!utax) {
       fprintf(stderr, "[unicorn::%s] Error: Failed to load taxonomy data\n", __func__);
@@ -887,6 +889,7 @@ static int unicorn_taxstats(int argc, char **argv)
                               opts.names,
                               opts.nodes,
                               opts.rank,
+                              opts.keeptaxa,
                               &ret);
   if (!utax) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
@@ -1014,9 +1017,9 @@ static int unicorn_alnfilt(int argc, char **argv)
   opts.maxscore            = FLT_MAX;
   opts.pct                 = 0.90;
   opts.alnfiltmode         = UNICORN_ALNFILT_ALL;
-  //utax_t *utax = NULL;
   unicorn_t *u = NULL;
-  char *_argv[64] = {0};
+  utax_t *utax = NULL;
+	char *_argv[64] = {0};
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
@@ -1025,11 +1028,19 @@ static int unicorn_alnfilt(int argc, char **argv)
   ret = 7;
 	if (opts.maxscore < opts.minscore) goto exit;
   ret = 2;
+
   fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
                                                                      opts.ifile);
   fflush(stderr);
-  clock_gettime(CLOCK_MONOTONIC, &start);
-  u = unicorn_init(opts.threads, opts.ifile, opts.outbam, NULL, opts.adnascore, opts.qsize, argc, _argv);
+	clock_gettime(CLOCK_MONOTONIC, &start);
+  u = unicorn_init(opts.threads,
+		               opts.ifile,
+									 opts.outbam,
+									 NULL,
+									 opts.adnascore,
+									 opts.qsize,
+									 argc,
+									 _argv);
   if (!u) goto exit;
   ret = 5;
   clock_gettime(CLOCK_MONOTONIC, &stop);
@@ -1037,19 +1048,39 @@ static int unicorn_alnfilt(int argc, char **argv)
   fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
   fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   fflush(stderr);
-  ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minscore, opts.maxscore, opts.pct, opts.strict_score_bounds);
+
+  if (opts.names || opts.nodes) {
+	  fprintf(stderr, "[unicorn::%s] Loading taxonomy\n", __func__);
+	  clock_gettime(CLOCK_MONOTONIC, &start);
+	  utax = unicorn_loadtaxonomy(opts.acc2tax,
+												        opts.names,
+												        opts.nodes,
+			  								        opts.rank,
+					  						        opts.keeptaxa,
+							  				        &ret);
+	  if (ret) goto exit;
+	  clock_gettime(CLOCK_MONOTONIC, &stop);
+	  ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+	  fprintf(stderr, "\t%u nodes\n"\
+	  								"\t%"PRIu64" accessions\n",
+			  						unicorn_tax_getnumnodes(utax),
+					  				unicorn_tax_getnumaccs(utax));
+	  fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
+	}
+
+	fprintf(stderr, "[unicorn::%s] Filtering alignments\n", __func__);
+	fflush(stderr);
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	ret = unicorn_alnfilter(u, utax, opts.alnfiltmode, opts.minscore, opts.maxscore, opts.pct, opts.strict_score_bounds);
   if (ret) goto exit;
   fprintf(stderr, "[unicorn::%s] Done\n"\
-                  "\t%"PRIu64" alignments, %" PRIu64 " passed filters (%f)\n"\
-                  "\t%u queries, %u passed filter (%f)\n"\
-                  "\t%u references, %u passed filter (%f)\n",
+                  "\t%"PRIu64" input alignments, %" PRIu64 " written (%f)\n"\
+                  "\t%u input queries, %u written (%f)\n",
                   __func__,
                   unicorn_getnaln(u), unicorn_getnfaln(u),
                   (float)unicorn_getnfaln(u)/unicorn_getnaln(u),
                   unicorn_getnqueries(u), unicorn_getnfqueries(u),
-                  (float)unicorn_getnfqueries(u)/unicorn_getnqueries(u),
-                  unicorn_getnref(u), unicorn_getnfref(u),
-                  (float)unicorn_getnfref(u)/unicorn_getnref(u));
+                  (float)unicorn_getnfqueries(u)/unicorn_getnqueries(u));
   ret = 0;
   exit:
     if (ret) {
@@ -1105,6 +1136,7 @@ static int unicorn_lca(int argc, char **argv)
                               opts.names,
                               opts.nodes,
                               opts.rank,
+															opts.keeptaxa,
                               &ret);
   if (ret) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
@@ -1188,6 +1220,7 @@ static int unicorn_alntag(int argc, char **argv)
                               opts.names,
                               opts.nodes,
                               opts.rank,
+                              opts.keeptaxa,
                               &ret);
   if (ret) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);

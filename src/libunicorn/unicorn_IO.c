@@ -1,5 +1,33 @@
+/*
+MIT License
+
+Copyright (c) 2026 GeoGenetics
+
+Author: Julian Regalado Perez
+        julian.perez@sund.ku.dk
+				jregalado@bicu.dev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 #define _XOPEN_SOURCE 700
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <stdint.h>
 
@@ -9,7 +37,7 @@
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 
-static float _alignment_score_or_xj(const bam1_t *b)
+float _alignment_score_or_xj(const bam1_t *b)
 {
   uint8_t *aux = bam_aux_get((bam1_t *)b, "XJ");
   if (aux) return bam_aux2f(aux);
@@ -199,8 +227,6 @@ uint64_t unicorn_loadqueues(unicorn_t *u, bamq_t *q, uint8_t n)
   return naln;
 }
 
-#include <math.h>
-
 int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q)
 {
 	bam1_t *b = bam_init1();
@@ -302,6 +328,127 @@ dataq_t *unicorn_qloadqueue(unicorn_t *u, uint64_t *naln)
 		*naln += _naln;
 	}
 	return dq;
+}
+
+static uint8_t _keep_tagged_alignment(const utax_t *utax,
+                                      const uint32q_t *keeptaxa,
+                                      const bam1_t *b)
+{
+  if (!keeptaxa || keeptaxa->n == 0) return 1;
+  if (!utax || !b) return 0;
+	uint8_t *tag = bam_aux_get(b, "XT");
+  uint32_t taxid = tag ? (uint32_t)bam_aux2i(tag) : 0;
+  if (taxid && utax_hastaxon(utax, keeptaxa, taxid)) return 1;
+  tag = bam_aux_get(b, "XR"); //Fallback to XR if XT not present
+  taxid = tag ? (uint32_t)bam_aux2i(tag) : 0;
+  return utax_hastaxon(utax, keeptaxa, taxid);
+}
+
+void unicorn_loadbyqname(bamq_t *q,
+	                       uint8_t *_nq,
+                         unicorn_t *u,
+                         const utax_t *utax,
+                         char **last_q,
+												 uint32_t *_nalns,
+												 uint32_t *_nreads)
+{
+  uint8_t nq = *_nq, n = 0;
+  bam1_t *b = bam_init1();
+  char *group_q = NULL;
+  const uint32q_t *keeptaxa = utax ? &utax->keeptaxa : NULL;
+  if (!b) return;
+  uint32_t nalns = 0, nreads = 0;
+  for (uint8_t i = 0; i < nq; i++) { //Loop over queues
+    kv_init(q[i]);
+    bam1_t *first = NULL;
+    free(group_q);
+    group_q = NULL;
+    while (1) { // Seed queue with the first alignment.
+      first = bam_init1();
+      if (!first) goto done;
+      if (u->dcache) {
+        if (!bam_copy1(first, u->daln)) {
+          bam_destroy1(first);
+          goto done;
+        }
+        u->dcache = 0;
+      }
+      else {
+        if (sam_read1(u->_FP, u->hdr, b) < 0) {
+          bam_destroy1(first);
+          goto done; // EOF
+        }
+        if (!bam_copy1(first, b)) {
+          bam_destroy1(first);
+          goto done;
+        }
+        nalns++;
+      }
+      if (!*last_q || strcmp(*last_q, bam_get_qname(first)) != 0) {
+        char *tmp = strdup(bam_get_qname(first));
+        if (!tmp) {
+          bam_destroy1(first);
+          goto done;
+        }
+        free(*last_q);
+        *last_q = tmp;
+        nreads++;
+      }
+      if (!_keep_tagged_alignment(utax, keeptaxa, first)) {
+        bam_destroy1(first);
+        first = NULL;
+        continue;
+      }
+      kv_push(bam1_t *, q[i], first);
+      group_q = strdup(bam_get_qname(first));
+      if (!group_q) goto done;
+      break;
+    }
+    // Keep loading until >= qsize, then extend until the *current*
+    // query name changes so a query group is not split across batches.
+    uint8_t qsize = u->qsize;
+		while (1) {
+      if (sam_read1(u->_FP, u->hdr, b) < 0) {
+        n = i + 1;
+        goto done;
+      }
+      nalns++;
+      if (!*last_q || strcmp(*last_q, bam_get_qname(b)) != 0) {
+        char *tmp = strdup(bam_get_qname(b));
+        if (!tmp) break;
+        free(*last_q);
+        *last_q = tmp;
+        nreads++;
+      }
+      if (!_keep_tagged_alignment(utax, keeptaxa, b)) continue;
+      const char *next_q = bam_get_qname(b);
+      if (q[i].n >= qsize && strcmp(group_q, next_q) != 0) {
+        // Batch limit reached and query boundary crossed: cache for next call
+        if (!bam_copy1(u->daln, b)) break;
+        u->dcache = 1;
+        break;
+      }
+      bam1_t *cp = bam_init1();
+      if (!cp) break;
+      if (!bam_copy1(cp, b)) break;
+      kv_push(bam1_t *, q[i], cp);
+      if (strcmp(group_q, next_q) != 0) {
+        char *tmp = strdup(next_q);
+        if (!tmp) break;
+        free(group_q);
+        group_q = tmp;
+      }
+    }
+    free(group_q);
+    group_q = NULL;
+    n = i + 1;
+  }
+  done:
+    free(group_q);
+    *_nq     = n;
+    *_nalns  = nalns;
+    *_nreads = nreads;
+    bam_destroy1(b);
 }
 
 /*
