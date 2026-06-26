@@ -185,6 +185,12 @@ static const mode_fn MODE_TBL[] = {
     mode_all         // 3: UNICORN_MODE_ALL
 };
 
+static inline float _normalized_filter_score(const bam1_t *b)
+{
+  float score = fabsf(_alignment_score_or_xj(b));
+  return isfinite(score) ? score : 0.0f;
+}
+
 static uint64_t unicorn_filter(unicorn_t *u, alnscoreq_t q)
 {
 	uint64_t alnid = 0, faln = 0;
@@ -308,7 +314,7 @@ static void _alnfilt_query(step_t *s,
     bam1_t *b = q->a[j];
     if (!b) continue;
     alnscore_t score = {0, 0, 0, 1};
-    score.score = fabsf(_alignment_score_or_xj(b));
+    score.score = _normalized_filter_score(b);
     score.tid = b->core.tid;
     score.al = (uint32_t)(bam_endpos(b) - b->core.pos);
     kv_push(alnscore_t, scores, score);
@@ -339,6 +345,21 @@ static void _alnfilt_query(step_t *s,
   if (filter && s->mode != UNICORN_ALNFILT_ALL) {
     if (nfalns) *nfalns += filter(scores, 0, best_score, s->pct);
     else filter(scores, 0, best_score, s->pct);
+  }
+  if (s->mode == UNICORN_ALNFILT_ALLTOP || s->mode == UNICORN_ALNFILT_RNDTOP || s->mode == UNICORN_ALNFILT_PCTTOP) {
+    uint32_t kept = 0;
+    for (uint32_t j = 0; j < scores.n; j++) {
+      if (!scores.a[j].keep) continue;
+      kept++;
+    }
+    if (kept == 0) {
+      for (uint32_t j = 0; j < scores.n; j++) {
+        if ((scores.a[j].score < s->minscore) || (scores.a[j].score > s->maxscore)) continue;
+        scores.a[j].keep = 1;
+        if (nfalns && *nfalns > 0) (*nfalns)--;
+        break;
+      }
+    }
   }
   for (uint32_t j = 0; j < scores.n; j++) {
     if (scores.a[j].keep) continue;
@@ -491,6 +512,7 @@ static int _filtall(unicorn_t *u, int mode, float minscore, float maxscore, floa
 		float best_score = scores.a[prev].score;
 		uint32_t bounds_filtered = 0;
 		for (uint64_t i = prev; i < scores.n; i++) { //Loop over alignments
+      scores.a[i].score = isfinite(scores.a[i].score) ? scores.a[i].score : 0.0f;
 			//Check for score bounds
 			if ((scores.a[i].score < minscore) || (scores.a[i].score > maxscore)) {
 				scores.a[i].keep = 0;
@@ -510,6 +532,23 @@ static int _filtall(unicorn_t *u, int mode, float minscore, float maxscore, floa
 		fqueries++;
 		falns += bounds_filtered;
 		falns += filter(scores, prev, best_score, pct);
+    if (mode != UNICORN_ALNFILT_ALL) {
+      uint8_t kept = 0;
+      for (uint64_t i = prev; i < scores.n; i++) {
+        if (scores.a[i].keep) {
+          kept = 1;
+          break;
+        }
+      }
+      if (!kept) {
+        for (uint64_t i = prev; i < scores.n; i++) {
+          if ((scores.a[i].score < minscore) || (scores.a[i].score > maxscore)) continue;
+          scores.a[i].keep = 1;
+          if (falns > 0) falns--;
+          break;
+        }
+      }
+    }
 		prev = scores.n;
 	}
 	clock_gettime(CLOCK_MONOTONIC, &stop);
