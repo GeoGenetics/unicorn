@@ -532,12 +532,12 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
 	if (opts->adnascore)
 	  fprintf(fp, "\t--adnascore\n");
 	taxonomy:
-	if (opts->withtid) {
+	//if (opts->withtid) {
     fprintf(fp, "\t--acc2tax %s\n", opts->acc2tax ? opts->acc2tax : "N/A");
     fprintf(fp, "\t--names %s\n", opts->names);
     fprintf(fp, "\t--nodes %s\n", opts->nodes);
 	  fprintf(fp, "\t--rank      %s\n", opts->rank);
-	}
+	//}
 }
 
 static uint8_t _refstats_checkopt(unicorn_opt_t *opts)
