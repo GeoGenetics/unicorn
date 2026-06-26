@@ -200,6 +200,7 @@ static void _forINSERT(void *data, long i, int tid)
     k = chr2int_put(submap, a.accv, &absent);
     if (!absent) {
       if (a.taxid != kh_val(submap, k) ) dup++;
+      free(a.accv);
       continue;
     }
     kh_val(submap, k) = a.taxid;
@@ -219,7 +220,12 @@ static tdataq_t *_loaddqueue(kstream_t *ks, uint8_t bits, uint32_t *_nacc)
 	char *tok, *key;
 	uint32_t val;
 	uint8_t low;
+	uint32_t nacc = 0;
 	while ( (ks_getuntil(ks, '\n', &kstr, 0)) >= 0 ) {
+		nacc++;
+		if (nacc % 1000000 == 0) {
+			fprintf(stderr, "[libunicorn::%s] Loaded %u accessions\n", __func__, nacc);
+		}
 		if (kstr.l == 0)
 			break;
 		tok = strtok(kstr.s, "\t\n ");
