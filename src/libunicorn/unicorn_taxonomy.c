@@ -223,8 +223,9 @@ static tdataq_t *_loaddqueue(kstream_t *ks, uint8_t bits, uint32_t *_nacc)
 	uint32_t __nacc = 0;
 	while ( (ks_getuntil(ks, '\n', &kstr, 0)) >= 0 ) {
 		__nacc++;
-		if (__nacc % 1000000 == 0) {
-			fprintf(stderr, "[libunicorn::%s] Loaded %u accessions\n", __func__, nacc);
+		if (__nacc % 10000 == 0) {
+			fprintf(stderr, "[libunicorn::%s] Loaded %u accessions\n", __func__, __nacc);
+		  fflush(stderr);
 		}
 		if (kstr.l == 0)
 			break;
