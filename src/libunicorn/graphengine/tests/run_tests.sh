@@ -237,4 +237,8 @@ if [[ "${MODE}" == "manual" ]]; then
   run_manual
 fi
 
-run_pytest "${PYTEST_ARGS[@]}"
+if ((${#PYTEST_ARGS[@]})); then
+  run_pytest "${PYTEST_ARGS[@]}"
+fi
+
+run_pytest
