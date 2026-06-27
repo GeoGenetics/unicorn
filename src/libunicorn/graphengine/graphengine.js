@@ -1,221 +1,117 @@
 "use strict";
 
-const state = {
-  series: [],
-  clientLog: [],
-  agent: {
-    history: [],
-    runtimeProvider: "mock",
-    transportMode: "backend",
-    configuredProvider: "openai",
-    configuredModel: "gpt-5",
-    apiKey: "",
-    baseUrl: "",
-  },
-  remote: {
-    connected: false,
-    datasets: [],
-    selectedDatasets: new Set(),
-    requestContext: null,
-    backendNodesFile: "",
-    backendNamesFile: "",
-    expandedTaxids: new Set(),
-    serverTreeActive: false,
-    totalReads: 0,
-    directTaxa: 0,
-    tooltipRequestId: 0,
-    tableRequestId: 0,
-    currentReport: null,
-    currentTable: null,
-  },
-  tree: null,
-  flat: [],
-  selected: new Set(),
-  missingTaxids: new Set(),
-  centerOnNextRender: false,
-  focusTaxid: null,
-  clickTimer: null,
-  tooltipTimer: null,
-  tooltipNode: null,
-  tooltipPoint: null,
-  suppressClicksUntil: 0,
-  minReadsActual: 0,
-};
+// Modularization transition note:
+// `graphengine.js` is currently being split into smaller browser-side modules.
+// During Pass 1 it still owns most runtime logic, but `state`, `els`, and boot
+// wiring now live in dedicated files.
+const unicornGraphEngine = window.UnicornGraphEngine = window.UnicornGraphEngine || {};
+const state = unicornGraphEngine.state;
+const els = unicornGraphEngine.els;
+const core = unicornGraphEngine.core;
+const backend = unicornGraphEngine.backend;
+const ui = unicornGraphEngine.ui;
 
-const els = {
-  app: document.getElementById("app"),
-  sidebar: document.getElementById("sidebar"),
-  controls: document.getElementById("controls"),
-  sidebarToggle: document.getElementById("sidebarToggle"),
-  toggleRemoteSection: document.getElementById("toggleRemoteSection"),
-  remoteSectionBody: document.getElementById("remoteSectionBody"),
-  toggleFilesSection: document.getElementById("toggleFilesSection"),
-  filesSectionBody: document.getElementById("filesSectionBody"),
-  toggleOptionsSection: document.getElementById("toggleOptionsSection"),
-  optionsSectionBody: document.getElementById("optionsSectionBody"),
-  toggleReportsSection: document.getElementById("toggleReportsSection"),
-  reportsSectionBody: document.getElementById("reportsSectionBody"),
-  toggleAgentSection: document.getElementById("toggleAgentSection"),
-  agentSectionBody: document.getElementById("agentSectionBody"),
-  agentMeta: document.getElementById("agentMeta"),
-  agentProviderSelect: document.getElementById("agentProviderSelect"),
-  agentModelSelect: document.getElementById("agentModelSelect"),
-  agentApiKey: document.getElementById("agentApiKey"),
-  agentBaseUrl: document.getElementById("agentBaseUrl"),
-  agentProviderState: document.getElementById("agentProviderState"),
-  toggleLogSection: document.getElementById("toggleLogSection"),
-  logSectionBody: document.getElementById("logSectionBody"),
-  agentPrompt: document.getElementById("agentPrompt"),
-  agentSendBtn: document.getElementById("agentSendBtn"),
-  agentClearBtn: document.getElementById("agentClearBtn"),
-  agentTranscript: document.getElementById("agentTranscript"),
-  uncollapseBtn: document.getElementById("uncollapseBtn"),
-  uncollapseTipsBtn: document.getElementById("uncollapseTipsBtn"),
-  subtreeReportBtn: document.getElementById("subtreeReportBtn"),
-  rankReportBtn: document.getElementById("rankReportBtn"),
-  selectDescendantsBtn: document.getElementById("selectDescendantsBtn"),
-  selectToRankBtn: document.getElementById("selectToRankBtn"),
-  selectToRankValue: document.getElementById("selectToRankValue"),
-  clearSelectionBtn: document.getElementById("clearSelectionBtn"),
-  lcaInputs: document.getElementById("lcaInputs"),
-  lcaListFile: document.getElementById("lcaListFile"),
-  addLcaBtn: document.getElementById("addLcaBtn"),
-  clearLcaListBtn: document.getElementById("clearLcaListBtn"),
-  remoteUser: document.getElementById("remoteUser"),
-  remoteHost: document.getElementById("remoteHost"),
-  connectBtn: document.getElementById("connectBtn"),
-  uploadBtn: document.getElementById("uploadBtn"),
-  copyTunnelBtn: document.getElementById("copyTunnelBtn"),
-  connectionState: document.getElementById("connectionState"),
-  tunnelCommand: document.getElementById("tunnelCommand"),
-  tunnelHint: document.getElementById("tunnelHint"),
-  remoteDatasetsPanel: document.getElementById("remoteDatasetsPanel"),
-  remoteRefreshBtn: document.getElementById("remoteRefreshBtn"),
-  remoteSelectAllBtn: document.getElementById("remoteSelectAllBtn"),
-  remoteClearAllBtn: document.getElementById("remoteClearAllBtn"),
-  remoteDatasetsMeta: document.getElementById("remoteDatasetsMeta"),
-  remoteDatasetsList: document.getElementById("remoteDatasetsList"),
-  nodesFile: document.getElementById("nodesFile"),
-  namesFile: document.getElementById("namesFile"),
-  renderBtn: document.getElementById("renderBtn"),
-  centerBtn: document.getElementById("centerBtn"),
-  countViewMode: document.getElementById("countViewMode"),
-  toggleTableBtn: document.getElementById("toggleTableBtn"),
-  countMode: document.getElementById("countMode"),
-  scaleMode: document.getElementById("scaleMode"),
-  minReads: document.getElementById("minReads"),
-  minReadsValue: document.getElementById("minReadsValue"),
-  minReadsScale: document.getElementById("minReadsScale"),
-  minReadsMax: document.getElementById("minReadsMax"),
-  searchBox: document.getElementById("searchBox"),
-  controlsResize: document.getElementById("controlsResize"),
-  summaryPanel: document.getElementById("summaryPanel"),
-  summaryResize: document.getElementById("summaryResize"),
-  status: document.getElementById("status"),
-  chartWrap: document.getElementById("chartWrap"),
-  svg: document.getElementById("treeSvg"),
-  tooltip: document.getElementById("tooltip"),
-  readCount: document.getElementById("readCount"),
-  taxonCount: document.getElementById("taxonCount"),
-  visibleCount: document.getElementById("visibleCount"),
-  missingCount: document.getElementById("missingCount"),
-  selectedCount: document.getElementById("selectedCount"),
-  tablePanel: document.getElementById("tablePanel"),
-  tablePanelTitle: document.getElementById("tablePanelTitle") || document.querySelector("#tablePanel h2"),
-  tableResize: document.getElementById("tableResize"),
-  pcoaMetric: document.getElementById("pcoaMetric"),
-  pcoaBtn: document.getElementById("pcoaBtn"),
-  barplotBtn: document.getElementById("barplotBtn"),
-  exportMatrixBtn: document.getElementById("exportMatrixBtn"),
-  subtreeReport: document.getElementById("subtreeReport"),
-  sourceLegend: document.getElementById("sourceLegend"),
-  topTableWrap: document.getElementById("topTableWrap"),
-  topTable: document.getElementById("topTable"),
-  clientLogMeta: document.getElementById("clientLogMeta"),
-  clientLog: document.getElementById("clientLog"),
-  clearClientLogBtn: document.getElementById("clearClientLogBtn"),
-};
+if (!state || !els || !core || !backend || !ui) {
+  throw new Error("Unicorn graphengine expected state, DOM, core, backend, and UI modules to load before graphengine.js.");
+}
 
-const SOURCE_COLORS = [
-  "#c85f43",
-  "#255f75",
-  "#e2a44e",
-  "#5f8c6f",
-  "#8a5a99",
-  "#d17b2c",
-  "#5d6cc1",
-  "#b24d6d",
-  "#4c9f9b",
-  "#7f6a58",
-];
+const {
+  SOURCE_COLORS,
+  RANK_DISPLAY_ORDER,
+  AGENT_PROVIDER_MODELS,
+  AGENT_SUPPORTED_PROVIDER_TARGETS,
+  AGENT_V1_READ_ONLY_TOOL_NAMES,
+  AGENT_MAX_TOOL_ITERATIONS,
+  formatBytes,
+  svgEl,
+  formatLogTime,
+  errorToDetail,
+  escapeHtml,
+} = core;
 
-const RANK_DISPLAY_ORDER = [
-  "superkingdom",
-  "kingdom",
-  "subkingdom",
-  "superphylum",
-  "phylum",
-  "subphylum",
-  "infraphylum",
-  "superclass",
-  "class",
-  "subclass",
-  "infraclass",
-  "cohort",
-  "superorder",
-  "order",
-  "suborder",
-  "infraorder",
-  "parvorder",
-  "superfamily",
-  "family",
-  "subfamily",
-  "tribe",
-  "subtribe",
-  "genus",
-  "subgenus",
-  "section",
-  "series",
-  "species group",
-  "species subgroup",
-  "species",
-  "subspecies",
-  "varietas",
-  "variety",
-  "subvariety",
-  "forma",
-  "strain",
-  "isolate",
-  "clade",
-  "no rank",
-];
+const {
+  getActiveBackendRequestContext,
+  updateActiveBackendRequestContext,
+  normalizeProviderRequestContext,
+  connectRemote,
+  updateTunnelHint,
+  updateConnectionState,
+  uploadLoadedFiles,
+  copyTunnelCommand,
+  loadAndRender,
+  getLocalRemoteUploadFiles,
+  getLocalRemoteDatasetUploadFiles,
+  uploadFilesToRemote,
+  loadAndRenderBackend,
+  clearRemoteDatasetInputs,
+  buildSeriesFromRemoteDatasets,
+  buildRemoteTree,
+  handleMinReadsChange,
+  hasBackendTree,
+  buildRemoteContextUrl,
+  fetchRemoteVisibleTree,
+  fetchRemoteNodeTooltip,
+  fetchRemoteTableView,
+  fetchRemoteSubtreeReport,
+  fetchRemoteRankReport,
+  fetchRemoteFullTreeModel,
+  applyRemoteVisiblePayload,
+  refreshRemoteDatasets,
+  renderRemoteDatasets,
+  selectAllRemoteDatasets,
+  clearRemoteDatasets,
+  resetBackendTreeState,
+  reconcileTreeStateAfterDatasetChange,
+  refreshTreeForDatasetSelectionChange,
+  hasLocalRemoteTaxonomyOverride,
+  hasRemoteBackendTaxonomy,
+  canRenderRemoteTree,
+  remoteRenderUnavailableMessage,
+  backendConnectionReadyMessage,
+  updateRemoteServerStatus,
+  refreshRemoteServerStatus,
+  syncBackendRuntimeUiState,
+  updateRenderAvailability,
+  getSelectedRemoteDatasets,
+  formatRemoteDatasetDetail,
+} = backend;
 
-const AGENT_PROVIDER_MODELS = {
-  openai: [
-    { value: "gpt-5", label: "GPT-5" },
-    { value: "gpt-5-mini", label: "GPT-5 mini" },
-    { value: "gpt-4.1", label: "GPT-4.1" },
-  ],
-  google: [
-    { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-    { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
-    { value: "gemini-3-flash", label: "Gemini 3 Flash" },
-    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
-  ],
-};
-
-const AGENT_SUPPORTED_PROVIDER_TARGETS = ["openai", "google"];
-const AGENT_V1_READ_ONLY_TOOL_NAMES = [
-  "get_graph_context",
-  "list_selected_datasets",
-  "get_selected_nodes",
-  "get_node_details",
-  "get_table_view",
-];
-
-const AGENT_MAX_TOOL_ITERATIONS = 4;
+const {
+  initRemotePanel,
+  initFileInputs,
+  initMinReadsControls,
+  getMinReadsMax,
+  getMinReadsScale,
+  getMinReadsValue,
+  setMinReadsValue,
+  valueFromSliderPosition,
+  sliderPositionFromValue,
+  syncMinReadsControl,
+  handleMinReadsScaleChange,
+  handleMinReadsMaxChange,
+  ensureFileRowControls,
+  initSidebarPanel,
+  initSectionToggle,
+  setSectionCollapsed,
+  toggleSidebar,
+  setSidebarCollapsed,
+  getCountViewMode,
+  getCountViewLabel,
+  initControlsResize,
+  setControlsWidth,
+  initSummaryResize,
+  setSummaryHeight,
+  initTablePanel,
+  initTableResize,
+  toggleTablePanel,
+  setTablePanelVisible,
+  setTableHeight,
+  addLcaInput,
+  clearLcaListFile,
+  colorForSource,
+  renderSourceLegend,
+  getVisibleSeries,
+} = ui;
 
 const unicornAgentRegistry = createUnicornAgentRegistry();
 window.unicornAgentRegistry = unicornAgentRegistry;
@@ -230,321 +126,117 @@ const unicornAgentProviderAdapter = window.UnicornAgentProviderModule.createProv
 });
 window.unicornAgentProviderAdapter = unicornAgentProviderAdapter;
 
-els.renderBtn.addEventListener("click", loadAndRender);
-els.addLcaBtn.addEventListener("click", addLcaInput);
-els.clearLcaListBtn.addEventListener("click", clearLcaListFile);
-els.connectBtn.addEventListener("click", connectRemote);
-els.uploadBtn.addEventListener("click", uploadLoadedFiles);
-els.copyTunnelBtn.addEventListener("click", copyTunnelCommand);
-els.remoteRefreshBtn.addEventListener("click", async () => {
-  try {
-    await refreshRemoteDatasets();
-    const count = state.remote.datasets.length;
-    setStatus(`Backend dataset list refreshed. ${count.toLocaleString()} file${count === 1 ? "" : "s"} available.`);
-  } catch (error) {
-    setStatus(`Could not refresh backend datasets: ${error.message || error}`);
-  }
-});
-els.remoteSelectAllBtn.addEventListener("click", selectAllRemoteDatasets);
-els.remoteClearAllBtn.addEventListener("click", clearRemoteDatasets);
-els.remoteUser.addEventListener("input", updateTunnelHint);
-els.remoteHost.addEventListener("input", updateTunnelHint);
-els.centerBtn.addEventListener("click", () => {
-  state.focusTaxid = null;
-  centerRoot();
-});
-if (els.countViewMode) {
-  els.countViewMode.addEventListener("change", () => {
-    redraw();
-  });
-}
-els.toggleTableBtn.addEventListener("click", toggleTablePanel);
-els.countMode.addEventListener("change", redraw);
-els.scaleMode.addEventListener("change", redraw);
-els.minReads.addEventListener("input", handleMinReadsChange);
-if (els.minReadsScale) {
-  els.minReadsScale.addEventListener("change", handleMinReadsScaleChange);
-}
-if (els.minReadsMax) {
-  els.minReadsMax.addEventListener("input", handleMinReadsMaxChange);
-  els.minReadsMax.addEventListener("change", handleMinReadsMaxChange);
-}
-els.searchBox.addEventListener("input", redraw);
-els.sidebarToggle.addEventListener("click", toggleSidebar);
-els.uncollapseBtn.addEventListener("click", uncollapseSelected);
-els.uncollapseTipsBtn.addEventListener("click", uncollapseSelectedToTips);
-if (els.subtreeReportBtn) {
-  els.subtreeReportBtn.addEventListener("click", openSelectedSubtreeReport);
-}
-if (els.rankReportBtn) {
-  els.rankReportBtn.addEventListener("click", openSelectedRankReport);
-}
-if (els.agentSendBtn) {
-  els.agentSendBtn.addEventListener("click", handleAgentSend);
-}
-if (els.agentClearBtn) {
-  els.agentClearBtn.addEventListener("click", clearAgentTranscript);
-}
-if (els.agentProviderSelect) {
-  els.agentProviderSelect.addEventListener("change", handleAgentProviderChange);
-}
-if (els.agentModelSelect) {
-  els.agentModelSelect.addEventListener("change", handleAgentModelChange);
-}
-if (els.agentApiKey) {
-  els.agentApiKey.addEventListener("input", handleAgentApiKeyInput);
-}
-if (els.agentBaseUrl) {
-  els.agentBaseUrl.addEventListener("input", handleAgentBaseUrlInput);
-}
-if (els.agentPrompt) {
-  els.agentPrompt.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      handleAgentSend();
-    }
-  });
-}
-els.selectDescendantsBtn.addEventListener("click", selectDescendants);
-if (els.selectToRankBtn) {
-  els.selectToRankBtn.addEventListener("click", selectToRank);
-}
-if (els.selectToRankValue) {
-  els.selectToRankValue.addEventListener("change", syncBackendRuntimeUiState);
-}
-els.clearSelectionBtn.addEventListener("click", clearSelection);
-if (els.exportMatrixBtn) {
-  els.exportMatrixBtn.addEventListener("click", exportCurrentSubtreeMatrix);
-}
-if (els.pcoaBtn) {
-  els.pcoaBtn.addEventListener("click", openCurrentCountMatrixPcoa);
-}
-if (els.barplotBtn) {
-  els.barplotBtn.addEventListener("click", openCurrentCountMatrixBarplot);
-}
-if (els.clearClientLogBtn) {
-  els.clearClientLogBtn.addEventListener("click", clearClientLog);
-}
-initControlsResize();
-initSummaryResize();
-initTablePanel();
-initTableResize();
-initSidebarPanel();
-initChartPan();
-initRemotePanel();
-initFileInputs();
-initMinReadsControls();
-initAgentControls();
-renderAgentTranscript();
-
-function initRemotePanel() {
-  const savedUser = localStorage.getItem("unicorn.remoteUser") || "";
-  const savedHost = localStorage.getItem("unicorn.remoteHost") || "";
-  els.remoteUser.value = savedUser;
-  els.remoteHost.value = savedHost;
-  updateTunnelHint();
-  updateConnectionState(false, "Not connected");
-  renderRemoteDatasets();
-  syncBackendRuntimeUiState();
-  renderClientLog();
-}
-
-function initFileInputs() {
-  ensureFileRowControls();
-  els.nodesFile.addEventListener("change", updateRenderAvailability);
-  els.namesFile.addEventListener("change", updateRenderAvailability);
-  els.lcaInputs.addEventListener("change", (event) => {
-    if (event.target && event.target.matches(".lca-file-input")) {
-      updateRenderAvailability();
-    }
-  });
-}
-
-function initMinReadsControls() {
-  const savedValue = Number(localStorage.getItem("unicorn.minReadsActual"));
-  const savedScale = localStorage.getItem("unicorn.minReadsScale");
-  const savedMax = Number(localStorage.getItem("unicorn.minReadsMax"));
-  state.minReadsActual = Number.isFinite(savedValue) && savedValue >= 0 ? Math.round(savedValue) : 0;
-  if (els.minReadsScale && (savedScale === "log" || savedScale === "linear")) {
-    els.minReadsScale.value = savedScale;
-  }
-  if (els.minReadsMax && Number.isFinite(savedMax) && savedMax >= 1) {
-    els.minReadsMax.value = String(Math.round(savedMax));
-  }
-  syncMinReadsControl();
-}
-
-function getMinReadsMax() {
-  if (els.minReadsMax) {
-    const configured = Number(els.minReadsMax.value || 0);
-    if (Number.isFinite(configured) && configured >= 1) {
-      return Math.round(configured);
-    }
-  }
-  return 1000;
-}
-
-function getMinReadsScale() {
-  return els.minReadsScale && els.minReadsScale.value === "log" ? "log" : "linear";
-}
-
-function getMinReadsValue() {
-  return Math.max(0, Math.round(state.minReadsActual || 0));
-}
-
-function setMinReadsValue(value) {
-  const maxValue = getMinReadsMax();
-  state.minReadsActual = Math.max(0, Math.min(maxValue, Math.round(Number(value) || 0)));
-  localStorage.setItem("unicorn.minReadsActual", String(state.minReadsActual));
-  syncMinReadsControl();
-}
-
-function valueFromSliderPosition(position) {
-  const sliderValue = Math.max(0, Math.min(1000, Number(position) || 0));
-  const maxValue = getMinReadsMax();
-  if (getMinReadsScale() === "log") {
-    if (sliderValue <= 0) return 0;
-    return Math.round(Math.exp((sliderValue / 1000) * Math.log(maxValue + 1)) - 1);
-  }
-  return Math.round((sliderValue / 1000) * maxValue);
-}
-
-function sliderPositionFromValue(value) {
-  const clampedValue = Math.max(0, Math.min(getMinReadsMax(), Number(value) || 0));
-  const maxValue = getMinReadsMax();
-  if (getMinReadsScale() === "log") {
-    if (clampedValue <= 0) return 0;
-    return Math.round((Math.log(clampedValue + 1) / Math.log(maxValue + 1)) * 1000);
-  }
-  return Math.round((clampedValue / maxValue) * 1000);
-}
-
-function syncMinReadsControl() {
-  state.minReadsActual = Math.max(0, Math.min(getMinReadsMax(), getMinReadsValue()));
-  els.minReads.value = String(sliderPositionFromValue(state.minReadsActual));
-  if (els.minReadsValue) {
-    els.minReadsValue.textContent = state.minReadsActual.toLocaleString();
-  }
-}
-
-async function handleMinReadsScaleChange() {
-  localStorage.setItem("unicorn.minReadsScale", getMinReadsScale());
-  syncMinReadsControl();
-  if (hasBackendTree()) {
+function initializeGraphengine() {
+  els.renderBtn.addEventListener("click", loadAndRender);
+  els.addLcaBtn.addEventListener("click", addLcaInput);
+  els.clearLcaListBtn.addEventListener("click", clearLcaListFile);
+  els.connectBtn.addEventListener("click", connectRemote);
+  els.uploadBtn.addEventListener("click", uploadLoadedFiles);
+  els.copyTunnelBtn.addEventListener("click", copyTunnelCommand);
+  els.remoteRefreshBtn.addEventListener("click", async () => {
     try {
-      const payload = await fetchRemoteVisibleTree({
-        minReads: getMinReadsValue(),
-        expandedTaxids: Array.from(state.remote.expandedTaxids),
-      });
-      applyRemoteVisiblePayload(payload);
-      await refreshCurrentReportIfNeeded();
-      redraw();
-      return;
+      await refreshRemoteDatasets();
+      const count = state.remote.datasets.length;
+      setStatus(`Backend dataset list refreshed. ${count.toLocaleString()} file${count === 1 ? "" : "s"} available.`);
     } catch (error) {
-      setStatus(`Could not refresh backend tree after changing the read-scale mode: ${error.message || error}`);
-      return;
+      setStatus(`Could not refresh backend datasets: ${error.message || error}`);
     }
-  }
-  redraw();
-}
-
-async function handleMinReadsMaxChange() {
-  if (els.minReadsMax) {
-    const numeric = Number(els.minReadsMax.value || 0);
-    els.minReadsMax.value = String(Math.max(1, Math.round(Number.isFinite(numeric) ? numeric : 1)));
-    localStorage.setItem("unicorn.minReadsMax", els.minReadsMax.value);
-  }
-  syncMinReadsControl();
-  if (hasBackendTree()) {
-    try {
-      const payload = await fetchRemoteVisibleTree({
-        minReads: getMinReadsValue(),
-        expandedTaxids: Array.from(state.remote.expandedTaxids),
-      });
-      applyRemoteVisiblePayload(payload);
-      await refreshCurrentReportIfNeeded();
+  });
+  els.remoteSelectAllBtn.addEventListener("click", selectAllRemoteDatasets);
+  els.remoteClearAllBtn.addEventListener("click", clearRemoteDatasets);
+  els.remoteUser.addEventListener("input", updateTunnelHint);
+  els.remoteHost.addEventListener("input", updateTunnelHint);
+  els.centerBtn.addEventListener("click", () => {
+    state.focusTaxid = null;
+    centerRoot();
+  });
+  if (els.countViewMode) {
+    els.countViewMode.addEventListener("change", () => {
       redraw();
-      return;
-    } catch (error) {
-      setStatus(`Could not refresh backend tree after changing the slider range: ${error.message || error}`);
-      return;
-    }
-  }
-  redraw();
-}
-
-function ensureFileRowControls() {
-  els.lcaInputs.querySelectorAll(".file-row").forEach((row) => {
-    let removeBtn = row.querySelector(".remove-file-btn");
-    if (!removeBtn) {
-      removeBtn = document.createElement("button");
-      removeBtn.type = "button";
-      removeBtn.className = "secondary remove-file-btn";
-      removeBtn.setAttribute("aria-label", "Remove input file");
-      removeBtn.textContent = "Remove";
-      row.appendChild(removeBtn);
-    }
-    if (removeBtn.dataset.bound === "1") return;
-    removeBtn.dataset.bound = "1";
-    removeBtn.addEventListener("click", () => {
-      const inputs = els.lcaInputs.querySelectorAll(".file-row");
-      if (inputs.length <= 1) {
-        const fileInput = row.querySelector(".lca-file-input");
-        if (fileInput) fileInput.value = "";
-        return;
-      }
-      row.remove();
     });
-  });
+  }
+  els.toggleTableBtn.addEventListener("click", toggleTablePanel);
+  els.countMode.addEventListener("change", redraw);
+  els.scaleMode.addEventListener("change", redraw);
+  els.minReads.addEventListener("input", handleMinReadsChange);
+  if (els.minReadsScale) {
+    els.minReadsScale.addEventListener("change", handleMinReadsScaleChange);
+  }
+  if (els.minReadsMax) {
+    els.minReadsMax.addEventListener("input", handleMinReadsMaxChange);
+    els.minReadsMax.addEventListener("change", handleMinReadsMaxChange);
+  }
+  els.searchBox.addEventListener("input", redraw);
+  els.sidebarToggle.addEventListener("click", toggleSidebar);
+  els.uncollapseBtn.addEventListener("click", uncollapseSelected);
+  els.uncollapseTipsBtn.addEventListener("click", uncollapseSelectedToTips);
+  if (els.subtreeReportBtn) {
+    els.subtreeReportBtn.addEventListener("click", openSelectedSubtreeReport);
+  }
+  if (els.rankReportBtn) {
+    els.rankReportBtn.addEventListener("click", openSelectedRankReport);
+  }
+  if (els.agentSendBtn) {
+    els.agentSendBtn.addEventListener("click", handleAgentSend);
+  }
+  if (els.agentClearBtn) {
+    els.agentClearBtn.addEventListener("click", clearAgentTranscript);
+  }
+  if (els.agentProviderSelect) {
+    els.agentProviderSelect.addEventListener("change", handleAgentProviderChange);
+  }
+  if (els.agentModelSelect) {
+    els.agentModelSelect.addEventListener("change", handleAgentModelChange);
+  }
+  if (els.agentApiKey) {
+    els.agentApiKey.addEventListener("input", handleAgentApiKeyInput);
+  }
+  if (els.agentBaseUrl) {
+    els.agentBaseUrl.addEventListener("input", handleAgentBaseUrlInput);
+  }
+  if (els.agentPrompt) {
+    els.agentPrompt.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        handleAgentSend();
+      }
+    });
+  }
+  els.selectDescendantsBtn.addEventListener("click", selectDescendants);
+  if (els.selectToRankBtn) {
+    els.selectToRankBtn.addEventListener("click", selectToRank);
+  }
+  if (els.selectToRankValue) {
+    els.selectToRankValue.addEventListener("change", syncBackendRuntimeUiState);
+  }
+  els.clearSelectionBtn.addEventListener("click", clearSelection);
+  if (els.exportMatrixBtn) {
+    els.exportMatrixBtn.addEventListener("click", exportCurrentSubtreeMatrix);
+  }
+  if (els.pcoaBtn) {
+    els.pcoaBtn.addEventListener("click", openCurrentCountMatrixPcoa);
+  }
+  if (els.barplotBtn) {
+    els.barplotBtn.addEventListener("click", openCurrentCountMatrixBarplot);
+  }
+  if (els.clearClientLogBtn) {
+    els.clearClientLogBtn.addEventListener("click", clearClientLog);
+  }
+
+  initControlsResize();
+  initSummaryResize();
+  initTablePanel();
+  initTableResize();
+  initSidebarPanel();
+  initChartPan();
+  initRemotePanel();
+  initFileInputs();
+  initMinReadsControls();
+  initAgentControls();
+  renderAgentTranscript();
 }
 
-function initSidebarPanel() {
-  const savedCollapsed = localStorage.getItem("unicorn.sidebarCollapsed") === "true";
-  setSidebarCollapsed(savedCollapsed);
-  initSectionToggle("remoteSection", els.toggleRemoteSection, els.remoteSectionBody);
-  initSectionToggle("filesSection", els.toggleFilesSection, els.filesSectionBody);
-  initSectionToggle("optionsSection", els.toggleOptionsSection, els.optionsSectionBody);
-  initSectionToggle("reportsSection", els.toggleReportsSection, els.reportsSectionBody);
-  initSectionToggle("agentSection", els.toggleAgentSection, els.agentSectionBody);
-  initSectionToggle("logSection", els.toggleLogSection, els.logSectionBody);
-}
-
-function initSectionToggle(key, button, body) {
-  const collapsed = localStorage.getItem(`unicorn.${key}.collapsed`) === "true";
-  setSectionCollapsed(button, body, collapsed);
-  button.addEventListener("click", () => {
-    const next = button.getAttribute("aria-expanded") !== "true";
-    setSectionCollapsed(button, body, !next);
-    localStorage.setItem(`unicorn.${key}.collapsed`, String(!next));
-  });
-}
-
-function setSectionCollapsed(button, body, collapsed) {
-  const section = button.closest(".panel-section");
-  if (section) section.classList.toggle("collapsed", collapsed);
-  body.hidden = collapsed;
-  button.textContent = collapsed ? "Show" : "Hide";
-  button.setAttribute("aria-expanded", String(!collapsed));
-}
-
-function toggleSidebar() {
-  const collapsed = !els.app.classList.contains("sidebar-collapsed");
-  setSidebarCollapsed(collapsed);
-  localStorage.setItem("unicorn.sidebarCollapsed", String(collapsed));
-  requestAnimationFrame(() => {
-    if (state.tree) {
-      centerNode(state.focusTaxid
-        ? state.flat.find((node) => node.taxid === state.focusTaxid) || state.tree
-        : state.tree);
-    }
-  });
-}
-
-function setSidebarCollapsed(collapsed) {
-  els.app.classList.toggle("sidebar-collapsed", collapsed);
-  els.sidebarToggle.textContent = collapsed ? "Show Panel" : "Hide Panel";
-  els.sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
-}
+unicornGraphEngine.initialize = initializeGraphengine;
 
 function createUnicornAgentRegistry() {
   const tools = {
@@ -828,27 +520,6 @@ function buildAgentContext() {
   };
 }
 
-function getActiveBackendRequestContext() {
-  return normalizeProviderRequestContext(state.remote.requestContext);
-}
-
-function updateActiveBackendRequestContext(requestContext, options = {}) {
-  const normalized = normalizeProviderRequestContext(requestContext);
-  if (!normalized) return;
-  const preserveExpandedTaxids = options.preserveExpandedTaxids !== false;
-  const previous = getActiveBackendRequestContext();
-  if (preserveExpandedTaxids && previous && (!normalized.expanded_taxids || !normalized.expanded_taxids.length)) {
-    normalized.expanded_taxids = previous.expanded_taxids.slice();
-  }
-  state.remote.requestContext = normalized;
-  if (normalized.nodes_file) {
-    state.remote.backendNodesFile = normalized.nodes_file;
-  }
-  if (normalized.names_file || normalized.names_file === null) {
-    state.remote.backendNamesFile = normalized.names_file || "";
-  }
-}
-
 function summarizeCurrentAgentReport(reportState) {
   if (!reportState || typeof reportState !== "object") return null;
   if (reportState.type === "subtree") {
@@ -873,23 +544,6 @@ function summarizeCurrentAgentReport(reportState) {
   }
   return {
     type: String(reportState.type || "unknown"),
-  };
-}
-
-function normalizeProviderRequestContext(requestContext) {
-  if (!requestContext || typeof requestContext !== "object") {
-    return null;
-  }
-  return {
-    dataset_names: Array.isArray(requestContext.dataset_names)
-      ? requestContext.dataset_names.map((name) => String(name))
-      : [],
-    nodes_file: requestContext.nodes_file ? String(requestContext.nodes_file) : null,
-    names_file: requestContext.names_file ? String(requestContext.names_file) : null,
-    min_reads: Number(requestContext.min_reads || 0),
-    expanded_taxids: Array.isArray(requestContext.expanded_taxids)
-      ? requestContext.expanded_taxids.map((value) => Number(value))
-      : [],
   };
 }
 
@@ -1630,767 +1284,6 @@ function handleAgentSend() {
     });
 }
 
-async function connectRemote() {
-  const user = els.remoteUser.value.trim();
-  const host = els.remoteHost.value.trim();
-  localStorage.setItem("unicorn.remoteUser", user);
-  localStorage.setItem("unicorn.remoteHost", host);
-  updateTunnelHint();
-
-  if (!user || !host) {
-    updateConnectionState(false, "Enter username and host");
-    setStatus("Enter a backend username and host, open the SSH tunnel if needed, then test the connection.");
-    return;
-  }
-
-  updateConnectionState(false, "Connecting...");
-  setStatus(`Testing local tunnel endpoint for ${user}@${host}...`);
-  addClientLog("info", "tunnel", `Testing tunnel endpoint for ${user}@${host}.`, "GET http://localhost:8000/ping");
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2500);
-    const response = await fetch("http://localhost:8000/ping", {
-      method: "GET",
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    if (!response.ok) {
-      throw new Error(`Ping returned HTTP ${response.status}`);
-    }
-    const ping = await response.json();
-    updateRemoteServerStatus(ping);
-    updateConnectionState(true, "Connected");
-    addClientLog(
-      "success",
-      "tunnel",
-      `Tunnel check succeeded for ${user}@${host}.`,
-      `backend taxonomy: nodes=${ping?.taxonomy?.nodes_file || "missing"}, names=${ping?.taxonomy?.names_file || "missing"}`,
-    );
-    try {
-      await refreshRemoteDatasets({ selectAll: true });
-      setStatus(backendConnectionReadyMessage(user, host));
-    } catch (error) {
-      addClientLog("error", "datasets", "Backend dataset refresh failed after tunnel check.", errorToDetail(error));
-      setStatus(`Tunnel check succeeded for ${user}@${host}, but the backend dataset list could not be loaded yet. ${error.message || error}`);
-    }
-  } catch (error) {
-    updateConnectionState(false, "Tunnel check failed");
-    state.remote.datasets = [];
-    state.remote.selectedDatasets.clear();
-    updateRemoteServerStatus(null);
-    renderRemoteDatasets();
-    addClientLog("error", "tunnel", `Tunnel check failed for ${user}@${host}.`, errorToDetail(error));
-    setStatus(`Tunnel check failed for ${user}@${host}. Make sure the SSH tunnel is open if needed and the backend HTTP server is running on port 8000.`);
-  }
-}
-
-function updateTunnelHint() {
-  const user = els.remoteUser.value.trim() || "youruser";
-  const host = els.remoteHost.value.trim() || "remote-server";
-  const command = `ssh -L 8000:localhost:8000 ${user}@${host}`;
-  els.tunnelCommand.textContent = command;
-  els.tunnelHint.innerHTML = `Start the graphengine backend and connect this UI to it. If the backend runs on another machine, open the SSH tunnel first, then use <strong>Test Tunnel</strong> to verify the backend HTTP endpoint.`;
-}
-
-function updateConnectionState(connected, message) {
-  state.remote.connected = connected;
-  if (!connected) {
-    state.remote.requestContext = null;
-    state.remote.backendNodesFile = "";
-    state.remote.backendNamesFile = "";
-  }
-  els.connectionState.textContent = message;
-  els.connectionState.classList.toggle("online", connected);
-  els.connectionState.classList.toggle("offline", !connected);
-  els.remoteDatasetsPanel.hidden = !connected;
-  syncBackendRuntimeUiState();
-}
-
-async function uploadLoadedFiles() {
-  const user = els.remoteUser.value.trim();
-  const host = els.remoteHost.value.trim();
-  const localFiles = getLocalRemoteUploadFiles();
-
-  if (!user || !host) {
-    setStatus("Enter a backend username and host before uploading files.");
-    return;
-  }
-  if (!localFiles.length) {
-    setStatus("No local .bdamage/LCA files are currently selected for upload.");
-    return;
-  }
-  if (!state.remote.connected) {
-    setStatus(`Tunnel has not been confirmed for ${user}@${host}. Test the tunnel first, then upload.`);
-    return;
-  }
-
-  els.uploadBtn.disabled = true;
-  addClientLog(
-    "info",
-    "upload",
-    `Uploading ${localFiles.length.toLocaleString()} local file${localFiles.length === 1 ? "" : "s"} to the backend.`,
-    localFiles.map((file) => file.name).join("\n"),
-  );
-  try {
-    const uploaded = await uploadFilesToRemote(localFiles);
-    await refreshRemoteServerStatus();
-    await refreshRemoteDatasets();
-    addClientLog("success", "upload", `Uploaded ${uploaded.toLocaleString()} file(s) successfully.`);
-    setStatus(`Uploaded ${uploaded.toLocaleString()} file(s) to the backend server for ${user}@${host}.`);
-  } catch (error) {
-    addClientLog("error", "upload", "Upload stopped.", errorToDetail(error));
-    setStatus(`Upload stopped. ${error.message || error}`);
-  } finally {
-    els.uploadBtn.disabled = false;
-  }
-}
-
-async function copyTunnelCommand() {
-  const command = els.tunnelCommand.textContent;
-  try {
-    await navigator.clipboard.writeText(command);
-    setStatus("Copied SSH tunnel command to clipboard.");
-  } catch (error) {
-    setStatus("Could not copy tunnel command automatically. You can still copy it manually.");
-  }
-}
-
-async function loadAndRender() {
-  if (!state.remote.connected) {
-    setStatus("Connect to the backend before rendering. If you are working locally, start the graphengine backend and connect to localhost.");
-    return;
-  }
-  if (!canRenderRemoteTree()) {
-    setStatus(remoteRenderUnavailableMessage());
-    return;
-  }
-  try {
-    setStatus("Syncing local uploads and fetching backend tree...");
-    state.missingTaxids.clear();
-    await loadAndRenderBackend();
-  } catch (error) {
-    console.error(error);
-    addClientLog("error", "tree", "Could not render tree.", errorToDetail(error));
-    setStatus(`Could not render tree: ${error.message || error}`);
-  }
-}
-
-function getLocalRemoteUploadFiles() {
-  const files = getLocalRemoteDatasetUploadFiles();
-  if (els.nodesFile.files[0]) files.push(els.nodesFile.files[0]);
-  if (els.namesFile.files[0]) files.push(els.namesFile.files[0]);
-  return files;
-}
-
-function getLocalRemoteDatasetUploadFiles() {
-  return Array.from(document.querySelectorAll(".lca-file-input"))
-    .map((input) => input.files[0])
-    .filter(Boolean);
-}
-
-async function uploadFilesToRemote(files) {
-  let uploaded = 0;
-  for (const file of files) {
-    const form = new FormData();
-    form.append("file", file, file.name);
-    addClientLog("info", "upload", `Uploading file ${file.name}.`);
-    let response;
-    try {
-      response = await fetch("http://localhost:8000/upload", {
-        method: "POST",
-        body: form,
-      });
-    } catch (error) {
-      addClientLog("error", "upload", `Upload fetch failed for ${file.name}.`, errorToDetail(error));
-      throw error;
-    }
-    if (!response.ok) {
-      addClientLog("error", "upload", `Upload failed for ${file.name}.`, `HTTP ${response.status}`);
-      throw new Error(`Upload failed for ${file.name} with HTTP ${response.status}`);
-    }
-    addClientLog("success", "upload", `Upload finished for ${file.name}.`);
-    uploaded++;
-  }
-  return uploaded;
-}
-
-async function loadAndRenderBackend() {
-  const localFiles = getLocalRemoteUploadFiles();
-  if (localFiles.length) {
-    await uploadFilesToRemote(localFiles);
-    await refreshRemoteServerStatus();
-    await refreshRemoteDatasets();
-    for (const file of localFiles) {
-      if (file.name.endsWith(".bdamage.txt")) state.remote.selectedDatasets.add(file.name);
-    }
-    clearRemoteDatasetInputs();
-  }
-
-  const files = getSelectedRemoteDatasets();
-  if (!files.length) {
-    setStatus(state.remote.datasets.length
-      ? "No backend datasets are currently selected. Select one or more files in the Datasets panel."
-      : "No backend .bdamage datasets are available to render.");
-    return;
-  }
-
-  state.remote.expandedTaxids.clear();
-  addClientLog(
-    "info",
-    "tree",
-    `Requesting backend root tree view for ${files.length.toLocaleString()} dataset${files.length === 1 ? "" : "s"}.`,
-    files.join("\n"),
-  );
-  const payload = await fetchRemoteVisibleTree({
-    datasetNames: files,
-    nodesFile: els.nodesFile.files[0] ? els.nodesFile.files[0].name : null,
-    namesFile: els.namesFile.files[0] ? els.namesFile.files[0].name : null,
-    minReads: getMinReadsValue(),
-    expandedTaxids: [],
-  });
-  if (!payload.tree) {
-    addClientLog("error", "tree", "The backend returned no tree payload.");
-    setStatus("The backend returned no tree to render.");
-    return;
-  }
-
-  applyRemoteVisiblePayload(payload);
-  state.centerOnNextRender = true;
-  addClientLog("success", "tree", `Loaded backend tree with ${Number(payload.direct_taxa || 0).toLocaleString()} direct taxa.`);
-  setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} dataset${state.series.length === 1 ? "" : "s"} and ${state.remote.directTaxa.toLocaleString()} direct taxa.`);
-  redraw();
-}
-
-function clearRemoteDatasetInputs() {
-  document.querySelectorAll(".lca-file-input").forEach((input) => {
-    input.value = "";
-  });
-  if (els.lcaListFile) {
-    els.lcaListFile.value = "";
-  }
-}
-
-function buildSeriesFromRemoteDatasets(datasets) {
-  const previousVisibility = new Map(
-    state.series.map((source) => [source.label, Boolean(source.visible)]),
-  );
-  return datasets.map((dataset, index) => ({
-    label: dataset.filename || dataset.id || `remote-dataset-${index + 1}`,
-    color: colorForSource(index),
-    visible: previousVisibility.has(dataset.filename || dataset.id || `remote-dataset-${index + 1}`)
-      ? previousVisibility.get(dataset.filename || dataset.id || `remote-dataset-${index + 1}`)
-      : true,
-  }));
-}
-
-function buildRemoteTree(node) {
-  const builtChildren = Array.isArray(node.children) ? node.children.map(buildRemoteTree) : [];
-  return {
-    taxid: Number(node.taxid),
-    parent: node.parent == null ? null : Number(node.parent),
-    rank: node.rank || "no rank",
-    name: node.name || String(node.taxid),
-    direct: Number(node.direct || 0),
-    directBySource: Array.isArray(node.direct_by_source)
-      ? node.direct_by_source.map((value) => Number(value || 0))
-      : [],
-    total: Number(node.total || 0),
-    totalBySource: Array.isArray(node.total_by_source)
-      ? node.total_by_source.map((value) => Number(value || 0))
-      : [],
-    childCount: typeof node.child_count === "number"
-      ? Number(node.child_count || 0)
-      : builtChildren.length,
-    hasChildren: typeof node.has_children === "boolean"
-      ? Boolean(node.has_children)
-      : builtChildren.length > 0,
-    expanded: Boolean(node.expanded),
-    children: builtChildren,
-    depth: Number(node.depth || 0),
-  };
-}
-
-async function handleMinReadsChange() {
-  setMinReadsValue(valueFromSliderPosition(els.minReads.value));
-  if (hasBackendTree()) {
-    try {
-      const payload = await fetchRemoteVisibleTree({
-        minReads: getMinReadsValue(),
-        expandedTaxids: Array.from(state.remote.expandedTaxids),
-      });
-      applyRemoteVisiblePayload(payload);
-      await refreshCurrentReportIfNeeded();
-      redraw();
-      return;
-    } catch (error) {
-      setStatus(`Could not refresh backend tree after changing the read filter: ${error.message || error}`);
-      return;
-    }
-  }
-  redraw();
-}
-
-function hasBackendTree() {
-  return state.remote.connected && state.remote.serverTreeActive && Boolean(state.tree);
-}
-
-function buildRemoteContextUrl(path, options = {}) {
-  const url = new URL(`http://localhost:8000/${path}`);
-  const activeRequestContext = getActiveBackendRequestContext();
-  const files = Array.isArray(options.datasetNames)
-    ? options.datasetNames
-    : activeRequestContext?.dataset_names?.length
-      ? activeRequestContext.dataset_names
-      : getSelectedRemoteDatasets();
-  for (const file of files) url.searchParams.append("files", file);
-  const nodesFile = options.nodesFile ?? activeRequestContext?.nodes_file ?? (els.nodesFile.files[0] ? els.nodesFile.files[0].name : null);
-  const namesFile = options.namesFile ?? activeRequestContext?.names_file ?? (els.namesFile.files[0] ? els.namesFile.files[0].name : null);
-  const minReads = options.minReads != null
-    ? Number(options.minReads)
-    : activeRequestContext && Number.isFinite(activeRequestContext.min_reads)
-      ? Number(activeRequestContext.min_reads)
-      : getMinReadsValue();
-  if (nodesFile) url.searchParams.set("nodes_file", nodesFile);
-  if (namesFile) url.searchParams.set("names_file", namesFile);
-  url.searchParams.set("min_reads", String(minReads));
-  if (Array.isArray(options.expandedTaxids)) {
-    for (const taxid of options.expandedTaxids) {
-      url.searchParams.append("expanded", String(taxid));
-    }
-  } else if (activeRequestContext?.expanded_taxids?.length) {
-    for (const taxid of activeRequestContext.expanded_taxids) {
-      url.searchParams.append("expanded", String(taxid));
-    }
-  }
-  for (const [key, value] of Object.entries(options.query || {})) {
-    if (value == null) continue;
-    url.searchParams.set(key, String(value));
-  }
-  return url;
-}
-
-async function fetchRemoteVisibleTree(options = {}) {
-  const endpoint = options.taxid != null ? "expand-node" : "root-view";
-  const url = buildRemoteContextUrl(endpoint, {
-    expandedTaxids: options.expandedTaxids || Array.from(state.remote.expandedTaxids),
-    datasetNames: options.datasetNames,
-    nodesFile: options.nodesFile,
-    namesFile: options.namesFile,
-    minReads: options.minReads,
-    query: {
-      ...(options.query && typeof options.query === "object" ? options.query : {}),
-      ...(options.taxid != null ? { taxid: options.taxid } : {}),
-    },
-  }).toString();
-  addClientLog("info", "tree", `GET /${endpoint}`, url);
-  let response;
-  try {
-    response = await fetch(url, { method: "GET" });
-  } catch (error) {
-    addClientLog("error", "tree", `Remote ${endpoint} fetch failed.`, errorToDetail(error));
-    throw error;
-  }
-  if (!response.ok) {
-    addClientLog("error", "tree", `Remote ${endpoint} request failed.`, `HTTP ${response.status}`);
-    throw new Error(`Remote ${endpoint} request failed with HTTP ${response.status}`);
-  }
-  addClientLog("success", "tree", `Remote ${endpoint} request succeeded.`);
-  return response.json();
-}
-
-async function fetchRemoteNodeTooltip(taxid) {
-  const response = await fetch(buildRemoteContextUrl("node-tooltip", {
-    query: { taxid },
-  }).toString(), { method: "GET" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.detail?.message || `Remote node-tooltip request failed with HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-async function fetchRemoteTableView(options = {}) {
-  const response = await fetch(buildRemoteContextUrl("table-view", {
-    query: {
-      scope: options.scope || "root",
-      taxid: options.taxid,
-      sort: options.sort || "direct",
-      limit: options.limit || 40,
-    },
-  }).toString(), { method: "GET" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.detail?.message || `Remote table-view request failed with HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-async function fetchRemoteSubtreeReport(taxid, options = {}) {
-  const url = buildRemoteContextUrl("subtree-report");
-  if (Array.isArray(options.taxids) && options.taxids.length) {
-    for (const selectedTaxid of options.taxids) {
-      url.searchParams.append("taxids", String(selectedTaxid));
-    }
-  } else if (taxid != null) {
-    url.searchParams.set("taxid", String(taxid));
-  }
-  const response = await fetch(url.toString(), { method: "GET" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.detail?.message || `Remote subtree-report request failed with HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-async function fetchRemoteRankReport(taxids) {
-  const url = buildRemoteContextUrl("rank-report");
-  for (const taxid of taxids) {
-    url.searchParams.append("taxids", String(taxid));
-  }
-  const response = await fetch(url.toString(), { method: "GET" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.detail?.message || `Remote rank-report request failed with HTTP ${response.status}`);
-  }
-  return payload;
-}
-
-async function fetchRemoteFullTreeModel() {
-  addClientLog("info", "tree", "GET /tree-model");
-  let response;
-  try {
-    response = await fetch(buildRemoteContextUrl("tree-model").toString(), { method: "GET" });
-  } catch (error) {
-    addClientLog("error", "tree", "Remote tree-model fetch failed.", errorToDetail(error));
-    throw error;
-  }
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    addClientLog("error", "tree", "Remote tree-model request failed.", payload?.detail?.message || `HTTP ${response.status}`);
-    throw new Error(payload?.detail?.message || `Remote tree-model request failed with HTTP ${response.status}`);
-  }
-  addClientLog("success", "tree", "Remote tree-model request succeeded.");
-  return payload;
-}
-
-function applyRemoteVisiblePayload(payload) {
-  const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
-  state.series = buildSeriesFromRemoteDatasets(datasets);
-  state.tree = buildRemoteTree(payload.tree);
-  state.missingTaxids = new Set(Array.isArray(payload.missing_taxids) ? payload.missing_taxids : []);
-  updateActiveBackendRequestContext(payload?.request_context, { preserveExpandedTaxids: false });
-  const activeRequestContext = getActiveBackendRequestContext();
-  state.remote.expandedTaxids = new Set(
-    Array.isArray(activeRequestContext?.expanded_taxids)
-      ? activeRequestContext.expanded_taxids.map((value) => Number(value))
-      : Array.isArray(payload.expanded_taxids)
-        ? payload.expanded_taxids.map((value) => Number(value))
-        : [],
-  );
-  state.remote.serverTreeActive = true;
-  state.remote.totalReads = Number(payload.total_reads || 0);
-  state.remote.directTaxa = Number(payload.direct_taxa || 0);
-  syncMinReadsControl();
-  renderSourceLegend();
-}
-
-async function refreshRemoteDatasets(options = {}) {
-  if (!state.remote.connected) {
-    renderRemoteDatasets();
-    return;
-  }
-
-  const { selectAll = false } = options;
-  addClientLog("info", "datasets", "Refreshing backend dataset list.", "GET http://localhost:8000/datasets");
-  let response;
-  try {
-    response = await fetch("http://localhost:8000/datasets", {
-      method: "GET",
-    });
-  } catch (error) {
-    addClientLog("error", "datasets", "Backend datasets fetch failed.", errorToDetail(error));
-    throw error;
-  }
-  if (!response.ok) {
-    addClientLog("error", "datasets", "Backend datasets request failed.", `HTTP ${response.status}`);
-    throw new Error(`Backend datasets request failed with HTTP ${response.status}`);
-  }
-
-  const payload = await response.json();
-  const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
-  const previous = new Set(state.remote.selectedDatasets);
-  const previouslyAllSelected = state.remote.datasets.length > 0
-    && previous.size === state.remote.datasets.length;
-
-  state.remote.datasets = datasets.map((dataset) => ({
-    id: dataset.id || dataset.filename || "",
-    filename: dataset.filename || dataset.id || "remote-dataset",
-    bytes: Number(dataset.bytes || 0),
-    modified_at: dataset.modified_at || "",
-  }));
-
-  if (selectAll || !previous.size || previouslyAllSelected) {
-    state.remote.selectedDatasets = new Set(state.remote.datasets.map((dataset) => dataset.filename));
-  } else {
-    state.remote.selectedDatasets = new Set(
-      state.remote.datasets
-        .map((dataset) => dataset.filename)
-        .filter((filename) => previous.has(filename)),
-    );
-  }
-
-  renderRemoteDatasets();
-  addClientLog("success", "datasets", `Loaded ${state.remote.datasets.length.toLocaleString()} backend dataset${state.remote.datasets.length === 1 ? "" : "s"}.`);
-}
-
-function renderRemoteDatasets() {
-  els.remoteDatasetsList.innerHTML = "";
-
-  if (!state.remote.connected) {
-    els.remoteDatasetsMeta.textContent = "Connect to browse backend files";
-    updateRenderAvailability();
-    return;
-  }
-
-  const datasets = state.remote.datasets;
-  const selected = state.remote.selectedDatasets;
-
-  if (!datasets.length) {
-    els.remoteDatasetsMeta.textContent = "0 files available";
-    const empty = document.createElement("div");
-    empty.className = "remote-datasets-empty";
-    empty.textContent = "No .bdamage datasets found in uploads on the backend.";
-    els.remoteDatasetsList.appendChild(empty);
-    updateRenderAvailability();
-    return;
-  }
-
-  els.remoteDatasetsMeta.textContent =
-    `${selected.size.toLocaleString()} of ${datasets.length.toLocaleString()} file${datasets.length === 1 ? "" : "s"} selected`;
-
-  for (const dataset of datasets) {
-    const item = document.createElement("div");
-    item.className = "remote-dataset-item";
-
-    const label = document.createElement("label");
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = selected.has(dataset.filename);
-    checkbox.addEventListener("change", async () => {
-      if (checkbox.checked) state.remote.selectedDatasets.add(dataset.filename);
-      else state.remote.selectedDatasets.delete(dataset.filename);
-      renderRemoteDatasets();
-      await refreshTreeForDatasetSelectionChange();
-    });
-
-    const copy = document.createElement("div");
-    copy.className = "remote-dataset-copy";
-
-    const name = document.createElement("div");
-    name.className = "remote-dataset-name";
-    name.textContent = dataset.filename;
-
-    const detail = document.createElement("div");
-    detail.className = "remote-dataset-detail";
-    detail.textContent = formatRemoteDatasetDetail(dataset);
-
-    copy.appendChild(name);
-    copy.appendChild(detail);
-    label.appendChild(checkbox);
-    label.appendChild(copy);
-    item.appendChild(label);
-    els.remoteDatasetsList.appendChild(item);
-  }
-
-  updateRenderAvailability();
-}
-
-function selectAllRemoteDatasets() {
-  state.remote.selectedDatasets = new Set(
-    state.remote.datasets.map((dataset) => dataset.filename),
-  );
-  renderRemoteDatasets();
-  refreshTreeForDatasetSelectionChange();
-}
-
-function clearRemoteDatasets() {
-  state.remote.selectedDatasets.clear();
-  renderRemoteDatasets();
-  refreshTreeForDatasetSelectionChange();
-}
-
-function resetBackendTreeState() {
-  state.tree = null;
-  state.flat = [];
-  state.series = [];
-  state.remote.serverTreeActive = false;
-  state.remote.totalReads = 0;
-  state.remote.directTaxa = 0;
-  state.remote.currentReport = null;
-  state.remote.requestContext = null;
-  state.remote.expandedTaxids.clear();
-  state.selected.clear();
-  state.focusTaxid = null;
-  state.missingTaxids.clear();
-  if (els.svg) {
-    els.svg.innerHTML = "";
-  }
-  clearSubtreeReportView();
-  renderSourceLegend();
-  renderSummary([]);
-  syncBackendRuntimeUiState();
-}
-
-function reconcileTreeStateAfterDatasetChange() {
-  if (!state.tree) return;
-  state.selected = new Set(
-    Array.from(state.selected).filter((taxid) => Boolean(findNodeByTaxid(state.tree, taxid))),
-  );
-  if (state.focusTaxid != null && !findNodeByTaxid(state.tree, state.focusTaxid)) {
-    state.focusTaxid = null;
-  }
-  if (state.remote.currentReport) {
-    clearSubtreeReportView();
-  }
-}
-
-async function refreshTreeForDatasetSelectionChange() {
-  if (!state.remote.connected || !state.remote.serverTreeActive) {
-    return;
-  }
-  const datasetNames = getSelectedRemoteDatasets();
-  if (!datasetNames.length) {
-    resetBackendTreeState();
-    setStatus("No backend datasets are selected. Choose one or more datasets to render a tree.");
-    return;
-  }
-  try {
-    addClientLog(
-      "info",
-      "tree",
-      `Refreshing backend tree after dataset selection changed to ${datasetNames.length.toLocaleString()} dataset${datasetNames.length === 1 ? "" : "s"}.`,
-      datasetNames.join("\n"),
-    );
-    const payload = await fetchRemoteVisibleTree({
-      datasetNames,
-      expandedTaxids: Array.from(state.remote.expandedTaxids),
-    });
-    applyRemoteVisiblePayload(payload);
-    reconcileTreeStateAfterDatasetChange();
-    redraw();
-  } catch (error) {
-    addClientLog("error", "tree", "Could not refresh backend tree after dataset selection change.", errorToDetail(error));
-    setStatus(`Could not refresh the backend tree after changing datasets: ${error.message || error}`);
-  }
-}
-
-function hasLocalRemoteTaxonomyOverride() {
-  return Boolean(els.nodesFile.files[0]);
-}
-
-function hasRemoteBackendTaxonomy() {
-  return Boolean(state.remote.backendNodesFile);
-}
-
-function canRenderRemoteTree() {
-  return state.remote.connected
-    && (getSelectedRemoteDatasets().length > 0 || getLocalRemoteDatasetUploadFiles().length > 0)
-    && (hasLocalRemoteTaxonomyOverride() || hasRemoteBackendTaxonomy());
-}
-
-function remoteRenderUnavailableMessage() {
-  if (!state.remote.connected) {
-    return "Connect to the backend before rendering.";
-  }
-  if (!getSelectedRemoteDatasets().length) {
-    if (getLocalRemoteDatasetUploadFiles().length > 0) {
-      return "The backend is ready to upload your selected local datasets, but taxonomy must still be available locally or on the backend.";
-    }
-    return state.remote.datasets.length
-      ? "Select one or more backend datasets before rendering."
-      : "No backend .bdamage datasets are available to render.";
-  }
-  return "Backend taxonomy is not ready yet. Upload nodes.dmp from this UI, or place nodes.dmp in the backend uploads directory.";
-}
-
-function backendConnectionReadyMessage(user, host) {
-  const selected = getSelectedRemoteDatasets().length;
-  const pendingUploads = getLocalRemoteDatasetUploadFiles().length;
-  const datasetLabel = selected === 1 ? "dataset" : "datasets";
-  if (canRenderRemoteTree()) {
-    const taxonomySource = hasLocalRemoteTaxonomyOverride()
-      ? `uploaded taxonomy staged from this UI (${els.nodesFile.files[0].name}${els.namesFile.files[0] ? `, ${els.namesFile.files[0].name}` : ""})`
-      : `backend taxonomy (${state.remote.backendNodesFile}${state.remote.backendNamesFile ? `, ${state.remote.backendNamesFile}` : ""})`;
-    if (selected > 0) {
-      return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${selected.toLocaleString()} ${datasetLabel} ${selected === 1 ? "is" : "are"} selected, and ${taxonomySource} is ready for rendering.`;
-    }
-    return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${pendingUploads.toLocaleString()} local dataset${pendingUploads === 1 ? "" : "s"} ${pendingUploads === 1 ? "is" : "are"} queued for upload, and ${taxonomySource} is ready for rendering.`;
-  }
-  if (pendingUploads > 0) {
-    return `Tunnel check succeeded for ${user}@${host}. Local datasets are queued for upload, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree.`;
-  }
-  if (selected > 0) {
-    return `Tunnel check succeeded for ${user}@${host}. Backend datasets are visible, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree.`;
-  }
-  return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable; choose one or more datasets to enable Render Tree.`;
-}
-
-function updateRemoteServerStatus(ping) {
-  state.remote.backendNodesFile = String(ping?.taxonomy?.nodes_file || "");
-  state.remote.backendNamesFile = String(ping?.taxonomy?.names_file || "");
-  syncBackendRuntimeUiState();
-}
-
-async function refreshRemoteServerStatus() {
-  if (!state.remote.connected) {
-    updateRemoteServerStatus(null);
-    return null;
-  }
-  const response = await fetch("http://localhost:8000/ping", { method: "GET" });
-  if (!response.ok) {
-    throw new Error(`Remote ping request failed with HTTP ${response.status}`);
-  }
-  const payload = await response.json();
-  updateRemoteServerStatus(payload);
-  return payload;
-}
-
-function syncBackendRuntimeUiState() {
-  const backendTreeReady = hasBackendTree();
-  const hasSelection = state.selected.size > 0;
-  const hasTargetRank = Boolean(String(els.selectToRankValue?.value || "").trim());
-  els.renderBtn.disabled = !canRenderRemoteTree();
-  els.centerBtn.disabled = !backendTreeReady;
-  els.toggleTableBtn.disabled = !backendTreeReady;
-  els.subtreeReportBtn.disabled = !backendTreeReady;
-  els.rankReportBtn.disabled = !backendTreeReady;
-  els.selectDescendantsBtn.disabled = !backendTreeReady || !hasSelection;
-  if (els.selectToRankBtn) {
-    els.selectToRankBtn.disabled = !backendTreeReady || !hasSelection || !hasTargetRank;
-  }
-  if (els.selectToRankValue) {
-    els.selectToRankValue.disabled = !backendTreeReady;
-  }
-  els.clearSelectionBtn.disabled = !backendTreeReady || !hasSelection;
-  els.uncollapseBtn.disabled = !backendTreeReady || !hasSelection;
-  els.uncollapseTipsBtn.disabled = !backendTreeReady || !hasSelection;
-  if (els.agentPrompt) {
-    els.agentPrompt.disabled = !backendTreeReady;
-  }
-  if (els.agentSendBtn) {
-    els.agentSendBtn.disabled = !backendTreeReady;
-  }
-}
-
-function updateRenderAvailability() {
-  syncBackendRuntimeUiState();
-}
-
-function getCountViewMode() {
-  const mode = String(els.countViewMode?.value || "both");
-  return mode === "direct" || mode === "subtree" ? mode : "both";
-}
-
 function formatNodeCountSummary(node) {
   const direct = Number(node?.direct || 0).toLocaleString();
   const subtree = Number((node?.subtree ?? node?.total) || 0).toLocaleString();
@@ -2400,12 +1293,6 @@ function formatNodeCountSummary(node) {
   return `${direct} direct / ${subtree} cumulative`;
 }
 
-function getCountViewLabel() {
-  const mode = getCountViewMode();
-  if (mode === "direct") return "direct";
-  if (mode === "subtree") return "cumulative";
-  return "direct + cumulative";
-}
 
 function rankSortKey(rank) {
   const normalized = String(rank || "no rank").trim().toLowerCase();
@@ -2435,35 +1322,6 @@ function updateSelectToRankOptions() {
   if (ranks.includes(previousValue)) {
     els.selectToRankValue.value = previousValue;
   }
-}
-
-function getSelectedRemoteDatasets() {
-  return state.remote.datasets
-    .map((dataset) => dataset.filename)
-    .filter((filename) => state.remote.selectedDatasets.has(filename));
-}
-
-function formatRemoteDatasetDetail(dataset) {
-  const parts = [];
-  if (dataset.bytes > 0) parts.push(formatBytes(dataset.bytes));
-  if (dataset.modified_at) {
-    const parsed = new Date(dataset.modified_at);
-    parts.push(Number.isNaN(parsed.getTime()) ? dataset.modified_at : parsed.toLocaleString());
-  }
-  return parts.join(" \u2022 ") || "ready";
-}
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  const digits = value >= 100 || unit === 0 ? 0 : value >= 10 ? 1 : 2;
-  return `${value.toFixed(digits)} ${units[unit]}`;
 }
 
 function redraw() {
@@ -3881,13 +2739,6 @@ async function renderBackendTopTable() {
   }
 }
 
-function svgEl(name, attrs = {}, text = "") {
-  const el = document.createElementNS("http://www.w3.org/2000/svg", name);
-  for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
-  if (text) el.textContent = text;
-  return el;
-}
-
 function setStatus(message) {
   els.status.textContent = message;
 }
@@ -3936,24 +2787,6 @@ function renderClientLog() {
       ${entry.detail ? `<pre class="client-log-detail">${escapeHtml(entry.detail)}</pre>` : ""}
     </div>
   `).join("");
-}
-
-function formatLogTime(timestamp) {
-  const parsed = new Date(timestamp);
-  if (Number.isNaN(parsed.getTime())) return timestamp;
-  return parsed.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function errorToDetail(error) {
-  if (!error) return "";
-  if (typeof error === "string") return error;
-  const message = error.message || String(error);
-  const stack = typeof error.stack === "string" ? error.stack : "";
-  return stack && !stack.startsWith(message) ? `${message}\n${stack}` : message;
 }
 
 function initChartPan() {
@@ -4011,185 +2844,4 @@ function initChartPan() {
 
   window.addEventListener("pointerup", stopPan);
   window.addEventListener("pointercancel", stopPan);
-}
-
-function initControlsResize() {
-  const saved = Number(localStorage.getItem("unicorn.controlsWidth"));
-  if (Number.isFinite(saved) && saved > 0) setControlsWidth(saved);
-  let startX = 0;
-  let startWidth = 0;
-  els.controlsResize.addEventListener("pointerdown", (event) => {
-    if (els.app.classList.contains("sidebar-collapsed")) return;
-    startX = event.clientX;
-    startWidth = document.documentElement.style.getPropertyValue("--controls-width")
-      ? Number.parseFloat(document.documentElement.style.getPropertyValue("--controls-width"))
-      : els.controls.getBoundingClientRect().width;
-    els.controlsResize.setPointerCapture(event.pointerId);
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "col-resize";
-  });
-  els.controlsResize.addEventListener("pointermove", (event) => {
-    if (!els.controlsResize.hasPointerCapture(event.pointerId)) return;
-    setControlsWidth(startWidth + event.clientX - startX);
-  });
-  els.controlsResize.addEventListener("pointerup", (event) => {
-    if (els.controlsResize.hasPointerCapture(event.pointerId)) {
-      els.controlsResize.releasePointerCapture(event.pointerId);
-    }
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-    localStorage.setItem("unicorn.controlsWidth", String(Math.round(els.controls.getBoundingClientRect().width)));
-    requestAnimationFrame(() => {
-      if (state.tree) centerNode(state.focusTaxid ? state.flat.find((n) => n.taxid === state.focusTaxid) || state.tree : state.tree);
-    });
-  });
-}
-
-function setControlsWidth(value) {
-  const width = Math.max(220, Math.min(540, value));
-  document.documentElement.style.setProperty("--controls-width", `${width}px`);
-}
-
-function initSummaryResize() {
-  const saved = Number(localStorage.getItem("unicorn.summaryHeight"));
-  if (Number.isFinite(saved) && saved > 0) setSummaryHeight(saved);
-  let startY = 0;
-  let startHeight = 0;
-  els.summaryResize.addEventListener("pointerdown", (event) => {
-    startY = event.clientY;
-    startHeight = els.summaryPanel.getBoundingClientRect().height;
-    els.summaryResize.setPointerCapture(event.pointerId);
-    document.body.style.userSelect = "none";
-  });
-  els.summaryResize.addEventListener("pointermove", (event) => {
-    if (!els.summaryResize.hasPointerCapture(event.pointerId)) return;
-    setSummaryHeight(startHeight + event.clientY - startY);
-    requestAnimationFrame(() => {
-      if (state.tree) centerRoot();
-    });
-  });
-  els.summaryResize.addEventListener("pointerup", (event) => {
-    if (els.summaryResize.hasPointerCapture(event.pointerId)) {
-      els.summaryResize.releasePointerCapture(event.pointerId);
-    }
-    document.body.style.userSelect = "";
-    localStorage.setItem("unicorn.summaryHeight", String(Math.round(els.summaryPanel.getBoundingClientRect().height)));
-  });
-}
-
-function setSummaryHeight(value) {
-  const height = Math.max(48, Math.min(180, value));
-  els.summaryPanel.style.setProperty("--summary-height", `${height}px`);
-}
-
-function initTablePanel() {
-  const saved = localStorage.getItem("unicorn.tableVisible");
-  setTablePanelVisible(saved === "1");
-}
-
-function initTableResize() {
-  if (!els.tableResize) return;
-  const saved = Number(localStorage.getItem("unicorn.tableHeight"));
-  if (Number.isFinite(saved) && saved > 0) setTableHeight(saved);
-  let startY = 0;
-  let startHeight = 0;
-  els.tableResize.addEventListener("pointerdown", (event) => {
-    startY = event.clientY;
-    startHeight = els.tablePanel.getBoundingClientRect().height;
-    els.tableResize.setPointerCapture(event.pointerId);
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "row-resize";
-  });
-  els.tableResize.addEventListener("pointermove", (event) => {
-    if (!els.tableResize.hasPointerCapture(event.pointerId)) return;
-    setTableHeight(startHeight - (event.clientY - startY));
-  });
-  els.tableResize.addEventListener("pointerup", (event) => {
-    if (els.tableResize.hasPointerCapture(event.pointerId)) {
-      els.tableResize.releasePointerCapture(event.pointerId);
-    }
-    document.body.style.userSelect = "";
-    document.body.style.cursor = "";
-    localStorage.setItem("unicorn.tableHeight", String(Math.round(els.tablePanel.getBoundingClientRect().height)));
-  });
-}
-
-function toggleTablePanel() {
-  setTablePanelVisible(els.tablePanel.hidden);
-  localStorage.setItem("unicorn.tableVisible", els.tablePanel.hidden ? "0" : "1");
-  requestAnimationFrame(() => {
-    if (state.tree) centerNode(state.focusTaxid ? state.flat.find((n) => n.taxid === state.focusTaxid) || state.tree : state.tree);
-  });
-}
-
-function setTablePanelVisible(visible) {
-  els.tablePanel.hidden = !visible;
-  els.tablePanel.classList.toggle("hidden", !visible);
-  els.toggleTableBtn.textContent = visible ? "Hide Counts" : "Show Counts";
-  els.toggleTableBtn.setAttribute("aria-expanded", visible ? "true" : "false");
-}
-
-function setTableHeight(value) {
-  const height = Math.max(140, Math.min(window.innerHeight * 0.7, value));
-  document.documentElement.style.setProperty("--table-height", `${height}px`);
-}
-
-function addLcaInput() {
-  const row = document.createElement("div");
-  row.className = "file-row";
-  row.innerHTML = `
-    <input class="lca-file-input" type="file" accept=".txt,.tsv,.bdamage,.lca">
-    <button class="secondary remove-file-btn" type="button" aria-label="Remove input file">Remove</button>
-  `;
-  els.lcaInputs.appendChild(row);
-  ensureFileRowControls();
-}
-
-function clearLcaListFile() {
-  els.lcaListFile.value = "";
-  setStatus("Cleared input file list selection.");
-}
-
-function colorForSource(index) {
-  return SOURCE_COLORS[index % SOURCE_COLORS.length];
-}
-
-function renderSourceLegend() {
-  if (!state.series.length) {
-    els.sourceLegend.hidden = true;
-    els.sourceLegend.innerHTML = "";
-    return;
-  }
-  els.sourceLegend.hidden = false;
-  els.sourceLegend.innerHTML = state.series.map((source, index) => `
-    <label class="legend-item${source.visible ? "" : " is-muted"}" data-series-index="${index}">
-      <input class="legend-toggle" type="checkbox" ${source.visible ? "checked" : ""} aria-label="Toggle ${escapeHtml(source.label)}">
-      <span class="legend-swatch" style="background:${source.color}"></span>
-      <span class="legend-label" title="${escapeHtml(source.label)}">${escapeHtml(source.label)}</span>
-    </label>
-  `).join("");
-
-  els.sourceLegend.querySelectorAll(".legend-item").forEach((item) => {
-    item.addEventListener("change", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement)) return;
-      const index = Number(item.getAttribute("data-series-index"));
-      if (!Number.isInteger(index) || !state.series[index]) return;
-      state.series[index].visible = target.checked;
-      item.classList.toggle("is-muted", !target.checked);
-      redraw();
-    });
-  });
-}
-
-function getVisibleSeries() {
-  return state.series.filter((source) => source.visible);
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
