@@ -8,11 +8,13 @@ const unicornGraphEngine = window.UnicornGraphEngine = window.UnicornGraphEngine
 const state = unicornGraphEngine.state;
 const els = unicornGraphEngine.els;
 const core = unicornGraphEngine.core;
+const treeModel = unicornGraphEngine.treeModel;
 const backend = unicornGraphEngine.backend;
+const treeRender = unicornGraphEngine.treeRender;
 const ui = unicornGraphEngine.ui;
 
-if (!state || !els || !core || !backend || !ui) {
-  throw new Error("Unicorn graphengine expected state, DOM, core, backend, and UI modules to load before graphengine.js.");
+if (!state || !els || !core || !treeModel || !backend || !treeRender || !ui) {
+  throw new Error("Unicorn graphengine expected state, DOM, core, tree model, backend, tree render, and UI modules to load before graphengine.js.");
 }
 
 const {
@@ -28,6 +30,17 @@ const {
   errorToDetail,
   escapeHtml,
 } = core;
+
+const {
+  collectVisible,
+  layoutVisible,
+  walkTree,
+  findNodeByTaxid,
+  collectExpandableTaxids,
+  nodeHasChildren,
+  getVisibleChildCount,
+  summarizeNodeForAgent,
+} = treeModel;
 
 const {
   getActiveBackendRequestContext,
@@ -75,6 +88,29 @@ const {
   getSelectedRemoteDatasets,
   formatRemoteDatasetDetail,
 } = backend;
+
+const {
+  redraw,
+  formatNodeCountSummary,
+  renderSvg,
+  renderNodePie,
+  getNodeSeriesValues,
+  pieSlicePath,
+  requestCenterRoot,
+  centerRoot,
+  centerNode,
+  radiusFor,
+  fillFor,
+  labelFor,
+  positionTooltip,
+  scheduleTooltip,
+  updateTooltipPosition,
+  showTooltip,
+  showBackendTooltip,
+  hideTooltip,
+  renderSummary,
+  initChartPan,
+} = treeRender;
 
 const {
   initRemotePanel,
@@ -127,7 +163,10 @@ const unicornAgentProviderAdapter = window.UnicornAgentProviderModule.createProv
 window.unicornAgentProviderAdapter = unicornAgentProviderAdapter;
 
 function initializeGraphengine() {
-  els.renderBtn.addEventListener("click", loadAndRender);
+  els.renderBtn.onclick = async (event) => {
+    event.preventDefault();
+    await window.loadAndRender();
+  };
   els.addLcaBtn.addEventListener("click", addLcaInput);
   els.clearLcaListBtn.addEventListener("click", clearLcaListFile);
   els.connectBtn.addEventListener("click", connectRemote);
@@ -1201,23 +1240,6 @@ function synthesizeFinalAnswerFromToolResult(toolResult) {
   return null;
 }
 
-function summarizeNodeForAgent(node) {
-  if (!node) return null;
-  return {
-    taxid: Number(node.taxid),
-    name: String(node.name || ""),
-    rank: String(node.rank || ""),
-    direct: Number(node.direct || 0),
-    subtree: Number(node.total || 0),
-    child_count: nodeHasChildren(node) ? getVisibleChildCount(node) : 0,
-  };
-}
-
-function getVisibleChildCount(node) {
-  const children = Array.isArray(node.children) ? node.children : [];
-  return children.filter((child) => Number(child.total || 0) > 0).length;
-}
-
 function handleAgentSend() {
   if (!els.agentPrompt) return;
   const prompt = els.agentPrompt.value.trim();
@@ -1284,16 +1306,6 @@ function handleAgentSend() {
     });
 }
 
-function formatNodeCountSummary(node) {
-  const direct = Number(node?.direct || 0).toLocaleString();
-  const subtree = Number((node?.subtree ?? node?.total) || 0).toLocaleString();
-  const mode = getCountViewMode();
-  if (mode === "direct") return `${direct} direct`;
-  if (mode === "subtree") return `${subtree} cumulative`;
-  return `${direct} direct / ${subtree} cumulative`;
-}
-
-
 function rankSortKey(rank) {
   const normalized = String(rank || "no rank").trim().toLowerCase();
   const index = RANK_DISPLAY_ORDER.indexOf(normalized);
@@ -1322,226 +1334,6 @@ function updateSelectToRankOptions() {
   if (ranks.includes(previousValue)) {
     els.selectToRankValue.value = previousValue;
   }
-}
-
-function redraw() {
-  if (!state.tree) return;
-  const minReads = 0;
-  const search = els.searchBox.value.trim().toLowerCase();
-  const visible = [];
-  const links = [];
-  const leaves = { count: 0 };
-  collectVisible(state.tree, null, visible, links, leaves, minReads);
-  layoutVisible(state.tree, new Set(visible));
-  state.flat = visible;
-  updateSelectToRankOptions();
-  renderSvg(visible, links, search);
-  renderSummary(visible);
-  renderTopTable();
-  syncBackendRuntimeUiState();
-  const activeSeries = getVisibleSeries().length;
-  const directTaxa = Number(state.remote.directTaxa || 0);
-  setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from a backend tree with ${directTaxa.toLocaleString()} direct taxa across ${activeSeries.toLocaleString()} active dataset${activeSeries === 1 ? "" : "s"}.`);
-}
-
-function collectVisible(node, parent, nodes, links, leaves, minReads) {
-  if (node !== state.tree && node.total <= 0) return false;
-  // The minimum-read filter is defined on subtree totals, so any node below
-  // the threshold is hidden and its nearest visible ancestor becomes the
-  // rendered collapse point for that branch.
-  if (node !== state.tree && node.total < minReads) return false;
-  nodes.push(node);
-  if (parent) links.push([parent, node]);
-  let visibleChildren = 0;
-  for (const child of node.children) {
-    if (collectVisible(child, node, nodes, links, leaves, minReads)) visibleChildren++;
-  }
-  if (visibleChildren === 0) {
-    node._leaf = leaves.count++;
-  }
-  return true;
-}
-
-function layoutVisible(root, visibleSet) {
-  const rowGap = 34;
-  const levelGap = 230;
-  const top = 42;
-  const left = 42;
-  const setY = (node) => {
-    const children = node.children.filter((child) => visibleSet.has(child));
-    if (children.length === 0) {
-      node.x = left + node.depth * levelGap;
-      node.y = top + (node._leaf || 0) * rowGap;
-      return node.y;
-    }
-    const ys = children.map(setY);
-    node.x = left + node.depth * levelGap;
-    node.y = ys.reduce((sum, y) => sum + y, 0) / ys.length;
-    return node.y;
-  };
-  setY(root);
-}
-
-function renderSvg(nodes, links, search) {
-  const maxDepth = nodes.reduce((m, n) => Math.max(m, n.depth), 0);
-  const maxY = nodes.reduce((m, n) => Math.max(m, n.y || 0), 0);
-  const width = Math.max(980, maxDepth * 230 + 420);
-  const height = Math.max(520, maxY + 80);
-  const mode = els.countMode.value;
-  const maxValue = Math.max(1, ...nodes.map((n) => mode === "direct" ? n.direct : n.total));
-
-  els.svg.setAttribute("width", width);
-  els.svg.setAttribute("height", height);
-  els.svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  els.svg.innerHTML = "";
-
-  const edgeLayer = svgEl("g", { class: "edges" });
-  for (const [a, b] of links) {
-    edgeLayer.appendChild(svgEl("path", {
-      class: "edge",
-      d: `M ${a.x} ${a.y} C ${a.x + 95} ${a.y}, ${b.x - 95} ${b.y}, ${b.x} ${b.y}`,
-    }));
-  }
-  els.svg.appendChild(edgeLayer);
-
-  const nodeLayer = svgEl("g", { class: "nodes" });
-  for (const node of nodes) {
-    const value = mode === "direct" ? node.direct : node.total;
-    const match = search && (`${node.taxid} ${node.name}`.toLowerCase().includes(search));
-    const dim = search && !match;
-    const selected = state.selected.has(node.taxid);
-    const group = svgEl("g", {
-      class: `node${match ? " match" : ""}${dim ? " dim" : ""}${selected ? " selected" : ""}`,
-      transform: `translate(${node.x}, ${node.y})`,
-    });
-    const radius = radiusFor(value, maxValue);
-    group.appendChild(svgEl("circle", {
-      class: "node-hit",
-      r: Math.max(radius + 7, 12),
-    }));
-    renderNodePie(group, node, radius);
-    group.appendChild(svgEl("text", {
-      x: radius + 8,
-      y: -5,
-    }, labelFor(node)));
-    group.appendChild(svgEl("text", {
-      class: "count",
-      x: radius + 8,
-      y: 10,
-    }, formatNodeCountSummary(node)));
-    group.addEventListener("click", (event) => {
-      if (performance.now() < state.suppressClicksUntil) return;
-      if (event.ctrlKey || event.metaKey) {
-        if (state.clickTimer) {
-          clearTimeout(state.clickTimer);
-          state.clickTimer = null;
-        }
-        toggleSelection(node);
-        return;
-      }
-      if (state.clickTimer) clearTimeout(state.clickTimer);
-      state.clickTimer = setTimeout(() => {
-        state.clickTimer = null;
-        toggleCollapse(node);
-      }, 220);
-    });
-    group.addEventListener("dblclick", (event) => {
-      if (performance.now() < state.suppressClicksUntil) return;
-      event.preventDefault();
-      if (state.clickTimer) {
-        clearTimeout(state.clickTimer);
-        state.clickTimer = null;
-      }
-      toggleFocus(node);
-    });
-    group.addEventListener("mouseenter", (event) => scheduleTooltip(event, node));
-    group.addEventListener("mousemove", (event) => updateTooltipPosition(event));
-    group.addEventListener("mouseleave", hideTooltip);
-    nodeLayer.appendChild(group);
-  }
-  els.svg.appendChild(nodeLayer);
-  if (state.centerOnNextRender) {
-    requestCenterRoot();
-    state.centerOnNextRender = false;
-  }
-}
-
-function renderNodePie(group, node, radius) {
-  const values = getNodeSeriesValues(node);
-  const total = values.reduce((sum, value) => sum + value, 0);
-  if (total <= 0) {
-    group.appendChild(svgEl("circle", {
-      r: radius,
-      fill: fillFor(node),
-    }));
-    return;
-  }
-  const origin = -Math.PI / 2;
-  let start = origin;
-  let drawn = 0;
-  for (let i = 0; i < values.length; i++) {
-    const value = values[i];
-    if (!value) continue;
-    const fraction = value / total;
-    const end = drawn + fraction >= 0.999999
-      ? origin + (Math.PI * 2)
-      : start + (Math.PI * 2 * fraction);
-    group.appendChild(svgEl("path", {
-      d: pieSlicePath(radius, start, end),
-      fill: state.series[i]?.color || fillFor(node),
-    }));
-    start = end;
-    drawn += fraction;
-  }
-  group.appendChild(svgEl("circle", {
-    r: radius,
-    fill: "none",
-    stroke: "#1f2b2e",
-    "stroke-width": "1.3",
-  }));
-}
-
-function getNodeSeriesValues(node) {
-  const values = els.countMode.value === "direct" ? node.directBySource : node.totalBySource;
-  return values.map((value, index) => state.series[index]?.visible ? value : 0);
-}
-
-function pieSlicePath(radius, startAngle, endAngle) {
-  if (Math.abs(endAngle - startAngle) >= Math.PI * 2 - 0.0001) {
-    return [
-      `M 0 ${-radius}`,
-      `A ${radius} ${radius} 0 1 1 0 ${radius}`,
-      `A ${radius} ${radius} 0 1 1 0 ${-radius}`,
-      "Z",
-    ].join(" ");
-  }
-  const x1 = Math.cos(startAngle) * radius;
-  const y1 = Math.sin(startAngle) * radius;
-  const x2 = Math.cos(endAngle) * radius;
-  const y2 = Math.sin(endAngle) * radius;
-  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
-  return `M 0 0 L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
-}
-
-function requestCenterRoot() {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(centerRoot);
-  });
-}
-
-function centerRoot() {
-  centerNode(state.tree);
-}
-
-function centerNode(node) {
-  if (!node || !els.chartWrap) return;
-  const rootX = node.x || 0;
-  const rootY = node.y || 0;
-  els.chartWrap.scrollTo({
-    left: Math.max(0, rootX - 80),
-    top: Math.max(0, rootY - (els.chartWrap.clientHeight / 2)),
-    behavior: "auto",
-  });
 }
 
 function toggleFocus(node) {
@@ -1736,157 +1528,6 @@ function getSelectedNodes() {
     }
   });
   return nodes;
-}
-
-function walkTree(node, visit) {
-  visit(node);
-  for (const child of node.children) {
-    walkTree(child, visit);
-  }
-}
-
-function findNodeByTaxid(node, taxid) {
-  if (!node) return null;
-  if (node.taxid === taxid) return node;
-  for (const child of node.children || []) {
-    const found = findNodeByTaxid(child, taxid);
-    if (found) return found;
-  }
-  return null;
-}
-
-function collectExpandableTaxids(node, expandedTaxids) {
-  if (nodeHasChildren(node)) {
-    expandedTaxids.add(node.taxid);
-  }
-  for (const child of node.children || []) {
-    collectExpandableTaxids(child, expandedTaxids);
-  }
-}
-
-function nodeHasChildren(node) {
-  if (typeof node.hasChildren === "boolean") return node.hasChildren;
-  if (typeof node.childCount === "number") return node.childCount > 0;
-  return Array.isArray(node.children) && node.children.length > 0;
-}
-
-function radiusFor(value, maxValue) {
-  if (!value) return 4;
-  const t = els.scaleMode.value === "linear" ? value / maxValue : Math.sqrt(value / maxValue);
-  return 4 + t * 24;
-}
-
-function fillFor(node) {
-  if (node.taxid === 0) return "#6f7a80";
-  if (node.direct > 0 && nodeHasChildren(node)) return "#e2a44e";
-  if (node.direct > 0) return "#c85f43";
-  if (node.depth === 0) return "#255f75";
-  return "#9cad9f";
-}
-
-function labelFor(node) {
-  const name = node.name || String(node.taxid);
-  return name.length > 34 ? `${name.slice(0, 31)}...` : name;
-}
-
-function positionTooltip(event) {
-  els.tooltip.style.left = `${event.clientX + 14}px`;
-  els.tooltip.style.top = `${event.clientY + 14}px`;
-}
-
-function scheduleTooltip(event, node) {
-  if (state.tooltipTimer) clearTimeout(state.tooltipTimer);
-  state.tooltipNode = node;
-  state.tooltipPoint = { clientX: event.clientX, clientY: event.clientY };
-  state.tooltipTimer = setTimeout(() => {
-    state.tooltipTimer = null;
-    if (state.tooltipNode !== node) return;
-    showTooltip(state.tooltipPoint || event, node);
-  }, 360);
-}
-
-function updateTooltipPosition(event) {
-  state.tooltipPoint = { clientX: event.clientX, clientY: event.clientY };
-  if (els.tooltip.hidden) return;
-  positionTooltip(event);
-}
-
-function showTooltip(event, node) {
-  showBackendTooltip(event, node);
-}
-
-async function showBackendTooltip(event, node) {
-  const requestId = ++state.remote.tooltipRequestId;
-  els.tooltip.hidden = false;
-  positionTooltip(event);
-  els.tooltip.innerHTML = `
-    <strong>${escapeHtml(node.name)}</strong>
-    taxid: ${node.taxid}<br>
-    loading tooltip...
-  `;
-  try {
-    const payload = await fetchRemoteNodeTooltip(node.taxid);
-    if (requestId !== state.remote.tooltipRequestId) return;
-    if (state.tooltipNode !== node) return;
-    const remoteNode = payload.node || {};
-    const countMode = getCountViewMode();
-    const breakdown = Array.isArray(remoteNode.datasets)
-      ? remoteNode.datasets
-        .filter((entry) => Number(entry.subtree || 0) > 0 || Number(entry.direct || 0) > 0)
-        .sort((a, b) => {
-          if (countMode === "direct") return Number(b.direct || 0) - Number(a.direct || 0);
-          return Number(b.subtree || 0) - Number(a.subtree || 0);
-        })
-        .map((entry, index) => `
-          <div class="tooltip-source">
-            <span class="tooltip-swatch" style="background:${getDatasetColor(entry.dataset, index)}"></span>
-            <span>${escapeHtml(entry.dataset)}: ${formatNodeCountSummary(entry)}</span>
-          </div>
-        `)
-        .join("")
-      : "";
-    els.tooltip.hidden = false;
-    positionTooltip(state.tooltipPoint || event);
-    els.tooltip.innerHTML = `
-      <strong>${escapeHtml(remoteNode.name || node.name)}</strong>
-      taxid: ${Number(remoteNode.taxid ?? node.taxid)}<br>
-      rank: ${escapeHtml(remoteNode.rank || node.rank || "NA")}<br>
-      counts: ${escapeHtml(formatNodeCountSummary(remoteNode))}<br>
-      children: ${Number(remoteNode.child_count || 0).toLocaleString()}<br>
-      ${breakdown ? `<div class="tooltip-breakdown"><em>per dataset</em>${breakdown}</div>` : ""}
-    `;
-  } catch (error) {
-    if (requestId !== state.remote.tooltipRequestId) return;
-    if (state.tooltipNode !== node) return;
-    els.tooltip.hidden = false;
-    positionTooltip(state.tooltipPoint || event);
-    els.tooltip.innerHTML = `
-      <strong>${escapeHtml(node.name)}</strong>
-      taxid: ${node.taxid}<br>
-      ${escapeHtml(error.message || "Could not load tooltip.")}
-    `;
-  }
-}
-
-function hideTooltip() {
-  if (state.tooltipTimer) {
-    clearTimeout(state.tooltipTimer);
-    state.tooltipTimer = null;
-  }
-  state.remote.tooltipRequestId++;
-  state.tooltipNode = null;
-  state.tooltipPoint = null;
-  els.tooltip.hidden = true;
-}
-
-function renderSummary(visible) {
-  const totalReads = hasBackendTree() ? state.remote.totalReads : 0;
-  const directTaxa = hasBackendTree() ? state.remote.directTaxa : 0;
-  els.readCount.textContent = totalReads.toLocaleString();
-  els.taxonCount.textContent = directTaxa.toLocaleString();
-  els.visibleCount.textContent = visible.length.toLocaleString();
-  els.missingCount.textContent = state.missingTaxids.size.toLocaleString();
-  els.selectedCount.textContent = state.selected.size.toLocaleString();
 }
 
 function renderTopTable() {
@@ -2787,61 +2428,4 @@ function renderClientLog() {
       ${entry.detail ? `<pre class="client-log-detail">${escapeHtml(entry.detail)}</pre>` : ""}
     </div>
   `).join("");
-}
-
-function initChartPan() {
-  let pointerId = null;
-  let startX = 0;
-  let startY = 0;
-  let startLeft = 0;
-  let startTop = 0;
-  let moved = false;
-
-  els.chartWrap.addEventListener("click", (event) => {
-    if (performance.now() < state.suppressClicksUntil) return;
-    if (!(event.ctrlKey || event.metaKey)) return;
-    if (event.target.closest(".node")) return;
-    if (!state.selected.size) return;
-    event.preventDefault();
-    state.selected.clear();
-    redraw();
-  });
-
-  els.chartWrap.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    if (event.target.closest(".tooltip")) return;
-    pointerId = event.pointerId;
-    startX = event.clientX;
-    startY = event.clientY;
-    startLeft = els.chartWrap.scrollLeft;
-    startTop = els.chartWrap.scrollTop;
-    moved = false;
-  });
-
-  window.addEventListener("pointermove", (event) => {
-    if (pointerId !== event.pointerId) return;
-    const dx = event.clientX - startX;
-    const dy = event.clientY - startY;
-    if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
-      moved = true;
-      hideTooltip();
-      els.chartWrap.classList.add("dragging");
-      document.body.style.userSelect = "none";
-    }
-    if (!moved) return;
-    els.chartWrap.scrollLeft = startLeft - dx;
-    els.chartWrap.scrollTop = startTop - dy;
-  });
-
-  const stopPan = (event) => {
-    if (pointerId !== event.pointerId) return;
-    if (moved) state.suppressClicksUntil = performance.now() + 120;
-    pointerId = null;
-    moved = false;
-    els.chartWrap.classList.remove("dragging");
-    document.body.style.userSelect = "";
-  };
-
-  window.addEventListener("pointerup", stopPan);
-  window.addEventListener("pointercancel", stopPan);
 }

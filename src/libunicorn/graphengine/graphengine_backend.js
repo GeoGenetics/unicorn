@@ -5,10 +5,18 @@
   const state = namespace.state;
   const els = namespace.els;
   const core = namespace.core;
+  const treeModel = namespace.treeModel;
 
-  if (!state || !els || !core) {
-    throw new Error("Unicorn graphengine backend expected state, DOM, and core modules to load first.");
+  if (!state || !els || !core || !treeModel) {
+    throw new Error("Unicorn graphengine backend expected state, DOM, core, and tree model modules to load first.");
   }
+
+  const {
+    buildRemoteTree,
+    findNodeByTaxid,
+    collectExpandableTaxids,
+    nodeHasChildren,
+  } = treeModel;
 
   function getUi() {
     return namespace.ui || null;
@@ -286,33 +294,6 @@
         visible: previousVisibility.has(label) ? previousVisibility.get(label) : true,
       };
     });
-  }
-
-  function buildRemoteTree(node) {
-    const builtChildren = Array.isArray(node.children) ? node.children.map(buildRemoteTree) : [];
-    return {
-      taxid: Number(node.taxid),
-      parent: node.parent == null ? null : Number(node.parent),
-      rank: node.rank || "no rank",
-      name: node.name || String(node.taxid),
-      direct: Number(node.direct || 0),
-      directBySource: Array.isArray(node.direct_by_source)
-        ? node.direct_by_source.map((value) => Number(value || 0))
-        : [],
-      total: Number(node.total || 0),
-      totalBySource: Array.isArray(node.total_by_source)
-        ? node.total_by_source.map((value) => Number(value || 0))
-        : [],
-      childCount: typeof node.child_count === "number"
-        ? Number(node.child_count || 0)
-        : builtChildren.length,
-      hasChildren: typeof node.has_children === "boolean"
-        ? Boolean(node.has_children)
-        : builtChildren.length > 0,
-      expanded: Boolean(node.expanded),
-      children: builtChildren,
-      depth: Number(node.depth || 0),
-    };
   }
 
   async function handleMinReadsChange() {
