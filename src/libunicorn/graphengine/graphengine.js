@@ -154,7 +154,9 @@ const {
   getSelectedNodes,
   getSingleSelectedNode,
   hasSelection,
+  isTaxidSelected,
   getFocusedNode,
+  clearFocus,
   toggleSelection,
   clearSelection,
   toggleFocus,
@@ -202,8 +204,7 @@ function initializeGraphengine() {
   els.remoteUser.addEventListener("input", updateTunnelHint);
   els.remoteHost.addEventListener("input", updateTunnelHint);
   els.centerBtn.addEventListener("click", () => {
-    state.focusTaxid = null;
-    centerRoot();
+    clearFocus({ centerRoot: true });
   });
   if (els.countViewMode) {
     els.countViewMode.addEventListener("change", () => {
@@ -339,10 +340,11 @@ function createUnicornAgentRegistry() {
         throw new Error(`Taxid ${taxid} is not present in the active tree.`);
       }
       if (!additive) {
-        state.selected.clear();
+        clearSelection();
       }
-      state.selected.add(node.taxid);
-      redraw();
+      if (!isTaxidSelected(node.taxid)) {
+        toggleSelection(node);
+      }
       return {
         ok: true,
         mode: "backend",
@@ -360,8 +362,10 @@ function createUnicornAgentRegistry() {
       if (!node) {
         throw new Error(`Taxid ${taxid} is not present in the active tree.`);
       }
-      state.focusTaxid = node.taxid;
-      centerNode(node);
+      const focusedNode = getFocusedNode();
+      if (!focusedNode || focusedNode.taxid !== node.taxid) {
+        toggleFocus(node);
+      }
       redraw();
       return {
         ok: true,
@@ -371,8 +375,12 @@ function createUnicornAgentRegistry() {
     },
     center_root: async () => {
       requireAgentBackendTree();
-      state.focusTaxid = null;
-      centerRoot();
+      const focusedNode = getFocusedNode();
+      if (focusedNode) {
+        toggleFocus(focusedNode);
+      } else {
+        clearFocus({ centerRoot: true });
+      }
       redraw();
       return {
         ok: true,
@@ -515,10 +523,10 @@ function buildAgentContext() {
   const expandedTaxids = activeRequestContext?.expanded_taxids?.length
     ? activeRequestContext.expanded_taxids.slice()
     : [];
-  const selectedTaxids = backendTreeReady ? Array.from(state.selected) : [];
-  const focusNode = backendTreeReady && state.focusTaxid != null
-    ? state.flat.find((node) => node.taxid === state.focusTaxid) || null
-    : null;
+  const selectedTaxids = backendTreeReady
+    ? getSelectedNodes().map((node) => Number(node.taxid))
+    : [];
+  const focusNode = backendTreeReady ? getFocusedNode() : null;
   const visibleRoot = backendTreeReady
     ? {
         taxid: Number(state.tree.taxid),
@@ -1391,6 +1399,10 @@ async function openSelectedSubtreeReport() {
     setStatus("Render a backend-backed tree first, then request a count matrix.");
     return;
   }
+  if (!hasSelection()) {
+    setStatus("Select one or more nodes first, then use Count Matrix.");
+    return;
+  }
   const selectedNodes = getSelectedNodes();
   if (!selectedNodes.length) {
     setStatus("Select one or more nodes first, then use Count Matrix.");
@@ -1426,6 +1438,10 @@ async function openSelectedSubtreeReport() {
 async function openSelectedRankReport() {
   if (!hasBackendTree()) {
     setStatus("Render a backend-backed tree first, then request a rank report.");
+    return;
+  }
+  if (!hasSelection()) {
+    setStatus("Select one or more nodes first, then use Rank Report.");
     return;
   }
   const selectedNodes = getSelectedNodes();

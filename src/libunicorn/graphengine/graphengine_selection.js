@@ -49,9 +49,20 @@
     return state.selected.size > 0;
   }
 
+  function isTaxidSelected(taxid) {
+    return state.selected.has(Number(taxid));
+  }
+
   function getFocusedNode() {
     if (!state.tree || state.focusTaxid == null) return null;
     return findNodeByTaxid(state.tree, state.focusTaxid) || null;
+  }
+
+  function clearFocus(options = {}) {
+    state.focusTaxid = null;
+    if (options.centerRoot) {
+      globalObject.centerRoot();
+    }
   }
 
   function rankSortKey(rank) {
@@ -253,7 +264,9 @@
     getSelectedNodes,
     getSingleSelectedNode,
     hasSelection,
+    isTaxidSelected,
     getFocusedNode,
+    clearFocus,
     toggleSelection,
     clearSelection,
     toggleFocus,
