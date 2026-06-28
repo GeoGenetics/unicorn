@@ -167,6 +167,28 @@
     setStatus(`Selected ${nextSelection.size.toLocaleString()} visible node${nextSelection.size === 1 ? "" : "s"} at rank ${targetRank}.`);
   }
 
+  async function toggleCollapse(node) {
+    if (!nodeHasChildren(node)) return;
+    try {
+      if (node.expanded) {
+        state.remote.expandedTaxids.delete(node.taxid);
+        const payload = await globalObject.fetchRemoteVisibleTree({
+          expandedTaxids: Array.from(state.remote.expandedTaxids),
+        });
+        globalObject.applyRemoteVisiblePayload(payload);
+      } else {
+        const payload = await globalObject.fetchRemoteVisibleTree({
+          taxid: node.taxid,
+          expandedTaxids: Array.from(state.remote.expandedTaxids),
+        });
+        globalObject.applyRemoteVisiblePayload(payload);
+      }
+      globalObject.redraw();
+    } catch (error) {
+      setStatus(`Could not update the backend tree view: ${error.message || error}`);
+    }
+  }
+
   function addDescendantsAtRankToSelection(node, targetRank, selection) {
     for (const child of node.children || []) {
       if (String(child.rank || "").trim() === targetRank) {
@@ -267,6 +289,7 @@
     isTaxidSelected,
     getFocusedNode,
     clearFocus,
+    toggleCollapse,
     toggleSelection,
     clearSelection,
     toggleFocus,

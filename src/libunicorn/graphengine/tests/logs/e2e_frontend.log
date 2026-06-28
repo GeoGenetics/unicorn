@@ -1,17 +1,18 @@
-Serving HTTP on :: port 8081 (http://[::]:8081/) ...
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /index.html HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /index.html HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_provider_adapter.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /styles.css HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_tree_model.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_core.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_state.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_dom.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_backend.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_tree_render.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_ui.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_reports.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_selection.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_agent.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine.js HTTP/1.1" 200 -
-::ffff:127.0.0.1 - - [28/Jun/2026 12:26:07] "GET /graphengine_boot.js HTTP/1.1" 200 -
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/opt/homebrew/Cellar/python@3.11/3.11.15_3/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/server.py", line 1328, in <module>
+    test(
+  File "/opt/homebrew/Cellar/python@3.11/3.11.15_3/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/server.py", line 1275, in test
+    with ServerClass(addr, HandlerClass) as httpd:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.11/3.11.15_3/Frameworks/Python.framework/Versions/3.11/lib/python3.11/socketserver.py", line 456, in __init__
+    self.server_bind()
+  File "/opt/homebrew/Cellar/python@3.11/3.11.15_3/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/server.py", line 1322, in server_bind
+    return super().server_bind()
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.11/3.11.15_3/Frameworks/Python.framework/Versions/3.11/lib/python3.11/http/server.py", line 140, in server_bind
+    socketserver.TCPServer.server_bind(self)
+  File "/opt/homebrew/Cellar/python@3.11/3.11.15_3/Frameworks/Python.framework/Versions/3.11/lib/python3.11/socketserver.py", line 472, in server_bind
+    self.socket.bind(self.server_address)
+OSError: [Errno 48] Address already in use

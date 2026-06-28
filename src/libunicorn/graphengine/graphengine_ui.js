@@ -19,7 +19,7 @@
     globalObject.updateConnectionState(false, "Not connected");
     globalObject.renderRemoteDatasets();
     globalObject.syncBackendRuntimeUiState();
-    globalObject.renderClientLog();
+    renderClientLog();
   }
 
   function initFileInputs() {
@@ -369,7 +369,7 @@
 
   function clearLcaListFile() {
     els.lcaListFile.value = "";
-    globalObject.setStatus("Cleared input file list selection.");
+    setStatus("Cleared input file list selection.");
   }
 
   function colorForSource(index) {
@@ -408,6 +408,56 @@
     return state.series.filter((source) => source.visible);
   }
 
+  function setStatus(message) {
+    els.status.textContent = String(message || "");
+  }
+
+  function addClientLog(level, stage, message, detail = "") {
+    const entry = {
+      timestamp: new Date().toISOString(),
+      level: String(level || "info"),
+      stage: String(stage || "general"),
+      message: String(message || ""),
+      detail: String(detail || ""),
+    };
+    state.clientLog.unshift(entry);
+    if (state.clientLog.length > 200) {
+      state.clientLog.length = 200;
+    }
+    renderClientLog();
+  }
+
+  function clearClientLog() {
+    state.clientLog = [];
+    renderClientLog();
+    setStatus("Cleared client log.");
+  }
+
+  function renderClientLog() {
+    if (!els.clientLog || !els.clientLogMeta) return;
+    const entries = state.clientLog;
+    els.clientLogMeta.textContent = entries.length
+      ? `${entries.length.toLocaleString()} recent client event${entries.length === 1 ? "" : "s"}`
+      : "No client log entries yet";
+    if (!entries.length) {
+      els.clientLog.innerHTML = `<div class="remote-datasets-empty">Client-side upload, dataset, and tree requests will appear here.</div>`;
+      return;
+    }
+    els.clientLog.innerHTML = entries.map((entry) => `
+      <div class="client-log-entry">
+        <div class="client-log-entry-head">
+          <div class="client-log-badges">
+            <span class="client-log-badge stage-${core.escapeHtml(entry.stage)}">${core.escapeHtml(entry.stage)}</span>
+            <span class="client-log-badge level-${core.escapeHtml(entry.level)}">${core.escapeHtml(entry.level)}</span>
+          </div>
+          <span class="client-log-time">${core.escapeHtml(core.formatLogTime(entry.timestamp))}</span>
+        </div>
+        <div class="client-log-message">${core.escapeHtml(entry.message)}</div>
+        ${entry.detail ? `<pre class="client-log-detail">${core.escapeHtml(entry.detail)}</pre>` : ""}
+      </div>
+    `).join("");
+  }
+
   namespace.ui = {
     initRemotePanel,
     initFileInputs,
@@ -443,5 +493,16 @@
     colorForSource,
     renderSourceLegend,
     getVisibleSeries,
+    setStatus,
+    addClientLog,
+    clearClientLog,
+    renderClientLog,
   };
+
+  Object.assign(globalObject, {
+    setStatus,
+    addClientLog,
+    clearClientLog,
+    renderClientLog,
+  });
 })(window);
