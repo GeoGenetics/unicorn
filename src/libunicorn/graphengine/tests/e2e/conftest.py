@@ -54,7 +54,7 @@ def terminate_process(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=5)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture()
 def services() -> Iterator[dict[str, str]]:
     if not VENV_PYTHON.is_file():
         pytest.fail(f"Missing virtualenv Python: {VENV_PYTHON}")

@@ -192,17 +192,12 @@ const {
 } = reports;
 
 const {
-  initAgentControls,
-  clearAgentTranscript,
-  pushAgentEntry,
   renderAgentTranscript,
-  buildAgentContext,
+  initAgentControls,
   createUnicornAgentRegistry,
   executeAgentProviderTurn,
   extractTaxidFromPrompt,
   handleAgentSend,
-  syncAgentRuntimeProvider,
-  getConfiguredAgentProvider,
   getAgentRuntimeConfig,
 } = agent;
 
@@ -212,7 +207,7 @@ if (!window.UnicornAgentProviderModule || typeof window.UnicornAgentProviderModu
   throw new Error("Unicorn agent provider module failed to load before graphengine.js.");
 }
 const unicornAgentProviderAdapter = window.UnicornAgentProviderModule.createProviderAdapter({
-  runtimeProviderName: state.agent.runtimeProvider,
+  runtimeProviderName: getAgentRuntimeConfig().runtime_provider,
   getRuntimeConfig: getAgentRuntimeConfig,
   extractTaxidFromPrompt,
   executeTurn: executeAgentProviderTurn,
