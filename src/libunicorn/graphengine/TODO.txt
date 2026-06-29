@@ -1,152 +1,254 @@
-Unicorn Graph Engine TODO
+Unicorn Graphengine TODO
 
-Current status
-- Graphengine now has one intended operating model: backend-required mode.
-- If a user is working on one machine, they should run the backend locally and
-  connect the UI to `localhost`.
-- Remote tree rendering is server-authoritative.
-- Backend owns dataset loading, taxonomy loading, visible tree slicing, tooltip data, table data, and subtree reports.
-- Client renders tree, requests visible slices from the backend, and now supports:
-  - delayed tooltips
-  - drag-to-pan
-  - root/expand interaction
-  - server-backed tooltip
-  - server-backed top table
-  - subtree report
-  - subtree matrix export
-  - linear/log minimum subtree read slider
-- Agent panel exists in the UI and already supports:
-  - client-side transcript/history
-  - provider/model configuration controls
-  - constrained Unicorn-native tools
-  - client-side provider turn loop
-  - mock provider runtime for agentic prototyping
+Current State
 
-API and semantics
-- Keep the backend as the source of truth for all graphengine operation.
-- Do not preserve a separate local dataset/tree/report execution path.
-- Preserve the current visible-tree semantics:
-  - root is always returned
-  - visible nodes are those that survive filters and lie on the expanded frontier
-  - `child_count` is filtered child count, not raw taxonomy child count
-  - collapsed nodes still carry subtree totals
-- Keep dataset/taxonomy changes invalidating expanded state.
-- Keep `min_reads` preserving the expansion request while allowing the backend to prune branches.
+- Graphengine is now backend-authoritative and backend-required.
+- The browser UI is modularized and `graphengine.js` has been removed.
+- `graphengine_boot.js` owns startup and browser-side integration.
+- The backend is the source of truth for:
+  - uploaded datasets
+  - taxonomy files
+  - tree construction
+  - visible tree slicing
+  - tooltip and table payloads
+  - count matrix and rank report payloads
+  - compute-backed barplot and PCoA payloads
+- The browser is responsible for:
+  - interaction
+  - view state
+  - popup rendering
+  - agent transcript display
+  - provider configuration UI
+- The current UI already supports:
+  - backend connection and upload flow
+  - tree rendering and navigation
+  - selection workflows including `select to rank`
+  - count-view toggle for direct vs cumulative counts
+  - count matrix and rank report
+  - barplot and PCoA popups
+  - agent panel with provider-backed execution path
+- The current compute layer already exists under `unicorn_compute` and is the intended home for future analysis routines.
 
-Near-term next steps
-1. Finish the backend-only cleanup.
-Current state:
-- the codebase still contains local-vs-remote branching
-- the intended product direction is now one backend-required path
-Why:
-- this removes the biggest source of semantic drift before more agent work
+Guiding Priorities
 
-2. Finish the first real provider-backed agent path.
-Current state:
-- the UI contract and client-side turn loop are already implemented
-- the remaining gap is replacing mock runtime with one real provider adapter
-Why:
-- this is the most important next milestone for the new agentic flow
+- Prefer features that improve the value of the whole app, not one narrow path.
+- Keep backend-as-truth intact.
+- Keep provider integrations thin and provider-neutral where possible.
+- Prefer additions that strengthen both manual analysis and future agent workflows.
+- Avoid large infrastructure detours until they unlock visible user value.
 
-3. Selected-node matrix views by rank.
-Current direction:
-- from one or more selected nodes, build a count matrix of directly assigned reads collapsed by rank
-- keep this as a report type alongside subtree report
-Why:
-- this is especially relevant for the wheat simulation because it can show where optimal-alignment filtering pushes reads deeper in the taxonomy
+Active Product Direction
 
-4. Add subtree report variants.
-Ideas:
-- rank-collapsed subtree report
-- compare two selected subtree reports
-- optional toggle between direct counts and subtree counts
-- optional export of per-dataset summary as TSV
+0. Robust backend-native expansion actions
+1. Metadata-aware analysis
+2. Leaner and more capable agent mode
+3. Better selection-driven exploration
+4. More analysis features through `unicorn_compute`
+5. Only then deeper infrastructure or optimization work
 
-5. Improve selection-driven analysis.
-Ideas:
-- count matrix for a selected set of nodes
-- union/intersection style reporting across selected nodes
-- selected-clade summary table
-- ability to treat selected nodes as a reporting scope for `/table-view`
+Concrete Roadmap
 
-6. Add backend analysis endpoints that call into libunicorn.
-Goal:
-- expose metagenomic engine functions directly from the backend
-- let the graph engine ask for analyses instead of only displaying precomputed `.bdamage` files
-Possible directions:
-- run filtering/reporting functions from libunicorn on selected datasets
-- compare alternative alignment-score or filtering strategies
-- compute rank-collapsed or taxon-focused summaries backend-side
+DONE 0. Backend-Native Large Expansion Actions
 
-7. Improve backend-scale behavior before caching.
-Observed:
-- interaction is smooth now, but uncollapsing to tips and large visible slices introduce some lag
-- this is acceptable for now, but likely matters at larger scale
-Tasks:
-- measure expand latency
-- measure subtree-report latency
-- measure payload sizes for root view, expanded view, tooltip, table, and subtree report
-- identify which calls dominate as dataset count grows
+Why first:
+- current `Uncollapse Tips` can fail on real datasets because the browser sends very large expansion state through `GET` query parameters
+- large clades such as `2759` can overflow request-size limits before the backend even parses the request
+- this is a reliability issue in existing core functionality, not just a future optimization
 
-Caching and performance
-Do not implement yet unless a real bottleneck is identified by measurement.
-When ready, cache:
-- visible tree by selected files + taxonomy files + expanded set + `min_reads`
-- tooltip by taxid + same context
-- table by scope + taxid + same context
-- subtree report by taxid + same context
+Short plan:
+- move large expansion actions off long `GET` URLs
+- make `Uncollapse Tips` a backend-native action with request-body transport
+- keep the backend responsible for computing large descendant expansion state
+- preserve current visible-tree behavior while making the transport scalable
 
-Potential performance upgrades after measurement
-- prefetch likely next expansions
-- prefetch tooltip payloads for visible nodes near the cursor path
-- prefetch subtree report for the currently selected node
-- delta transport for visible tree updates
-- avoid fetching `/tree-model` for remote `Uncollapse Tips`
+Definition of done for this phase:
+- `Uncollapse Tips` works for large clades on a real backend session
+- the browser no longer serializes giant `expanded=` query strings for this action
+- client and server logs stay understandable when large expansion actions run
 
-UI improvements
-1. Make report/table views and agent traces feel more analysis-oriented.
-Ideas:
-- tabs for top placements / subtree report / selected-node matrix
-- clearer active-view labeling
-- keep subtree report visible while filters update
-- show more explicit evidence/tool traces for agent answers
+1. Metadata Integration
 
-2. Improve slider ergonomics.
-Ideas:
-- presets for max range
-- auto-fit max range to total reads with optional manual override
-- display current filter threshold more prominently
+Why first:
+- highest immediate value
+- improves tree interpretation, reports, plots, and future agent answers
+- unlocks real biological/sample grouping workflows
 
-3. Improve report export workflow.
-Ideas:
-- export per-dataset summary
-- export rank-collapsed matrices
-- export selected-node matrices
+First implementation slice:
+- add one metadata table input format for per-sample annotations
+- load metadata into backend session state
+- expose metadata summary in the UI
+- attach metadata to selected datasets by stable dataset name
+- show metadata in dataset list and key report views
 
-Backend robustness
-1. Session/lifecycle policy
-- decide whether the backend stays global, per-user, or explicit-session based
-- decide how agent conversation state should relate to graph session state
+Second slice:
+- color/group datasets by metadata field
+- show metadata-aware legends in count matrix, barplot, and PCoA
+- allow one metadata field to drive plot grouping
 
-2. Error conventions
-- keep structured `code` + `message`
-- extend consistently to future analysis endpoints and future provider failures
+Definition of done for this phase:
+- graphengine can load metadata for selected datasets
+- users can see metadata in the interface
+- barplot and PCoA can use metadata-aware grouping/coloring
 
-3. Large-scale data model
-Ultimate target:
-- support millions of `.bdamage` files
-Questions to answer later:
-- what stays in memory
-- what gets indexed on disk
-- what aggregation can be streamed
-- what query patterns deserve materialized summaries
+2. Agent Token Compaction
 
-Recommended next implementation order
-1. Finish backend-only cleanup
-2. Ship one real provider-backed agent path
-3. Finish and refine selected-node direct-read count matrix by rank
-4. Rank-collapsed subtree report
-5. Selected-node analysis endpoints
-6. libunicorn-backed backend analysis hooks
-7. Performance instrumentation
-8. Cache only after the real hot paths are clear
+Why second:
+- fast payoff
+- lowers provider cost and latency
+- improves reliability before adding more agent behaviors
+
+First implementation slice:
+- shrink graph context to selected, focused, visible, and summary-only data
+- stop resending redundant payloads
+- cap transcript history aggressively
+- summarize tool results before reinjection into the next turn
+
+Second slice:
+- add compact provider context mode as the default
+- instrument approximate request size and tool-result size in logs
+- keep one debug mode for full payload inspection
+
+Definition of done for this phase:
+- agent turns are visibly smaller
+- repeated prompts do not resend the whole graph state
+- logs still support debugging without flooding the normal UI
+
+3. Safe Agent Actions
+
+Why third:
+- biggest perceived leap in usefulness after token compaction
+- builds directly on the existing read-only tool contract and provider wiring
+
+First implementation slice:
+- add explicit action tools for:
+  - `select_node`
+  - `clear_selection`
+  - `select_descendants`
+  - `select_to_rank`
+  - `open_count_matrix`
+- keep actions narrow, deterministic, and UI-visible
+
+Second slice:
+- add action confirmation/result reporting back into transcript
+- make failures explicit when the requested graph action cannot be performed
+- keep unsupported mutations clearly rejected
+
+Definition of done for this phase:
+- the agent can carry out a small safe set of visible graph actions
+- transcript and client log make those actions auditable
+
+4. Selection UX Upgrade
+
+Why fourth:
+- strong manual-usage payoff
+- complements metadata and report workflows
+- relatively low technical risk
+
+First implementation slice:
+- add clearer selection summary in the top or side UI
+- show what selection scope current reports will use
+- improve feedback after selection operations
+
+Second slice:
+- add more selection operators such as:
+  - `select visible`
+  - `invert selection`
+  - `select siblings`
+  - `select path to root`
+
+Definition of done for this phase:
+- users can understand and refine selections without guesswork
+- selection-driven reporting feels deliberate rather than implicit
+
+5. Metadata-Aware Reporting and Plotting
+
+Why here:
+- once metadata exists, it should shape downstream analysis views
+- this creates visible scientific value quickly
+
+First implementation slice:
+- metadata-driven grouping in barplot
+- metadata labels in count matrix exports
+- metadata labels and symbols in PCoA
+
+Second slice:
+- per-group summaries
+- quick compare views between metadata-defined cohorts
+
+Definition of done for this phase:
+- reports and plots can be interpreted by sample identity, not just filename
+
+6. Local LLM Provider Path
+
+Why later:
+- valuable, but easier once compact context and action semantics are stable
+- should reuse the provider-neutral strict-JSON adapter design
+
+First implementation slice:
+- support one local provider target through backend transport
+- keep the same Unicorn internal provider interface
+- expose local provider config in the existing provider UI
+
+Definition of done for this phase:
+- graphengine can talk to at least one local LLM without changing agent semantics
+
+7. Expand `unicorn_compute`
+
+Why ongoing:
+- this is the right long-term home for analysis features
+- it keeps the frontend lighter and the backend more reusable
+
+Near-term targets after current barplot and PCoA:
+- richer PCoA controls and diagnostics
+- additional ordination/summary plots
+- backend-served compute specs for future visualizations
+
+Potential next analyses:
+- scree plot
+- loadings or taxon contribution summaries where appropriate
+- sample distance heatmap
+- cohort comparison summaries
+
+8. Performance and Scale
+
+Do this after the above features unless a real bottleneck appears.
+
+Measure first:
+- render latency
+- expand latency
+- count matrix latency
+- PCoA latency
+- payload sizes for tree, tooltip, reports, and agent turns
+
+Only then consider:
+- cached visible tree slices
+- cached compute outputs
+- tooltip/report prefetch
+- larger-session lifecycle policies
+
+Current Non-Goals
+
+- bringing back a local-only graphengine runtime
+- adding broad state-mutating agent behaviors before safe action tooling is solid
+- premature caching without measured hot paths
+- deep provider-specific logic leaking into the main graph runtime
+
+Recommended Implementation Order
+
+0. Backend-native large expansion actions
+1. Metadata integration
+2. Agent token compaction
+3. Safe agent actions
+4. Selection UX upgrade
+5. Metadata-aware reporting and plotting
+6. Local LLM provider path
+7. Continued `unicorn_compute` expansion
+8. Performance work driven by measurement
+
+What “Good” Looks Like Next
+
+- graphengine remains fast and understandable
+- metadata makes the interface scientifically richer
+- agent mode becomes cheaper, safer, and more useful
+- new analyses land through `unicorn_compute`
+- the codebase stays modular while visible user value keeps increasing

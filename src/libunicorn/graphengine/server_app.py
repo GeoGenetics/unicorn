@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import json
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ AGENT_PROVIDER_LOG_PATH = Path(
 
 
 app = FastAPI(title="Unicorn Graph Engine Prototype API")
+LOGGER = logging.getLogger("unicorn.graphengine")
 
 
 def _utc_iso(timestamp: float) -> str:
@@ -1523,19 +1525,32 @@ def _selected_count_matrix_report(
     }
 
 
-@app.get("/root-view")
-def root_view(
-    files: Optional[List[str]] = Query(default=None),
-    nodes_file: Optional[str] = Query(default=None),
-    names_file: Optional[str] = Query(default=None),
-    min_reads: int = Query(default=0, ge=0),
-    expanded: Optional[List[int]] = Query(default=None),
+def _collect_expandable_taxids_in_context(
+    node: TreeNodeModel,
+    tree: TreeModel,
+    min_reads: int,
+    expanded_taxids: set[int],
+) -> None:
+    eligible_children = [
+        child for child in node.children
+        if _node_passes_filter(child, tree, min_reads)
+    ]
+    if eligible_children:
+        expanded_taxids.add(node.taxid)
+    for child in eligible_children:
+        _collect_expandable_taxids_in_context(child, tree, min_reads, expanded_taxids)
+
+
+def _visible_tree_response(
+    selection: SelectionModel,
+    taxonomy: TaxonomyModel,
+    tree: TreeModel,
+    min_reads: int,
+    expanded_taxids: set[int],
 ) -> Dict[str, Any]:
-    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
-    requested_expanded_taxids = set(expanded or [])
     visible_tree, active_expanded_taxids = STORE.build_visible_tree_payload(
         tree,
-        expanded_taxids=requested_expanded_taxids,
+        expanded_taxids=expanded_taxids,
         min_reads=min_reads,
     )
     return {
@@ -1551,6 +1566,19 @@ def root_view(
         "request_context": _response_context(selection, taxonomy, min_reads, active_expanded_taxids),
         "cache": STORE.cache_status(),
     }
+
+
+@app.get("/root-view")
+def root_view(
+    files: Optional[List[str]] = Query(default=None),
+    nodes_file: Optional[str] = Query(default=None),
+    names_file: Optional[str] = Query(default=None),
+    min_reads: int = Query(default=0, ge=0),
+    expanded: Optional[List[int]] = Query(default=None),
+) -> Dict[str, Any]:
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    requested_expanded_taxids = set(_normalize_taxids(expanded))
+    return _visible_tree_response(selection, taxonomy, tree, min_reads, requested_expanded_taxids)
 
 
 @app.get("/expand-node")
@@ -1576,24 +1604,7 @@ def expand_node(
         )
     requested_expanded_taxids = set(expanded or [])
     requested_expanded_taxids.add(taxid)
-    visible_tree, active_expanded_taxids = STORE.build_visible_tree_payload(
-        tree,
-        expanded_taxids=requested_expanded_taxids,
-        min_reads=min_reads,
-    )
-    return {
-        "ok": True,
-        "datasets": [dataset.to_summary_payload() for dataset in selection.datasets],
-        "taxonomy": taxonomy.to_status_payload(),
-        "tree": visible_tree,
-        "missing_taxids": tree.missing_taxids,
-        "expanded_taxids": active_expanded_taxids,
-        "min_reads": min_reads,
-        "total_reads": selection.total_reads,
-        "direct_taxa": len(selection.direct_counts),
-        "request_context": _response_context(selection, taxonomy, min_reads, active_expanded_taxids),
-        "cache": STORE.cache_status(),
-    }
+    return _visible_tree_response(selection, taxonomy, tree, min_reads, requested_expanded_taxids)
 
 
 @app.get("/node-tooltip")
@@ -1851,6 +1862,62 @@ def compute_barplot(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         "spec": spec,
         "request_context": request_context,
     }
+
+
+@app.post("/uncollapse-to-tips")
+def uncollapse_to_tips(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    taxids = _normalize_taxids(payload.get("taxids") if isinstance(payload, dict) else None)
+    if not taxids:
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "At least one taxid is required for an uncollapse-to-tips request.",
+                code="missing_taxids",
+            ),
+        )
+    files = payload.get("files") if isinstance(payload.get("files"), list) else None
+    nodes_file = str(payload.get("nodes_file") or "") or None
+    names_file = str(payload.get("names_file") or "") or None
+    min_reads_value = payload.get("min_reads", 0)
+    try:
+        min_reads = max(0, int(min_reads_value))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=_error_detail(
+                "min_reads must be an integer.",
+                code="invalid_min_reads",
+                min_reads=min_reads_value,
+            ),
+        )
+    requested_expanded_taxids = set(
+        _normalize_taxids(payload.get("expanded_taxids") if isinstance(payload, dict) else None)
+    )
+    LOGGER.info(
+        "uncollapse-to-tips start selected_taxids=%s requested_expanded_taxids=%s",
+        len(taxids),
+        len(requested_expanded_taxids),
+    )
+    selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
+    request_context = _response_context(
+        selection,
+        taxonomy,
+        min_reads,
+        sorted(requested_expanded_taxids),
+    )
+    selected_nodes = [
+        _resolve_node_in_context(tree, taxid, min_reads, request_context)
+        for taxid in taxids
+    ]
+    for node in selected_nodes:
+        _collect_expandable_taxids_in_context(node, tree, min_reads, requested_expanded_taxids)
+    response = _visible_tree_response(selection, taxonomy, tree, min_reads, requested_expanded_taxids)
+    LOGGER.info(
+        "uncollapse-to-tips complete selected_taxids=%s active_expanded_taxids=%s",
+        len(taxids),
+        len(response.get("expanded_taxids") or []),
+    )
+    return response
 
 
 @app.post("/compute/pcoa")

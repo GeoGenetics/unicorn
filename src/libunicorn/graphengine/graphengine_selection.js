@@ -19,7 +19,6 @@
   const {
     walkTree,
     findNodeByTaxid,
-    collectExpandableTaxids,
     nodeHasChildren,
   } = treeModel;
 
@@ -253,23 +252,16 @@
 
   async function uncollapseSelectedToTipsRemote(selectedNodes) {
     try {
-      const modelPayload = await globalObject.fetchRemoteFullTreeModel();
-      const fullTree = modelPayload?.tree ? globalObject.buildRemoteTree(modelPayload.tree) : null;
-      if (!fullTree) {
-        setStatus("Could not load the full backend tree for Uncollapse Tips.");
-        return;
-      }
-      const expandedTaxids = new Set(state.remote.expandedTaxids);
-      for (const node of selectedNodes) {
-        const target = findNodeByTaxid(fullTree, node.taxid);
-        if (target) {
-          collectExpandableTaxids(target, expandedTaxids);
-        }
-      }
-      const visiblePayload = await globalObject.fetchRemoteVisibleTree({
-        expandedTaxids: Array.from(expandedTaxids),
-      });
+      const visiblePayload = await globalObject.postRemoteUncollapseToTips(
+        selectedNodes.map((node) => node.taxid),
+        {
+          expandedTaxids: Array.from(state.remote.expandedTaxids),
+        },
+      );
       globalObject.applyRemoteVisiblePayload(visiblePayload);
+      if (typeof globalObject.refreshCurrentReportIfNeeded === "function") {
+        await globalObject.refreshCurrentReportIfNeeded();
+      }
       globalObject.redraw();
     } catch (error) {
       setStatus(`Could not uncollapse selected nodes to tips on the backend: ${error.message || error}`);

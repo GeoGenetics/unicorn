@@ -13,9 +13,6 @@
 
   const {
     buildRemoteTree,
-    findNodeByTaxid,
-    collectExpandableTaxids,
-    nodeHasChildren,
   } = treeModel;
 
   function getUi() {
@@ -339,13 +336,15 @@
     if (nodesFile) url.searchParams.set("nodes_file", nodesFile);
     if (namesFile) url.searchParams.set("names_file", namesFile);
     url.searchParams.set("min_reads", String(minReads));
-    if (Array.isArray(options.expandedTaxids)) {
-      for (const taxid of options.expandedTaxids) {
-        url.searchParams.append("expanded", String(taxid));
-      }
-    } else if (activeRequestContext?.expanded_taxids?.length) {
-      for (const taxid of activeRequestContext.expanded_taxids) {
-        url.searchParams.append("expanded", String(taxid));
+    if (options.includeExpanded === true) {
+      if (Array.isArray(options.expandedTaxids)) {
+        for (const taxid of options.expandedTaxids) {
+          url.searchParams.append("expanded", String(taxid));
+        }
+      } else if (activeRequestContext?.expanded_taxids?.length) {
+        for (const taxid of activeRequestContext.expanded_taxids) {
+          url.searchParams.append("expanded", String(taxid));
+        }
       }
     }
     for (const [key, value] of Object.entries(options.query || {})) {
@@ -358,6 +357,7 @@
   async function fetchRemoteVisibleTree(options = {}) {
     const endpoint = options.taxid != null ? "expand-node" : "root-view";
     const url = buildRemoteContextUrl(endpoint, {
+      includeExpanded: true,
       expandedTaxids: options.expandedTaxids || Array.from(state.remote.expandedTaxids),
       datasetNames: options.datasetNames,
       nodesFile: options.nodesFile,
@@ -382,6 +382,76 @@
     }
     addClientLog("success", "tree", `Remote ${endpoint} request succeeded.`);
     return response.json();
+  }
+
+  function buildRemoteContextPayload(options = {}) {
+    const activeRequestContext = getActiveBackendRequestContext();
+    const files = Array.isArray(options.datasetNames)
+      ? options.datasetNames
+      : activeRequestContext?.dataset_names?.length
+        ? activeRequestContext.dataset_names
+        : getSelectedRemoteDatasets();
+    const nodesFile = options.nodesFile ?? activeRequestContext?.nodes_file ?? (els.nodesFile.files[0] ? els.nodesFile.files[0].name : null);
+    const namesFile = options.namesFile ?? activeRequestContext?.names_file ?? (els.namesFile.files[0] ? els.namesFile.files[0].name : null);
+    const minReads = options.minReads != null
+      ? Number(options.minReads)
+      : activeRequestContext && Number.isFinite(activeRequestContext.min_reads)
+        ? Number(activeRequestContext.min_reads)
+        : getMinReadsValueSafe();
+    return {
+      files,
+      nodes_file: nodesFile || null,
+      names_file: namesFile || null,
+      min_reads: minReads,
+      expanded_taxids: Array.isArray(options.expandedTaxids)
+        ? options.expandedTaxids.map((value) => Number(value))
+        : activeRequestContext?.expanded_taxids?.length
+          ? activeRequestContext.expanded_taxids.map((value) => Number(value))
+          : Array.from(state.remote.expandedTaxids),
+    };
+  }
+
+  async function postRemoteUncollapseToTips(taxids, options = {}) {
+    const body = {
+      ...buildRemoteContextPayload(options),
+      taxids: Array.isArray(taxids) ? taxids.map((value) => Number(value)) : [],
+    };
+    addClientLog(
+      "info",
+      "tree",
+      "Running Uncollapse Tips.",
+      `selected_taxids=${body.taxids.length.toLocaleString()}`,
+    );
+    let response;
+    try {
+      response = await fetch("http://localhost:8000/uncollapse-to-tips", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      addClientLog("error", "tree", "Remote uncollapse-to-tips fetch failed.", core.errorToDetail(error));
+      throw error;
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      addClientLog(
+        "error",
+        "tree",
+        "Remote uncollapse-to-tips request failed.",
+        payload?.detail?.message || `HTTP ${response.status}`,
+      );
+      throw new Error(payload?.detail?.message || `Remote uncollapse-to-tips request failed with HTTP ${response.status}`);
+    }
+    addClientLog(
+      "success",
+      "tree",
+      "Uncollapse Tips completed.",
+      `selected_taxids=${body.taxids.length.toLocaleString()} active_expanded_taxids=${Number(Array.isArray(payload?.expanded_taxids) ? payload.expanded_taxids.length : 0).toLocaleString()}`,
+    );
+    return payload;
   }
 
   async function fetchRemoteNodeTooltip(taxid) {
@@ -438,24 +508,6 @@
     if (!response.ok) {
       throw new Error(payload?.detail?.message || `Remote rank-report request failed with HTTP ${response.status}`);
     }
-    return payload;
-  }
-
-  async function fetchRemoteFullTreeModel() {
-    addClientLog("info", "tree", "GET /tree-model");
-    let response;
-    try {
-      response = await fetch(buildRemoteContextUrl("tree-model").toString(), { method: "GET" });
-    } catch (error) {
-      addClientLog("error", "tree", "Remote tree-model fetch failed.", core.errorToDetail(error));
-      throw error;
-    }
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      addClientLog("error", "tree", "Remote tree-model request failed.", payload?.detail?.message || `HTTP ${response.status}`);
-      throw new Error(payload?.detail?.message || `Remote tree-model request failed with HTTP ${response.status}`);
-    }
-    addClientLog("success", "tree", "Remote tree-model request succeeded.");
     return payload;
   }
 
@@ -820,12 +872,13 @@
     handleMinReadsChange,
     hasBackendTree,
     buildRemoteContextUrl,
+    buildRemoteContextPayload,
     fetchRemoteVisibleTree,
+    postRemoteUncollapseToTips,
     fetchRemoteNodeTooltip,
     fetchRemoteTableView,
     fetchRemoteSubtreeReport,
     fetchRemoteRankReport,
-    fetchRemoteFullTreeModel,
     applyRemoteVisiblePayload,
     refreshRemoteDatasets,
     renderRemoteDatasets,
