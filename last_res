@@ -1,30 +1,9 @@
-The PCoA path is now wired end to end.
-What changed:
-Added backend route: [server_app.py](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/server_app.py)POST /compute/pcoa
-rebuilds the selected-node count matrix on the backend
-calls build_count_matrix_pcoa_spec(...)
-
-Added UI controls: [index.html](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/index.html)PCoA button
-metric selector with:Jaccard
-Bray-Curtis
-Log-chord
-Chao
-
-
-Wired popup rendering: [graphengine.js](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine.js)fetches POST /compute/pcoa
-opens a Plotly scatter popup
-labels axes with explained variance
-shows correction status in the plot header
-hides PCoA when count view is Direct + Cumulative
-hides PCoA controls for rank reports and plain top-table mode
-
-Updated progress tracker: [todo.txt](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/unicorn_compute/todo.txt)
-Checks I ran:
-Python import check for [pcoa.py](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/unicorn_compute/pcoa.py)
-py_compile on [server_app.py](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/server_app.py)
-JS parse check on [graphengine.js](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine.js)
-What to do before trying it:
-Restart the backend server so POST /compute/pcoa is live.
-Hard refresh the app so the new PCoA button and metric selector appear.
-Open a count matrix, choose Direct or Cumulative, pick a metric, and click PCoA.
-If you want, next we can tune the popup aesthetics or add sample-group overlays once you’ve had a first spin.
+Pass 8B is done.
+graphengine.js is now a tiny compatibility shim with no semantic ownership. The last meaningful leftovers were moved where they belong:
+toggleCollapse() moved into [graphengine_selection.js](/Users/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine_selection.js)
+setStatus(), addClientLog(), clearClientLog(), and renderClientLog() moved into [graphengine_ui.js](/Users/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine_ui.js)
+I also made the script order in [index.html](/Users/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/index.html) more explicit while keeping the current dependency-safe order, and preserved the compatibility globals that tests and DevTools still use.
+Regression is green:
+./tests/run_tests.sh
+5 passed in 40.06s
+I didn’t do the extra manual DevTools/fresh-reload check in this pass. The next step is Pass 8C: Remove or freeze graphengine.js.
