@@ -102,6 +102,34 @@
                 <span>names.dmp optional</span>
                 <input id="namesFile" type="file" accept=".dmp,.txt">
               </label>
+              <label>
+                <span>metadata.txt optional</span>
+                <input id="metadataFile" type="file" accept=".txt,.tsv,.tab">
+                <small class="hint">Upload one metadata table. The backend stores it canonically as <strong>metadata.txt</strong> and replaces any existing metadata file.</small>
+              </label>
+            </div>
+          </section>
+
+          <section class="panel-section" aria-label="Metadata section">
+            <div class="panel-section-head">
+              <h2>Metadata</h2>
+              <button id="toggleMetadataSection" class="secondary compact-btn section-toggle" type="button" aria-expanded="true">Hide</button>
+            </div>
+            <div id="metadataSectionBody" class="panel-section-body">
+              <section id="metadataSummaryPanel" class="metadata-summary-panel" aria-label="Metadata summary">
+                <div class="metadata-summary-head">
+                  <h3>Backend Metadata</h3>
+                </div>
+                <div id="metadataSummaryMeta" class="metadata-summary-meta">No backend metadata loaded</div>
+                <div id="metadataSummaryFields" class="metadata-summary-fields">Load a metadata file or connect to a backend that already has <strong>metadata.txt</strong>.</div>
+              </section>
+              <section class="metadata-selected-panel" aria-label="Selected dataset metadata">
+                <div class="metadata-summary-head">
+                  <h3>Selected Dataset Metadata</h3>
+                </div>
+                <div id="metadataSelectedMeta" class="metadata-summary-meta">No selected datasets yet</div>
+                <div id="metadataSelectedList" class="metadata-selected-list">Render a backend tree and select one or more datasets to inspect metadata bindings.</div>
+              </section>
             </div>
           </section>
 

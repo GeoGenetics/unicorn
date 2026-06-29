@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import logging
 import os
 import json
@@ -29,6 +30,7 @@ GOOGLE_INTERACTIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta
 AGENT_PROVIDER_LOG_PATH = Path(
     os.environ.get("UNICORN_GRAPHENGINE_AGENT_LOG", str(UPLOAD_DIR / "graphengine_agent_provider.jsonl"))
 ).resolve()
+METADATA_FILENAME = "metadata.txt"
 
 
 app = FastAPI(title="Unicorn Graph Engine Prototype API")
@@ -154,6 +156,28 @@ class TaxonomyNode:
     rank: str
 
 
+@dataclass(frozen=True)
+class MetadataModel:
+    fileinfo: FileInfo
+    fields: Tuple[str, ...]
+    rows_by_dataset: Dict[str, Dict[str, str]]
+    rows_total: int
+    
+    def to_status_payload(self, available_dataset_names: Optional[set[str]] = None) -> Dict[str, Any]:
+        available = available_dataset_names or set()
+        matched_datasets = sorted(dataset_name for dataset_name in self.rows_by_dataset if dataset_name in available)
+        matched_rows = len(matched_datasets)
+        unmatched_rows = self.rows_total - matched_rows
+        return {
+            "filename": self.fileinfo.name,
+            "fields": list(self.fields),
+            "rows_total": self.rows_total,
+            "matched_rows": matched_rows,
+            "unmatched_rows": unmatched_rows,
+            "datasets_with_metadata": matched_datasets,
+        }
+
+
 @dataclass
 class DatasetModel:
     fileinfo: FileInfo
@@ -174,7 +198,7 @@ class DatasetModel:
         )
         return payload
 
-    def to_summary_payload(self) -> Dict[str, Any]:
+    def to_summary_payload(self, metadata: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         payload = self.fileinfo.to_payload()
         payload.update(
             {
@@ -182,6 +206,8 @@ class DatasetModel:
                 "total_taxa": self.total_taxa,
             }
         )
+        if metadata is not None:
+            payload["metadata"] = dict(metadata)
         return payload
 
 
@@ -302,6 +328,7 @@ class GraphEngineStore:
         self._dataset_cache: Dict[str, DatasetModel] = {}
         self._selection_cache: Dict[Tuple[str, ...], SelectionModel] = {}
         self._taxonomy_cache: Optional[TaxonomyModel] = None
+        self._metadata_cache: Optional[MetadataModel] = None
         self._tree_cache: Dict[
             Tuple[Tuple[str, ...], Tuple[str, Tuple[int, float], Optional[str], Optional[Tuple[int, float]]]],
             TreeModel,
@@ -403,6 +430,84 @@ class GraphEngineStore:
             _raise_filesystem_http_error(path, operation="read", file_role="taxonomy names file")
         return names
 
+    def _parse_metadata(self, path: Path) -> MetadataModel:
+        fileinfo = FileInfo.from_path(path)
+        try:
+            with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+                reader = csv.reader(handle, delimiter="\t")
+                header: Optional[List[str]] = None
+                rows_by_dataset: Dict[str, Dict[str, str]] = {}
+                rows_total = 0
+                dataset_column = -1
+                fields: List[str] = []
+                for raw_row in reader:
+                    row = [cell.strip() for cell in raw_row]
+                    if not row or not any(row):
+                        continue
+                    if header is None:
+                        header = row
+                        if "dataset" not in header:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=_error_detail(
+                                    "Metadata file must contain a 'dataset' header column.",
+                                    code="metadata_missing_dataset_column",
+                                ),
+                            )
+                        dataset_column = header.index("dataset")
+                        fields = [column for column in header if column and column != "dataset"]
+                        continue
+                    if header is None:
+                        continue
+                    if len(row) < len(header):
+                        row = row + ([""] * (len(header) - len(row)))
+                    elif len(row) > len(header):
+                        row = row[:len(header)]
+                    dataset_name = row[dataset_column].strip()
+                    if not dataset_name:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=_error_detail(
+                                "Metadata rows must include a non-empty dataset value.",
+                                code="metadata_missing_dataset_value",
+                                row_number=rows_total + 2,
+                            ),
+                        )
+                    dataset_key = Path(dataset_name).name
+                    if dataset_key in rows_by_dataset:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=_error_detail(
+                                "Metadata file contains duplicate dataset rows.",
+                                code="metadata_duplicate_dataset",
+                                dataset=dataset_key,
+                            ),
+                        )
+                    row_payload: Dict[str, str] = {}
+                    for index, column in enumerate(header):
+                        if not column or column == "dataset":
+                            continue
+                        row_payload[column] = row[index] if index < len(row) else ""
+                    rows_by_dataset[dataset_key] = row_payload
+                    rows_total += 1
+                if header is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=_error_detail(
+                            "Metadata file must contain a header row.",
+                            code="metadata_missing_header",
+                        ),
+                    )
+        except PermissionError:
+            _raise_filesystem_http_error(path, operation="read", file_role="metadata file")
+
+        return MetadataModel(
+            fileinfo=fileinfo,
+            fields=tuple(fields),
+            rows_by_dataset=rows_by_dataset,
+            rows_total=rows_total,
+        )
+
     def _prune_stale_caches(self, available_names: set[str]) -> None:
         stale_datasets = [name for name in self._dataset_cache if name not in available_names]
         for name in stale_datasets:
@@ -425,6 +530,63 @@ class GraphEngineStore:
             files = _list_bdamage_files()
             self._prune_stale_caches({path.name for path in files})
             return files
+
+    def get_metadata(self) -> Optional[MetadataModel]:
+        metadata_path = UPLOAD_DIR / METADATA_FILENAME
+        with self._lock:
+            cached = self._metadata_cache
+            if not metadata_path.exists():
+                self._metadata_cache = None
+                return None
+            current_info = FileInfo.from_path(metadata_path)
+            if cached and cached.fileinfo.fingerprint() == current_info.fingerprint():
+                return cached
+        try:
+            metadata = self._parse_metadata(metadata_path)
+        except HTTPException as error:
+            LOGGER.warning(
+                "Could not auto-load backend metadata file %s: %s",
+                metadata_path,
+                error.detail.get("message") if isinstance(error.detail, dict) else error.detail,
+            )
+            with self._lock:
+                self._metadata_cache = None
+            return None
+        with self._lock:
+            self._metadata_cache = metadata
+        return metadata
+
+    def load_metadata(self, path: Path) -> MetadataModel:
+        metadata = self._parse_metadata(path)
+        with self._lock:
+            self._metadata_cache = metadata
+        return metadata
+
+    def metadata_summary_payload(self) -> Optional[Dict[str, Any]]:
+        metadata = self.get_metadata()
+        if metadata is None:
+            return None
+        available_dataset_names = {path.name for path in self.list_files()}
+        return metadata.to_status_payload(available_dataset_names)
+
+    def metadata_for_dataset(self, dataset_name: str) -> Optional[Dict[str, str]]:
+        metadata = self.get_metadata()
+        if metadata is None:
+            return None
+        row = metadata.rows_by_dataset.get(Path(dataset_name).name)
+        return dict(row) if row is not None else None
+
+    def dataset_summary_payload(self, dataset: DatasetModel) -> Dict[str, Any]:
+        return dataset.to_summary_payload(self.metadata_for_dataset(dataset.fileinfo.name))
+
+    def selection_status_payload(self, selection: SelectionModel) -> Dict[str, Any]:
+        return {
+            "dataset_count": len(selection.datasets),
+            "datasets": [self.dataset_summary_payload(dataset) for dataset in selection.datasets],
+            "total_reads": selection.total_reads,
+            "total_taxa": selection.total_taxa,
+            "direct_taxa": len(selection.direct_counts),
+        }
 
     def get_or_load_dataset(self, path: Path) -> DatasetModel:
         with self._lock:
@@ -729,6 +891,7 @@ def ping() -> Dict[str, Any]:
             "nodes_file": nodes_path.name if nodes_path else None,
             "names_file": names_path.name if names_path else None,
         },
+        "metadata": STORE.metadata_summary_payload(),
         "cache": STORE.cache_status(),
     }
 
@@ -747,12 +910,41 @@ async def upload(file: UploadFile = File(...)) -> Dict[str, Any]:
     }
 
 
+@app.post("/metadata/upload")
+async def upload_metadata(file: UploadFile = File(...)) -> Dict[str, Any]:
+    outpath = UPLOAD_DIR / METADATA_FILENAME
+    data = await file.read()
+    outpath.write_bytes(data)
+    try:
+        metadata = STORE.load_metadata(outpath)
+    except Exception:
+        try:
+            outpath.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    return {
+        "ok": True,
+        "metadata": STORE.metadata_summary_payload(),
+        "saved_to": str(outpath),
+    }
+
+
+@app.get("/metadata/status")
+def metadata_status() -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "metadata": STORE.metadata_summary_payload(),
+    }
+
+
 @app.get("/datasets")
 def list_datasets() -> Dict[str, Any]:
-    datasets = [FileInfo.from_path(path).to_payload() for path in STORE.list_files()]
+    datasets = [STORE.dataset_summary_payload(STORE.get_or_load_dataset(path)) for path in STORE.list_files()]
     return {
         "ok": True,
         "datasets": datasets,
+        "metadata": STORE.metadata_summary_payload(),
     }
 
 
@@ -785,13 +977,14 @@ def model_status(
         "ok": True,
         "upload_dir": str(UPLOAD_DIR),
         "available_datasets": [path.name for path in available],
-        "selection": selection.to_status_payload() if selection else {
+        "selection": STORE.selection_status_payload(selection) if selection else {
             "dataset_count": 0,
             "datasets": [],
             "total_reads": 0,
             "total_taxa": 0,
             "direct_taxa": 0,
         },
+        "metadata": STORE.metadata_summary_payload(),
         "taxonomy": taxonomy.to_status_payload(),
         "tree": tree.to_status_payload() if tree else None,
         "cache": STORE.cache_status(),
@@ -842,10 +1035,11 @@ def tree_model(
     tree = STORE.build_tree_model(selection, taxonomy)
     return {
         "ok": True,
-        "datasets": [dataset.to_summary_payload() for dataset in selection.datasets],
+        "datasets": [STORE.dataset_summary_payload(dataset) for dataset in selection.datasets],
         "taxonomy": taxonomy.to_status_payload(),
         "tree": tree.root.to_payload(),
         "missing_taxids": tree.missing_taxids,
+        "metadata": STORE.metadata_summary_payload(),
         "cache": STORE.cache_status(),
     }
 
@@ -1555,7 +1749,7 @@ def _visible_tree_response(
     )
     return {
         "ok": True,
-        "datasets": [dataset.to_summary_payload() for dataset in selection.datasets],
+        "datasets": [STORE.dataset_summary_payload(dataset) for dataset in selection.datasets],
         "taxonomy": taxonomy.to_status_payload(),
         "tree": visible_tree,
         "missing_taxids": tree.missing_taxids,
@@ -1564,6 +1758,7 @@ def _visible_tree_response(
         "total_reads": selection.total_reads,
         "direct_taxa": len(selection.direct_counts),
         "request_context": _response_context(selection, taxonomy, min_reads, active_expanded_taxids),
+        "metadata": STORE.metadata_summary_payload(),
         "cache": STORE.cache_status(),
     }
 

@@ -18,6 +18,9 @@
     globalObject.updateTunnelHint();
     globalObject.updateConnectionState(false, "Not connected");
     globalObject.renderRemoteDatasets();
+    if (typeof globalObject.renderMetadataSummary === "function") {
+      globalObject.renderMetadataSummary();
+    }
     globalObject.syncBackendRuntimeUiState();
     renderClientLog();
   }
@@ -26,6 +29,9 @@
     ensureFileRowControls();
     els.nodesFile.addEventListener("change", globalObject.updateRenderAvailability);
     els.namesFile.addEventListener("change", globalObject.updateRenderAvailability);
+    if (els.metadataFile) {
+      els.metadataFile.addEventListener("change", globalObject.updateRenderAvailability);
+    }
     els.lcaInputs.addEventListener("change", (event) => {
       if (event.target && event.target.matches(".lca-file-input")) {
         globalObject.updateRenderAvailability();
@@ -176,6 +182,7 @@
     setSidebarCollapsed(savedCollapsed);
     initSectionToggle("remoteSection", els.toggleRemoteSection, els.remoteSectionBody);
     initSectionToggle("filesSection", els.toggleFilesSection, els.filesSectionBody);
+    initSectionToggle("metadataSection", els.toggleMetadataSection, els.metadataSectionBody);
     initSectionToggle("optionsSection", els.toggleOptionsSection, els.optionsSectionBody);
     initSectionToggle("reportsSection", els.toggleReportsSection, els.reportsSectionBody);
     initSectionToggle("agentSection", els.toggleAgentSection, els.agentSectionBody);

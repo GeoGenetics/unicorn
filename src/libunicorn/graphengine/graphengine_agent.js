@@ -271,6 +271,9 @@
       : backendConnected
         ? getSelectedRemoteDatasets()
         : [];
+    const selectedDatasetSummaries = backendConnected && typeof globalObject.getSelectedRemoteDatasetSummaries === "function"
+      ? globalObject.getSelectedRemoteDatasetSummaries()
+      : [];
     const expandedTaxids = activeRequestContext?.expanded_taxids?.length
       ? activeRequestContext.expanded_taxids.slice()
       : [];
@@ -297,6 +300,7 @@
       mode: "backend",
       datasets: {
         selected: selectedDatasets,
+        selected_summaries: selectedDatasetSummaries,
         count: selectedDatasets.length,
         total_reads: Number(backendConnected ? state.remote.totalReads : 0),
         direct_taxa: Number(backendConnected ? state.remote.directTaxa : 0),
@@ -390,6 +394,15 @@
       datasets: {
         selected: Array.isArray(datasets.selected)
           ? datasets.selected.map((name) => String(name))
+          : [],
+        selected_summaries: Array.isArray(datasets.selected_summaries)
+          ? datasets.selected_summaries.map((dataset) => ({
+            filename: String(dataset?.filename || ""),
+            color: String(dataset?.color || ""),
+            metadata: dataset?.metadata && typeof dataset.metadata === "object"
+              ? dataset.metadata
+              : null,
+          }))
           : [],
         count: Number(datasets.count || 0),
         total_reads: Number(datasets.total_reads || 0),

@@ -28,6 +28,7 @@
       requestContext: null,
       backendNodesFile: "",
       backendNamesFile: "",
+      metadata: null,
       expandedTaxids: new Set(),
       serverTreeActive: false,
       totalReads: 0,

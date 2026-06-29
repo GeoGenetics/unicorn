@@ -68,6 +68,22 @@
     }
   }
 
+  function normalizeRemoteMetadata(metadata) {
+    if (!metadata || typeof metadata !== "object") {
+      return null;
+    }
+    return {
+      filename: String(metadata.filename || ""),
+      fields: Array.isArray(metadata.fields) ? metadata.fields.map((value) => String(value)) : [],
+      rows_total: Number(metadata.rows_total || 0),
+      matched_rows: Number(metadata.matched_rows || 0),
+      unmatched_rows: Number(metadata.unmatched_rows || 0),
+      datasets_with_metadata: Array.isArray(metadata.datasets_with_metadata)
+        ? metadata.datasets_with_metadata.map((value) => String(value))
+        : [],
+    };
+  }
+
   function normalizeProviderRequestContext(requestContext) {
     if (!requestContext || typeof requestContext !== "object") {
       return null;
@@ -115,11 +131,13 @@
       state.remote.selectedDatasets.clear();
       state.remote.backendNodesFile = "";
       state.remote.backendNamesFile = "";
+      state.remote.metadata = null;
       state.remote.requestContext = null;
       state.remote.expandedTaxids.clear();
       updateConnectionState(false, "Could not reach backend");
       els.remoteDatasetsPanel.hidden = true;
       renderRemoteDatasets();
+      renderMetadataSummary();
       setStatus(`Could not reach the backend over localhost:8000. ${error.message || error}`);
       addClientLog("error", "connect", "Backend tunnel test failed.", core.errorToDetail(error));
     }
@@ -141,6 +159,7 @@
     if (!connected) {
       state.remote.datasets = [];
       state.remote.selectedDatasets.clear();
+      state.remote.metadata = null;
       state.remote.requestContext = null;
     }
     syncBackendRuntimeUiState();
@@ -152,17 +171,22 @@
       return;
     }
     const files = getLocalRemoteUploadFiles();
-    if (!files.length) {
+    const metadataFile = getLocalRemoteMetadataFile();
+    if (!files.length && !metadataFile) {
       setStatus("Choose one or more local files first.");
       return;
     }
-    addClientLog("info", "upload", `Uploading ${files.length.toLocaleString()} local file${files.length === 1 ? "" : "s"} to the backend.`);
+    const fileCount = files.length + (metadataFile ? 1 : 0);
+    addClientLog("info", "upload", `Uploading ${fileCount.toLocaleString()} local file${fileCount === 1 ? "" : "s"} to the backend.`);
     try {
-      const uploaded = await uploadFilesToRemote(files);
+      const uploaded = files.length ? await uploadFilesToRemote(files) : 0;
+      if (metadataFile) {
+        await uploadMetadataToRemote(metadataFile);
+      }
       await refreshRemoteServerStatus();
       await refreshRemoteDatasets();
       clearRemoteDatasetInputs();
-      setStatus(`Uploaded ${uploaded.toLocaleString()} file${uploaded === 1 ? "" : "s"} to the backend.`);
+      setStatus(`Uploaded ${fileCount.toLocaleString()} file${fileCount === 1 ? "" : "s"} to the backend.`);
     } catch (error) {
       setStatus(`Could not upload files to the backend: ${error.message || error}`);
     }
@@ -197,6 +221,10 @@
     return [...datasetFiles, ...taxonomyFiles];
   }
 
+  function getLocalRemoteMetadataFile() {
+    return els.metadataFile?.files?.[0] || null;
+  }
+
   function getLocalRemoteDatasetUploadFiles() {
     return Array.from(document.querySelectorAll(".lca-file-input"))
       .map((input) => input.files && input.files[0])
@@ -223,15 +251,42 @@
     return uploaded;
   }
 
+  async function uploadMetadataToRemote(file) {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    addClientLog("info", "upload", `Uploading metadata ${file.name} to backend.`);
+    const response = await fetch("http://localhost:8000/metadata/upload", {
+      method: "POST",
+      body: formData,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      addClientLog("error", "upload", `Metadata upload failed for ${file.name}.`, payload?.detail?.message || `HTTP ${response.status}`);
+      throw new Error(payload?.detail?.message || `Metadata upload failed for ${file.name} with HTTP ${response.status}`);
+    }
+    state.remote.metadata = normalizeRemoteMetadata(payload?.metadata);
+    addClientLog("success", "upload", `Metadata upload finished for ${file.name}.`, state.remote.metadata?.filename || "metadata.txt");
+    return payload;
+  }
+
   async function loadAndRenderBackend() {
     const localFiles = getLocalRemoteUploadFiles();
+    const metadataFile = getLocalRemoteMetadataFile();
     if (localFiles.length) {
       await uploadFilesToRemote(localFiles);
+      if (metadataFile) {
+        await uploadMetadataToRemote(metadataFile);
+      }
       await refreshRemoteServerStatus();
       await refreshRemoteDatasets();
       for (const file of localFiles) {
         if (file.name.endsWith(".bdamage.txt")) state.remote.selectedDatasets.add(file.name);
       }
+      clearRemoteDatasetInputs();
+    } else if (metadataFile) {
+      await uploadMetadataToRemote(metadataFile);
+      await refreshRemoteServerStatus();
+      await refreshRemoteDatasets();
       clearRemoteDatasetInputs();
     }
 
@@ -276,6 +331,9 @@
     });
     if (els.lcaListFile) {
       els.lcaListFile.value = "";
+    }
+    if (els.metadataFile) {
+      els.metadataFile.value = "";
     }
   }
 
@@ -555,6 +613,7 @@
     }
 
     const payload = await response.json();
+    state.remote.metadata = normalizeRemoteMetadata(payload?.metadata);
     const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
     const previous = new Set(state.remote.selectedDatasets);
     const previouslyAllSelected = state.remote.datasets.length > 0
@@ -565,6 +624,7 @@
       filename: dataset.filename || dataset.id || "remote-dataset",
       bytes: Number(dataset.bytes || 0),
       modified_at: dataset.modified_at || "",
+      metadata: dataset.metadata && typeof dataset.metadata === "object" ? dataset.metadata : null,
     }));
 
     if (selectAll || !previous.size || previouslyAllSelected) {
@@ -578,6 +638,7 @@
     }
 
     renderRemoteDatasets();
+    renderMetadataSummary();
     addClientLog("success", "datasets", `Loaded ${state.remote.datasets.length.toLocaleString()} backend dataset${state.remote.datasets.length === 1 ? "" : "s"}.`);
   }
 
@@ -586,6 +647,7 @@
 
     if (!state.remote.connected) {
       els.remoteDatasetsMeta.textContent = "Connect to browse backend files";
+      renderMetadataSummary();
       updateRenderAvailability();
       return;
     }
@@ -599,12 +661,13 @@
       empty.className = "remote-datasets-empty";
       empty.textContent = "No .bdamage datasets found in uploads on the backend.";
       els.remoteDatasetsList.appendChild(empty);
+      renderMetadataSummary();
       updateRenderAvailability();
       return;
     }
 
     els.remoteDatasetsMeta.textContent =
-      `${selected.size.toLocaleString()} of ${datasets.length.toLocaleString()} file${datasets.length === 1 ? "" : "s"} selected`;
+      `${selected.size.toLocaleString()} of ${datasets.length.toLocaleString()} file${datasets.length === 1 ? "" : "s"} selected${state.remote.metadata ? ` • metadata: ${state.remote.metadata.matched_rows.toLocaleString()} matched` : ""}`;
 
     for (const dataset of datasets) {
       const item = document.createElement("div");
@@ -640,6 +703,7 @@
       els.remoteDatasetsList.appendChild(item);
     }
 
+    renderMetadataSummary();
     updateRenderAvailability();
   }
 
@@ -754,28 +818,33 @@
   function backendConnectionReadyMessage(user, host) {
     const selected = getSelectedRemoteDatasets().length;
     const pendingUploads = getLocalRemoteDatasetUploadFiles().length;
+    const metadataReady = state.remote.metadata
+      ? `metadata (${state.remote.metadata.filename || "metadata.txt"}, ${state.remote.metadata.matched_rows.toLocaleString()} matched row${state.remote.metadata.matched_rows === 1 ? "" : "s"})`
+      : "no backend metadata loaded yet";
     const datasetLabel = selected === 1 ? "dataset" : "datasets";
     if (canRenderRemoteTree()) {
       const taxonomySource = hasLocalRemoteTaxonomyOverride()
         ? `uploaded taxonomy staged from this UI (${els.nodesFile.files[0].name}${els.namesFile.files[0] ? `, ${els.namesFile.files[0].name}` : ""})`
         : `backend taxonomy (${state.remote.backendNodesFile}${state.remote.backendNamesFile ? `, ${state.remote.backendNamesFile}` : ""})`;
       if (selected > 0) {
-        return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${selected.toLocaleString()} ${datasetLabel} ${selected === 1 ? "is" : "are"} selected, and ${taxonomySource} is ready for rendering.`;
+        return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${selected.toLocaleString()} ${datasetLabel} ${selected === 1 ? "is" : "are"} selected, ${taxonomySource} is ready for rendering, and ${metadataReady}.`;
       }
-      return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${pendingUploads.toLocaleString()} local dataset${pendingUploads === 1 ? "" : "s"} ${pendingUploads === 1 ? "is" : "are"} queued for upload, and ${taxonomySource} is ready for rendering.`;
+      return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${pendingUploads.toLocaleString()} local dataset${pendingUploads === 1 ? "" : "s"} ${pendingUploads === 1 ? "is" : "are"} queued for upload, ${taxonomySource} is ready for rendering, and ${metadataReady}.`;
     }
     if (pendingUploads > 0) {
-      return `Tunnel check succeeded for ${user}@${host}. Local datasets are queued for upload, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree.`;
+      return `Tunnel check succeeded for ${user}@${host}. Local datasets are queued for upload, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree. Backend metadata status: ${metadataReady}.`;
     }
     if (selected > 0) {
-      return `Tunnel check succeeded for ${user}@${host}. Backend datasets are visible, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree.`;
+      return `Tunnel check succeeded for ${user}@${host}. Backend datasets are visible, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree. Backend metadata status: ${metadataReady}.`;
     }
-    return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable; choose one or more datasets to enable Render Tree.`;
+    return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable; choose one or more datasets to enable Render Tree. Backend metadata status: ${metadataReady}.`;
   }
 
   function updateRemoteServerStatus(ping) {
     state.remote.backendNodesFile = String(ping?.taxonomy?.nodes_file || "");
     state.remote.backendNamesFile = String(ping?.taxonomy?.names_file || "");
+    state.remote.metadata = normalizeRemoteMetadata(ping?.metadata);
+    renderMetadataSummary();
     syncBackendRuntimeUiState();
   }
 
@@ -830,6 +899,25 @@
       .filter((filename) => state.remote.selectedDatasets.has(filename));
   }
 
+  function getColorForDatasetFilename(filename) {
+    const matchingSeries = state.series.find((source) => source.label === filename);
+    if (matchingSeries?.color) {
+      return matchingSeries.color;
+    }
+    const datasetIndex = state.remote.datasets.findIndex((dataset) => dataset.filename === filename);
+    return colorForSource(datasetIndex >= 0 ? datasetIndex : 0);
+  }
+
+  function getSelectedRemoteDatasetSummaries() {
+    return state.remote.datasets
+      .filter((dataset) => state.remote.selectedDatasets.has(dataset.filename))
+      .map((dataset) => ({
+        filename: dataset.filename,
+        color: getColorForDatasetFilename(dataset.filename),
+        metadata: dataset.metadata && typeof dataset.metadata === "object" ? { ...dataset.metadata } : null,
+      }));
+  }
+
   function formatRemoteDatasetDetail(dataset) {
     const parts = [];
     if (dataset.bytes > 0) parts.push(core.formatBytes(dataset.bytes));
@@ -837,7 +925,71 @@
       const parsed = new Date(dataset.modified_at);
       parts.push(Number.isNaN(parsed.getTime()) ? dataset.modified_at : parsed.toLocaleString());
     }
+    const metadata = dataset.metadata && typeof dataset.metadata === "object" ? dataset.metadata : null;
+    if (metadata) {
+      const metadataPreview = Object.entries(metadata)
+        .slice(0, 2)
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(" | ");
+      if (metadataPreview) {
+        parts.push(metadataPreview);
+      }
+    }
     return parts.join(" \u2022 ") || "ready";
+  }
+
+  function renderMetadataSummary() {
+    if (!els.metadataSummaryMeta || !els.metadataSummaryFields || !els.metadataSelectedMeta || !els.metadataSelectedList) {
+      return;
+    }
+    if (!state.remote.connected) {
+      els.metadataSummaryMeta.textContent = "Connect to inspect backend metadata";
+      els.metadataSummaryFields.innerHTML = "The backend will report whether <strong>metadata.txt</strong> is already present.";
+      els.metadataSelectedMeta.textContent = "No backend dataset context yet";
+      els.metadataSelectedList.textContent = "Connect to the backend to inspect dataset metadata bindings.";
+      return;
+    }
+    const metadata = state.remote.metadata;
+    if (!metadata) {
+      els.metadataSummaryMeta.textContent = "No backend metadata loaded";
+      els.metadataSummaryFields.innerHTML = "Upload one metadata table to store it on the backend as <strong>metadata.txt</strong>.";
+      els.metadataSelectedMeta.textContent = "No metadata attached to selected datasets";
+      els.metadataSelectedList.textContent = "Once metadata is loaded, selected datasets with matching filenames will appear here.";
+      return;
+    }
+    const fieldCount = metadata.fields.length;
+    els.metadataSummaryMeta.textContent =
+      `${metadata.filename || "metadata.txt"} • ${metadata.matched_rows.toLocaleString()} matched • ${metadata.unmatched_rows.toLocaleString()} unmatched`;
+    els.metadataSummaryFields.textContent = fieldCount
+      ? `Fields: ${metadata.fields.join(", ")}`
+      : "No metadata fields were detected beyond the required dataset column.";
+    const selectedSummaries = getSelectedRemoteDatasetSummaries();
+    if (!selectedSummaries.length) {
+      els.metadataSelectedMeta.textContent = "No selected datasets yet";
+      els.metadataSelectedList.textContent = "Select one or more backend datasets to inspect their metadata bindings.";
+      return;
+    }
+    const withMetadata = selectedSummaries.filter((dataset) => dataset.metadata && Object.keys(dataset.metadata).length > 0);
+    els.metadataSelectedMeta.textContent =
+      `${withMetadata.length.toLocaleString()} of ${selectedSummaries.length.toLocaleString()} selected dataset${selectedSummaries.length === 1 ? "" : "s"} matched metadata`;
+    if (!withMetadata.length) {
+      els.metadataSelectedList.textContent = "The current dataset selection has no matched metadata rows.";
+      return;
+    }
+    els.metadataSelectedList.innerHTML = withMetadata.map((dataset) => {
+      const metadataRows = Object.entries(dataset.metadata || {})
+        .map(([key, value]) => `<span class="metadata-chip"><strong>${core.escapeHtml(key)}</strong>: ${core.escapeHtml(String(value || ""))}</span>`)
+        .join("");
+      return `
+        <div class="metadata-selected-item">
+          <div class="metadata-selected-name">
+            <span class="metadata-selected-swatch" style="background:${core.escapeHtml(dataset.color)}"></span>
+            <span title="${core.escapeHtml(dataset.filename)}">${core.escapeHtml(dataset.filename)}</span>
+          </div>
+          <div class="metadata-selected-values">${metadataRows}</div>
+        </div>
+      `;
+    }).join("");
   }
 
   function addClientLog(level, stage, message, detail = "") {
@@ -897,8 +1049,10 @@
     syncBackendRuntimeUiState,
     updateRenderAvailability,
     getSelectedRemoteDatasets,
+    getSelectedRemoteDatasetSummaries,
     formatRemoteDatasetDetail,
     getVisibleSeriesSafe,
+    renderMetadataSummary,
   };
 
   Object.assign(globalObject, namespace.backend);
