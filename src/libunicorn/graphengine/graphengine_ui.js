@@ -18,6 +18,9 @@
     globalObject.updateTunnelHint();
     globalObject.updateConnectionState(false, "Not connected");
     globalObject.renderRemoteDatasets();
+    if (typeof globalObject.initMetadataControls === "function") {
+      globalObject.initMetadataControls();
+    }
     if (typeof globalObject.renderMetadataSummary === "function") {
       globalObject.renderMetadataSummary();
     }

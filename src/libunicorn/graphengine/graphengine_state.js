@@ -29,6 +29,8 @@
       backendNodesFile: "",
       backendNamesFile: "",
       metadata: null,
+      metadataFieldSelection: [],
+      metadataFieldColors: {},
       expandedTaxids: new Set(),
       serverTreeActive: false,
       totalReads: 0,

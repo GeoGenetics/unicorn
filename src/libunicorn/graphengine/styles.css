@@ -276,6 +276,88 @@ h2 {
   font-weight: 600;
 }
 
+.metadata-field-picker {
+  display: grid;
+  gap: 7px;
+}
+
+.metadata-field-picker span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metadata-field-picker select {
+  min-height: 128px;
+  padding: 8px;
+  border: 1px solid #d7ccb7;
+  background: #fffdf7;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.metadata-picker-hint {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.metadata-color-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 240, 0.82);
+}
+
+.metadata-field-color-list {
+  display: grid;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+.metadata-field-color-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid #d7ccb7;
+  background: #fffdf7;
+}
+
+.metadata-field-color-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.metadata-field-color-name span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metadata-field-color-input {
+  width: 38px;
+  min-width: 38px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #d7ccb7;
+  background: #fffdf7;
+  cursor: pointer;
+}
+
 .metadata-selected-panel {
   display: grid;
   gap: 8px;
@@ -336,11 +418,20 @@ h2 {
   align-items: center;
   gap: 4px;
   padding: 4px 7px;
-  border: 1px solid #d7ccb7;
-  background: rgba(37, 95, 117, 0.06);
+  border: 1px solid var(--metadata-chip-color, #d7ccb7);
+  background: color-mix(in srgb, var(--metadata-chip-color, rgba(37, 95, 117, 0.06)) 12%, white);
   color: var(--ink);
   font-size: 11px;
   font-weight: 600;
+}
+
+.metadata-chip strong {
+  color: var(--metadata-chip-color, var(--ink));
+}
+
+.metadata-selected-empty {
+  color: var(--muted);
+  font-style: italic;
 }
 
 .sidebar-tab {

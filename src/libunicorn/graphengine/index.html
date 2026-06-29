@@ -122,6 +122,18 @@
                 </div>
                 <div id="metadataSummaryMeta" class="metadata-summary-meta">No backend metadata loaded</div>
                 <div id="metadataSummaryFields" class="metadata-summary-fields">Load a metadata file or connect to a backend that already has <strong>metadata.txt</strong>.</div>
+                <label class="metadata-field-picker" for="metadataFieldSelect">
+                  <span>Displayed metadata fields</span>
+                  <select id="metadataFieldSelect" multiple size="5" aria-describedby="metadataFieldPickerHint"></select>
+                </label>
+                <div id="metadataFieldPickerHint" class="metadata-picker-hint">Select one or more metadata fields to display across the panel.</div>
+                <section class="metadata-color-panel" aria-label="Metadata field colors">
+                  <div class="metadata-summary-head">
+                    <h3>Field Display Colors</h3>
+                  </div>
+                  <div id="metadataFieldColorMeta" class="metadata-summary-meta">No metadata fields selected</div>
+                  <div id="metadataFieldColorList" class="metadata-field-color-list">Select one or more metadata fields to customize their display colors.</div>
+                </section>
               </section>
               <section class="metadata-selected-panel" aria-label="Selected dataset metadata">
                 <div class="metadata-summary-head">
