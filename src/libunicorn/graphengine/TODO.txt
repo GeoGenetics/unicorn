@@ -213,6 +213,39 @@ Potential next analyses:
 
 Do this after the above features unless a real bottleneck appears.
 
+Current note:
+- real backend sessions with many datasets and large visible clades can already feel slow
+- tree dragging, large selection workflows, and downstream analysis popups work correctly but are not yet snappy at scale
+- this is now a real product concern, but should be handled with measurement rather than panic refactoring
+
+Performance investigation track:
+- keep the main roadmap moving, especially metadata
+- allow targeted performance work whenever ordinary interaction becomes clunky on real sessions
+- prefer measurement-backed fixes over speculative optimization
+
+First investigation pass:
+- measure tree redraw time after large expansion workflows
+- measure visible node count in realistic sessions such as:
+  - many datasets selected
+  - `Eukaryota` expanded to tips
+  - genus-level selection
+- measure time spent in:
+  - visible-node collection
+  - tree layout
+  - SVG/DOM update cost
+  - report refresh coupling
+  - barplot/PCoA popup request and render time
+- identify whether the dominant slowdown is:
+  - frontend DOM/SVG size
+  - full redraw frequency
+  - repeated tree/layout recomputation
+  - selection traversal cost
+  - report synchronization cost
+
+Likely first optimization target:
+- frontend tree rendering and redraw behavior
+- especially large SVG node/label counts and full redraw cost during pan/navigation
+
 Measure first:
 - render latency
 - expand latency
@@ -235,7 +268,7 @@ Current Non-Goals
 
 Recommended Implementation Order
 
-0. Backend-native large expansion actions
+DONE 0. Backend-native large expansion actions
 1. Metadata integration
 2. Agent token compaction
 3. Safe agent actions
@@ -252,3 +285,4 @@ What “Good” Looks Like Next
 - agent mode becomes cheaper, safer, and more useful
 - new analyses land through `unicorn_compute`
 - the codebase stays modular while visible user value keeps increasing
+- performance work happens when real-session interaction quality demands it, guided by measurement
