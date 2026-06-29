@@ -167,6 +167,7 @@ def test_metadata_upload_missing_dataset_column_fails_cleanly(
     )
 
     log_step("Confirming the session still renders normally after the invalid metadata upload")
+    metadata_free_connected_page.locator("#metadataFile").set_input_files([])
     metadata_free_connected_page.locator("#renderBtn").click()
     metadata_free_connected_page.wait_for_function(
         "() => document.querySelectorAll('#treeSvg .node').length > 1",
