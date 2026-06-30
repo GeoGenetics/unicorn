@@ -41,7 +41,7 @@ Active Product Direction
 
 0. Robust backend-native expansion actions
 1. Metadata-aware analysis
-2. Leaner and more capable agent mode
+2. Agentic graphengine
 3. Better selection-driven exploration
 4. More analysis features through `unicorn_compute`
 5. Only then deeper infrastructure or optimization work
@@ -66,7 +66,7 @@ Definition of done for this phase:
 - the browser no longer serializes giant `expanded=` query strings for this action
 - client and server logs stay understandable when large expansion actions run
 
-1. Metadata Integration
+DONE 1. Metadata Integration
 
 Why first:
 - highest immediate value
@@ -88,30 +88,50 @@ Second slice:
 Definition of done for this phase:
 - graphengine can load metadata for selected datasets
 - users can see metadata in the interface
-- barplot and PCoA can use metadata-aware grouping/coloring
+- tree, barplot, and PCoA reuse one shared metadata resolver contract
+- value-level metadata colors, including the missing bucket, are reusable across visualizations
 
-2. Agent Token Compaction
+Current closure note:
+- metadata is now backend-owned and additive
+- metadata attaches to datasets by filename
+- selected datasets show metadata in the controls UI
+- the tree exposes a metadata-aware legend in the main UI
+- barplot and PCoA consume the same resolver-driven label/color payload as the tree
+- further metadata-aware agent summaries should now be treated as agent work, not unfinished metadata integration
+
+2. Agentic Graphengine
 
 Why second:
 - fast payoff
 - lowers provider cost and latency
 - improves reliability before adding more agent behaviors
+- builds directly on the provider-neutral strict-JSON contract and the now-stable metadata-aware graph context
 
 First implementation slice:
 - shrink graph context to selected, focused, visible, and summary-only data
 - stop resending redundant payloads
 - cap transcript history aggressively
 - summarize tool results before reinjection into the next turn
+- keep the provider request/response loop auditable while reducing payload size
 
 Second slice:
 - add compact provider context mode as the default
 - instrument approximate request size and tool-result size in logs
 - keep one debug mode for full payload inspection
+- prepare the compact context so future agent actions can consume the same graph state without re-expanding payload size
+
+Third slice:
+- enrich agent context with compact metadata-aware summaries
+- keep using backend-authoritative graph state and resolver-derived metadata summaries
+- do not dump raw metadata tables into provider turns
+- stage the system for later safe agent actions once compact execution is reliable
 
 Definition of done for this phase:
 - agent turns are visibly smaller
 - repeated prompts do not resend the whole graph state
 - logs still support debugging without flooding the normal UI
+- the compact context remains rich enough for useful graph-aware answers
+- the agent stack is ready for the next phase of safe graph actions
 
 3. Safe Agent Actions
 
