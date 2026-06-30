@@ -50,6 +50,25 @@ def _normalize_dataset_colors(dataset_colors: Any) -> Dict[str, str]:
     return normalized
 
 
+def _normalize_dataset_display(dataset_display: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(dataset_display, Mapping):
+        return {}
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for key, value in dataset_display.items():
+        filename = str(key or "").strip()
+        if not filename or not isinstance(value, Mapping):
+            continue
+        normalized[filename] = {
+            "filename": filename,
+            "metadata_field": None if value.get("metadata_field") is None else str(value.get("metadata_field")),
+            "metadata_value": None if value.get("metadata_value") is None else str(value.get("metadata_value")),
+            "color": str(value.get("color") or "").strip() or None,
+            "label": str(value.get("label") or "").strip() or filename,
+            "missing": bool(value.get("missing")),
+        }
+    return normalized
+
+
 def _normalize_correction_method(correction_method: Any) -> str:
     normalized = str(correction_method or "auto").strip().lower()
     if normalized not in VALID_CORRECTION_METHODS:
@@ -457,10 +476,12 @@ def build_count_matrix_pcoa_spec(
     distance_metric: Any,
     correction_method: Any = "auto",
     dataset_colors: Optional[Mapping[str, str]] = None,
+    dataset_display: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
     normalized_mode = _normalize_count_mode(count_mode)
     normalized_metric = _normalize_distance_metric(distance_metric)
     normalized_colors = _normalize_dataset_colors(dataset_colors)
+    normalized_display = _normalize_dataset_display(dataset_display)
 
     dataset_names, feature_labels, feature_matrix, summary = _extract_feature_matrix(
         report,
@@ -487,11 +508,15 @@ def build_count_matrix_pcoa_spec(
 
     points: List[Dict[str, Any]] = []
     for index, dataset_name in enumerate(dataset_names):
+        display = normalized_display.get(dataset_name, {})
         points.append(
             {
                 "dataset": dataset_name,
-                "label": dataset_name,
-                "color": normalized_colors.get(dataset_name) or None,
+                "label": str(display.get("label") or dataset_name),
+                "metadata_field": display.get("metadata_field"),
+                "metadata_value": display.get("metadata_value"),
+                "missing": bool(display.get("missing")),
+                "color": display.get("color") or normalized_colors.get(dataset_name) or None,
                 "x": float(coordinates[index, 0]),
                 "y": float(coordinates[index, 1]),
             }

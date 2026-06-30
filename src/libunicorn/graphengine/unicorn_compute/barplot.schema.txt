@@ -60,9 +60,23 @@ The barplot compute routine accepts:
     }
   },
   "count_mode": "direct",
-  "dataset_colors": {
-    "Lib_sim1_collapsed.alnfilt.bdamage.txt": "#c85f43",
-    "Lib_sim1_collapsed.bdamage.txt": "#255f75"
+  "dataset_display": {
+    "Lib_sim1_collapsed.alnfilt.bdamage.txt": {
+      "filename": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "metadata_field": "group",
+      "metadata_value": "treated",
+      "color": "#c85f43",
+      "label": "Lib_sim1_collapsed.alnfilt.bdamage.txt [group: treated]",
+      "missing": false
+    },
+    "Lib_sim1_collapsed.bdamage.txt": {
+      "filename": "Lib_sim1_collapsed.bdamage.txt",
+      "metadata_field": "group",
+      "metadata_value": "control",
+      "color": "#255f75",
+      "label": "Lib_sim1_collapsed.bdamage.txt [group: control]",
+      "missing": false
+    }
   }
 }
 ```
@@ -73,8 +87,10 @@ Rules:
 - `count_mode` must be either:
   - `direct`
   - `subtree`
-- `dataset_colors` is optional
-- if a dataset color is not provided, the compute layer may leave `color` null
+- `dataset_display` is optional
+- `dataset_display` should come from Unicorn's shared metadata resolver
+- if `dataset_display` is omitted, the compute layer falls back to raw dataset names
+- legacy `dataset_colors` may still be accepted as a fallback input, but the preferred V1.1 path is the resolver-driven `dataset_display`
 
 
 Output contract
@@ -94,12 +110,20 @@ The compute routine returns:
   ],
   "traces": [
     {
-      "name": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "name": "Lib_sim1_collapsed.alnfilt.bdamage.txt [group: treated]",
+      "dataset": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "metadata_field": "group",
+      "metadata_value": "treated",
+      "missing": false,
       "color": "#c85f43",
       "y": [100, 23]
     },
     {
-      "name": "Lib_sim1_collapsed.bdamage.txt",
+      "name": "Lib_sim1_collapsed.bdamage.txt [group: control]",
+      "dataset": "Lib_sim1_collapsed.bdamage.txt",
+      "metadata_field": "group",
+      "metadata_value": "control",
+      "missing": false,
       "color": "#255f75",
       "y": [20, 5]
     }
@@ -118,6 +142,9 @@ Rules:
 - `count_mode` echoes the selected mode
 - `x` contains normalized selected-node labels
 - each trace corresponds to one dataset
+- `trace.name` should prefer the resolver-provided display label when available
+- `trace.dataset` keeps the canonical dataset filename
+- `trace.metadata_field`, `trace.metadata_value`, and `trace.missing` mirror the shared resolver payload when available
 - `trace.y` length must match `x` length
 - `summary` is intentionally compact
 
@@ -135,4 +162,3 @@ V1 policy
 
 - V1 supports only `direct` and `subtree`
 - `both` remains a frontend display mode, not a compute barplot mode
-

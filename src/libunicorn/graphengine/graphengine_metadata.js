@@ -145,7 +145,10 @@
         assignedCount++;
       }
     }
-    mapping[MISSING_METADATA_VALUE] = MISSING_METADATA_COLOR;
+    mapping[MISSING_METADATA_VALUE] = normalizeColor(
+      mapping[MISSING_METADATA_VALUE],
+      MISSING_METADATA_COLOR,
+    );
     state.remote.metadataValueColors = {
       ...state.remote.metadataValueColors,
       [field]: mapping,
@@ -159,9 +162,6 @@
       return MISSING_METADATA_COLOR;
     }
     const normalizedValue = String(value);
-    if (normalizedValue === MISSING_METADATA_VALUE) {
-      return MISSING_METADATA_COLOR;
-    }
     const mapping = ensureFieldValueColorAssignments(field, [normalizedValue]);
     return normalizeColor(mapping[normalizedValue], MISSING_METADATA_COLOR);
   }

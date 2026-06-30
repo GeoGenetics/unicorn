@@ -98,7 +98,7 @@
     const field = String(els.metadataColorFieldSelect.value || "").trim();
     const mode = field ? `${metadataResolver.FIELD_MODE_PREFIX}${field}` : metadataResolver.NONE_VISUALIZATION_MODE;
     metadataResolver.setMetadataVisualizationMode(mode);
-    applyMetadataColorsToSeries(state.series, state.remote.datasets.filter((dataset) => state.remote.selectedDatasets.has(dataset.filename)));
+    applyMetadataColorsToSeries(state.series, getActiveSeriesRemoteDatasets());
     renderSourceLegendSafe();
     if (state.tree) globalObject.redraw();
     renderMetadataSummary();
@@ -107,7 +107,7 @@
   function handleMetadataValueColorInput(field, value, color) {
     if (!field || value == null) return;
     metadataResolver.setMetadataValueColor(field, value, color);
-    applyMetadataColorsToSeries(state.series, state.remote.datasets.filter((dataset) => state.remote.selectedDatasets.has(dataset.filename)));
+    applyMetadataColorsToSeries(state.series, getActiveSeriesRemoteDatasets());
     renderSourceLegendSafe();
     if (state.tree) globalObject.redraw();
     renderMetadataSummary();
@@ -345,7 +345,7 @@
     state.remote.metadata = normalizeRemoteMetadata(payload?.metadata);
     applyMetadataColorsToSeries(
       state.series,
-      state.remote.datasets.filter((dataset) => state.remote.selectedDatasets.has(dataset.filename)),
+      getActiveSeriesRemoteDatasets(),
     );
     renderSourceLegendSafe();
     addClientLog("success", "upload", `Metadata upload finished for ${file.name}.`, state.remote.metadata?.filename || "metadata.txt");
@@ -1017,6 +1017,22 @@
       .filter((filename) => state.remote.selectedDatasets.has(filename));
   }
 
+  function getActiveSeriesRemoteDatasets() {
+    if (!Array.isArray(state.series) || !state.series.length) {
+      return state.remote.datasets.filter((dataset) => state.remote.selectedDatasets.has(dataset.filename));
+    }
+    const datasetByFilename = new Map(
+      state.remote.datasets.map((dataset) => [dataset.filename, dataset]),
+    );
+    return state.series.map((source) => {
+      const filename = String(source?.label || "");
+      return datasetByFilename.get(filename) || {
+        filename,
+        metadata: null,
+      };
+    }).filter((dataset) => dataset && dataset.filename);
+  }
+
   function getColorForDatasetFilename(filename) {
     const matchingSeries = state.series.find((source) => source.label === filename);
     if (matchingSeries?.color) {
@@ -1036,16 +1052,28 @@
       }));
   }
 
+  function getActiveSeriesRemoteDatasetSummaries() {
+    const activeDatasets = getActiveSeriesRemoteDatasets();
+    const colorByFilename = new Map(
+      state.series.map((source, index) => [source.label, source.color || colorForSource(index)]),
+    );
+    return activeDatasets.map((dataset, index) => ({
+      filename: dataset.filename,
+      color: colorByFilename.get(dataset.filename) || colorForSource(index),
+      metadata: dataset.metadata && typeof dataset.metadata === "object" ? { ...dataset.metadata } : null,
+    }));
+  }
+
   function getSelectedResolvedMetadataDisplays(options = {}) {
     return metadataResolver.resolveDatasetMetadataDisplays(
-      getSelectedRemoteDatasetSummaries(),
+      getActiveSeriesRemoteDatasetSummaries(),
       options,
     );
   }
 
   function getSelectedMetadataLegendPayload(options = {}) {
     return metadataResolver.buildMetadataLegendPayload(
-      getSelectedRemoteDatasetSummaries(),
+      getActiveSeriesRemoteDatasetSummaries(),
       options,
     );
   }

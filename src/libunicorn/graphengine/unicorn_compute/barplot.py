@@ -26,6 +26,25 @@ def _normalize_dataset_colors(dataset_colors: Any) -> Dict[str, str]:
     return normalized
 
 
+def _normalize_dataset_display(dataset_display: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(dataset_display, Mapping):
+        return {}
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for key, value in dataset_display.items():
+        filename = str(key or "").strip()
+        if not filename or not isinstance(value, Mapping):
+            continue
+        normalized[filename] = {
+            "filename": filename,
+            "metadata_field": None if value.get("metadata_field") is None else str(value.get("metadata_field")),
+            "metadata_value": None if value.get("metadata_value") is None else str(value.get("metadata_value")),
+            "color": str(value.get("color") or "").strip() or None,
+            "label": str(value.get("label") or "").strip() or filename,
+            "missing": bool(value.get("missing")),
+        }
+    return normalized
+
+
 def _node_label(row: Mapping[str, Any]) -> str:
     name = str(row.get("name") or row.get("taxid") or "node")
     taxid = row.get("taxid")
@@ -39,6 +58,7 @@ def build_count_matrix_barplot_spec(
     *,
     count_mode: Any,
     dataset_colors: Optional[Mapping[str, str]] = None,
+    dataset_display: Optional[Mapping[str, Mapping[str, Any]]] = None,
 ) -> Dict[str, Any]:
     if not isinstance(report, Mapping):
         raise ValueError("report must be an object.")
@@ -51,6 +71,7 @@ def build_count_matrix_barplot_spec(
 
     normalized_mode = _normalize_count_mode(count_mode)
     normalized_colors = _normalize_dataset_colors(dataset_colors)
+    normalized_display = _normalize_dataset_display(dataset_display)
 
     rows = matrix.get("rows")
     dataset_names = matrix.get("dataset_names")
@@ -78,10 +99,15 @@ def build_count_matrix_barplot_spec(
                 y.append(int(value or 0))
             except (TypeError, ValueError):
                 raise ValueError(f"Dataset value for '{dataset_name}' could not be interpreted as an integer.")
+        display = normalized_display.get(dataset_name, {})
         traces.append(
             {
-                "name": dataset_name,
-                "color": normalized_colors.get(dataset_name) or None,
+                "name": str(display.get("label") or dataset_name),
+                "dataset": dataset_name,
+                "metadata_field": display.get("metadata_field"),
+                "metadata_value": display.get("metadata_value"),
+                "missing": bool(display.get("missing")),
+                "color": display.get("color") or normalized_colors.get(dataset_name) or None,
                 "y": y,
             }
         )
@@ -99,4 +125,3 @@ def build_count_matrix_barplot_spec(
             "dataset_count": len(dataset_names),
         },
     }
-

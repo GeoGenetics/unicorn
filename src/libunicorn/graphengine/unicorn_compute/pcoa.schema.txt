@@ -61,9 +61,23 @@ The PCoA compute routine accepts:
   },
   "count_mode": "subtree",
   "distance_metric": "bray_curtis",
-  "dataset_colors": {
-    "Lib_sim1_collapsed.alnfilt.bdamage.txt": "#c85f43",
-    "Lib_sim1_collapsed.bdamage.txt": "#255f75"
+  "dataset_display": {
+    "Lib_sim1_collapsed.alnfilt.bdamage.txt": {
+      "filename": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "metadata_field": "group",
+      "metadata_value": "treated",
+      "color": "#c85f43",
+      "label": "Lib_sim1_collapsed.alnfilt.bdamage.txt [group: treated]",
+      "missing": false
+    },
+    "Lib_sim1_collapsed.bdamage.txt": {
+      "filename": "Lib_sim1_collapsed.bdamage.txt",
+      "metadata_field": "group",
+      "metadata_value": "control",
+      "color": "#255f75",
+      "label": "Lib_sim1_collapsed.bdamage.txt [group: control]",
+      "missing": false
+    }
   }
 }
 ```
@@ -79,8 +93,10 @@ Rules:
   - `bray_curtis`
   - `log_cord`
   - `chao`
-- `dataset_colors` is optional
-- if a dataset color is not provided, the compute layer may leave `color` null
+- `dataset_display` is optional
+- `dataset_display` should come from Unicorn's shared metadata resolver
+- if `dataset_display` is omitted, the compute layer falls back to raw dataset names
+- legacy `dataset_colors` may still be accepted as a fallback input, but the preferred path is the resolver-driven `dataset_display`
 - each selected node becomes one feature column
 - each dataset becomes one ordination point
 - feature values must be taken from the selected `count_mode`
@@ -119,14 +135,20 @@ The compute routine returns:
   "points": [
     {
       "dataset": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
-      "label": "Lib_sim1_collapsed.alnfilt.bdamage.txt",
+      "label": "Lib_sim1_collapsed.alnfilt.bdamage.txt [group: treated]",
+      "metadata_field": "group",
+      "metadata_value": "treated",
+      "missing": false,
       "color": "#c85f43",
       "x": -0.31,
       "y": 0.14
     },
     {
       "dataset": "Lib_sim1_collapsed.bdamage.txt",
-      "label": "Lib_sim1_collapsed.bdamage.txt",
+      "label": "Lib_sim1_collapsed.bdamage.txt [group: control]",
+      "metadata_field": "group",
+      "metadata_value": "control",
+      "missing": false,
       "color": "#255f75",
       "x": 0.31,
       "y": -0.14
@@ -162,6 +184,8 @@ Rules:
 - `distance_metric` echoes the selected metric
 - `axes` lists the plotted dimensions in order
 - `points` contains one point per dataset
+- `point.label` should prefer the resolver-provided display label when available
+- `point.metadata_field`, `point.metadata_value`, and `point.missing` mirror the shared resolver payload when available
 - `distance_matrix` is included in V1 so downstream tools can inspect or export
   the exact pairwise distances used by the ordination
 - `feature_labels` preserves the feature ordering used to build the input matrix

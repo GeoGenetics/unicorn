@@ -448,11 +448,28 @@
     return `${direct} / ${subtree}`;
   }
 
+  function getResolvedDatasetDisplayMap() {
+    const resolvedDisplays = typeof globalObject.getSelectedResolvedMetadataDisplays === "function"
+      ? globalObject.getSelectedResolvedMetadataDisplays()
+      : [];
+    return Object.fromEntries(
+      (Array.isArray(resolvedDisplays) ? resolvedDisplays : []).map((entry) => [
+        String(entry?.filename || ""),
+        {
+          filename: String(entry?.filename || ""),
+          metadata_field: entry?.metadata_field == null ? null : String(entry.metadata_field),
+          metadata_value: entry?.metadata_value == null ? null : String(entry.metadata_value),
+          color: entry?.color == null ? null : String(entry.color),
+          label: entry?.label == null ? null : String(entry.label),
+          missing: Boolean(entry?.missing),
+        },
+      ]).filter(([filename]) => filename),
+    );
+  }
+
   async function fetchComputedBarplotSpec(taxids, countMode) {
     const activeRequestContext = globalObject.getActiveBackendRequestContext?.();
-    const datasetColors = Object.fromEntries(
-      state.series.map((source, index) => [source.label, source.color || SOURCE_COLORS[index % SOURCE_COLORS.length]]),
-    );
+    const datasetDisplay = getResolvedDatasetDisplayMap();
     const payload = {
       taxids: Array.isArray(taxids) ? taxids.map((value) => Number(value)) : [],
       files: activeRequestContext?.dataset_names?.length ? activeRequestContext.dataset_names.slice() : globalObject.getSelectedRemoteDatasets?.(),
@@ -462,7 +479,7 @@
         ? Number(activeRequestContext.min_reads)
         : getMinReadsValueSafe(),
       count_mode: countMode,
-      dataset_colors: datasetColors,
+      dataset_display: datasetDisplay,
     };
     const response = await fetch("http://localhost:8000/compute/barplot", {
       method: "POST",
@@ -480,9 +497,7 @@
 
   async function fetchComputedPcoaSpec(taxids, countMode, distanceMetric) {
     const activeRequestContext = globalObject.getActiveBackendRequestContext?.();
-    const datasetColors = Object.fromEntries(
-      state.series.map((source, index) => [source.label, source.color || SOURCE_COLORS[index % SOURCE_COLORS.length]]),
-    );
+    const datasetDisplay = getResolvedDatasetDisplayMap();
     const payload = {
       taxids: Array.isArray(taxids) ? taxids.map((value) => Number(value)) : [],
       files: activeRequestContext?.dataset_names?.length ? activeRequestContext.dataset_names.slice() : globalObject.getSelectedRemoteDatasets?.(),
@@ -493,7 +508,7 @@
         : getMinReadsValueSafe(),
       count_mode: countMode,
       distance_metric: distanceMetric,
-      dataset_colors: datasetColors,
+      dataset_display: datasetDisplay,
     };
     const response = await fetch("http://localhost:8000/compute/pcoa", {
       method: "POST",

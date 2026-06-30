@@ -2086,6 +2086,7 @@ def compute_barplot(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             report,
             count_mode=payload.get("count_mode"),
             dataset_colors=payload.get("dataset_colors"),
+            dataset_display=payload.get("dataset_display"),
         )
     except ValueError as error:
         raise HTTPException(
@@ -2198,6 +2199,7 @@ def compute_pcoa(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             count_mode=payload.get("count_mode"),
             distance_metric=payload.get("distance_metric"),
             dataset_colors=payload.get("dataset_colors"),
+            dataset_display=payload.get("dataset_display"),
         )
     except NotImplementedError as error:
         raise HTTPException(
