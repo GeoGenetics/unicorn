@@ -127,12 +127,17 @@
                   <select id="metadataFieldSelect" multiple size="5" aria-describedby="metadataFieldPickerHint"></select>
                 </label>
                 <div id="metadataFieldPickerHint" class="metadata-picker-hint">Select one or more metadata fields to display across the panel.</div>
-                <section class="metadata-color-panel" aria-label="Metadata field colors">
+                <section class="metadata-color-panel" aria-label="Metadata value colors">
                   <div class="metadata-summary-head">
-                    <h3>Field Display Colors</h3>
+                    <h3>Visualization Value Colors</h3>
                   </div>
-                  <div id="metadataFieldColorMeta" class="metadata-summary-meta">No metadata fields selected</div>
-                  <div id="metadataFieldColorList" class="metadata-field-color-list">Select one or more metadata fields to customize their display colors.</div>
+                  <label class="metadata-field-picker" for="metadataColorFieldSelect">
+                    <span>Active color field</span>
+                    <select id="metadataColorFieldSelect" aria-describedby="metadataColorFieldHint"></select>
+                  </label>
+                  <div id="metadataColorFieldHint" class="metadata-picker-hint">Colors are assigned per value in the active metadata field and reused by tree, barplot, and PCoA visual semantics.</div>
+                  <div id="metadataFieldColorMeta" class="metadata-summary-meta">No active metadata color field</div>
+                  <div id="metadataFieldColorList" class="metadata-field-color-list">Choose a metadata field to edit value colors.</div>
                 </section>
               </section>
               <section class="metadata-selected-panel" aria-label="Selected dataset metadata">

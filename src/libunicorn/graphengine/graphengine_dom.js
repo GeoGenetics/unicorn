@@ -69,6 +69,7 @@
     metadataSummaryMeta: document.getElementById("metadataSummaryMeta"),
     metadataSummaryFields: document.getElementById("metadataSummaryFields"),
     metadataFieldSelect: document.getElementById("metadataFieldSelect"),
+    metadataColorFieldSelect: document.getElementById("metadataColorFieldSelect"),
     metadataFieldColorMeta: document.getElementById("metadataFieldColorMeta"),
     metadataFieldColorList: document.getElementById("metadataFieldColorList"),
     metadataSelectedMeta: document.getElementById("metadataSelectedMeta"),

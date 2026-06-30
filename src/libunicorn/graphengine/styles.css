@@ -819,6 +819,34 @@ code {
   padding-top: 6px;
 }
 
+.legend-section {
+  display: grid;
+  gap: 8px;
+}
+
+.legend-section-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.legend-meta-list {
+  display: grid;
+  gap: 8px;
+}
+
+.legend-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #d7ccb7;
+  background: #fffdf7;
+}
+
 .client-log-head {
   display: flex;
   align-items: center;
@@ -972,6 +1000,21 @@ code {
   color: var(--ink);
   font-size: 12px;
   font-weight: 700;
+}
+
+.legend-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.legend-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .legend-toggle {

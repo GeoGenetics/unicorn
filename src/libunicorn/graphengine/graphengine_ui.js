@@ -5,9 +5,11 @@
   const state = namespace.state;
   const els = namespace.els;
   const core = namespace.core;
+  const backend = namespace.backend;
+  const metadataResolver = namespace.metadata;
 
-  if (!state || !els || !core) {
-    throw new Error("Unicorn graphengine UI expected state, DOM, and core modules to load first.");
+  if (!state || !els || !core || !metadataResolver) {
+    throw new Error("Unicorn graphengine UI expected state, DOM, core, and metadata modules to load first.");
   }
 
   function initRemotePanel() {
@@ -392,14 +394,56 @@
       els.sourceLegend.innerHTML = "";
       return;
     }
+    const resolvedDisplays = typeof backend?.getSelectedResolvedMetadataDisplays === "function"
+      ? backend.getSelectedResolvedMetadataDisplays()
+      : [];
+    const resolvedByFilename = new Map(
+      resolvedDisplays.map((entry) => [entry.filename, entry]),
+    );
+    const metadataLegend = typeof backend?.getSelectedMetadataLegendPayload === "function"
+      ? backend.getSelectedMetadataLegendPayload()
+      : null;
+    const metadataLegendHtml = metadataLegend && Array.isArray(metadataLegend.values) && metadataLegend.values.length
+      ? `
+        <div class="legend-section legend-section-meta">
+          <div class="legend-section-title">Coloring by ${core.escapeHtml(metadataLegend.field)}</div>
+          <div class="legend-meta-list">
+            ${metadataLegend.values.map((entry) => `
+              <div class="legend-meta-item">
+                <span class="legend-swatch" style="background:${entry.color}"></span>
+                <span class="legend-label">${core.escapeHtml(entry.value === metadataResolver.MISSING_METADATA_VALUE ? "(missing)" : String(entry.value))}</span>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `
+      : "";
     els.sourceLegend.hidden = false;
-    els.sourceLegend.innerHTML = state.series.map((source, index) => `
-      <label class="legend-item${source.visible ? "" : " is-muted"}" data-series-index="${index}">
-        <input class="legend-toggle" type="checkbox" ${source.visible ? "checked" : ""} aria-label="Toggle ${core.escapeHtml(source.label)}">
-        <span class="legend-swatch" style="background:${source.color}"></span>
-        <span class="legend-label" title="${core.escapeHtml(source.label)}">${core.escapeHtml(source.label)}</span>
-      </label>
-    `).join("");
+    els.sourceLegend.innerHTML = `
+      ${metadataLegendHtml}
+      <div class="legend-section legend-section-datasets">
+        <div class="legend-section-title">Datasets</div>
+        ${state.series.map((source, index) => {
+          const resolved = resolvedByFilename.get(source.label);
+          const metadataValue = resolved?.metadata_value === metadataResolver.MISSING_METADATA_VALUE
+            ? "(missing)"
+            : resolved?.metadata_value;
+          const detail = resolved?.metadata_field
+            ? `<span class="legend-detail">${core.escapeHtml(String(metadataValue))}</span>`
+            : "";
+          return `
+            <label class="legend-item${source.visible ? "" : " is-muted"}" data-series-index="${index}">
+              <input class="legend-toggle" type="checkbox" ${source.visible ? "checked" : ""} aria-label="Toggle ${core.escapeHtml(source.label)}">
+              <span class="legend-swatch" style="background:${source.color}"></span>
+              <span class="legend-copy">
+                <span class="legend-label" title="${core.escapeHtml(source.label)}">${core.escapeHtml(source.label)}</span>
+                ${detail}
+              </span>
+            </label>
+          `;
+        }).join("")}
+      </div>
+    `;
 
     els.sourceLegend.querySelectorAll(".legend-item").forEach((item) => {
       item.addEventListener("change", (event) => {

@@ -88,7 +88,11 @@
   function ensureMetadataVisualizationState(metadata = state.remote.metadata) {
     const availableFields = getAvailableMetadataFields(metadata);
     const storedMode = readStoredMetadataVisualizationMode();
-    state.remote.metadataVisualizationMode = normalizeMetadataVisualizationMode(storedMode, availableFields);
+    let normalizedMode = normalizeMetadataVisualizationMode(storedMode, availableFields);
+    if (normalizedMode === NONE_VISUALIZATION_MODE && availableFields.length) {
+      normalizedMode = `${FIELD_MODE_PREFIX}${availableFields[0]}`;
+    }
+    state.remote.metadataVisualizationMode = normalizedMode;
     writeStoredMetadataVisualizationMode(state.remote.metadataVisualizationMode);
 
     const storedColors = readStoredMetadataValueColors();
@@ -162,6 +166,25 @@
     return normalizeColor(mapping[normalizedValue], MISSING_METADATA_COLOR);
   }
 
+  function setMetadataValueColor(field, value, color) {
+    if (!field || value == null) {
+      return MISSING_METADATA_COLOR;
+    }
+    const normalizedValue = String(value);
+    const fallback = normalizedValue === MISSING_METADATA_VALUE
+      ? MISSING_METADATA_COLOR
+      : core.SOURCE_COLORS[0];
+    const nextColor = normalizeColor(color, fallback);
+    const mapping = ensureFieldValueColorAssignments(field, [normalizedValue]);
+    mapping[normalizedValue] = nextColor;
+    state.remote.metadataValueColors = {
+      ...state.remote.metadataValueColors,
+      [field]: mapping,
+    };
+    writeStoredMetadataValueColors(state.remote.metadataValueColors);
+    return nextColor;
+  }
+
   function buildResolvedDatasetLabel(datasetSummary, field, value, missing) {
     const filename = String(datasetSummary?.filename || "");
     if (!field || value == null) {
@@ -218,7 +241,10 @@
       return null;
     }
     const field = resolved[0].metadata_field;
-    const values = Array.from(new Set(resolved.map((entry) => entry.metadata_value)))
+    const values = Array.from(new Set([
+      ...resolved.map((entry) => entry.metadata_value),
+      MISSING_METADATA_VALUE,
+    ]))
       .sort((left, right) => {
         if (left === MISSING_METADATA_VALUE) return 1;
         if (right === MISSING_METADATA_VALUE) return -1;
@@ -247,6 +273,7 @@
     ensureMetadataVisualizationState,
     getDatasetMetadataValue,
     getMetadataValueColor,
+    setMetadataValueColor,
     resolveDatasetMetadataDisplay,
     resolveDatasetMetadataDisplays,
     buildMetadataLegendPayload,

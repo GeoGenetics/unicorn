@@ -48,11 +48,6 @@
     return core.SOURCE_COLORS[index % core.SOURCE_COLORS.length];
   }
 
-  function normalizeMetadataFieldColor(value, fallback) {
-    const candidate = String(value || "").trim();
-    return /^#[0-9a-fA-F]{6}$/.test(candidate) ? candidate : fallback;
-  }
-
   function readStoredMetadataFieldSelection() {
     try {
       const raw = localStorage.getItem("unicorn.metadataFieldSelection");
@@ -67,25 +62,10 @@
     localStorage.setItem("unicorn.metadataFieldSelection", JSON.stringify(fields));
   }
 
-  function readStoredMetadataFieldColors() {
-    try {
-      const raw = localStorage.getItem("unicorn.metadataFieldColors");
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch (_error) {
-      return {};
-    }
-  }
-
-  function writeStoredMetadataFieldColors(colors) {
-    localStorage.setItem("unicorn.metadataFieldColors", JSON.stringify(colors));
-  }
-
   function ensureMetadataFieldPreferences(metadata) {
     const fields = Array.isArray(metadata?.fields) ? metadata.fields.map((value) => String(value)) : [];
     if (!fields.length) {
       state.remote.metadataFieldSelection = [];
-      state.remote.metadataFieldColors = {};
       return;
     }
 
@@ -93,14 +73,6 @@
     const nextSelection = storedSelection.filter((field) => fields.includes(field));
     state.remote.metadataFieldSelection = nextSelection.length ? nextSelection : fields.slice();
     writeStoredMetadataFieldSelection(state.remote.metadataFieldSelection);
-
-    const storedColors = readStoredMetadataFieldColors();
-    const nextColors = {};
-    fields.forEach((field, index) => {
-      nextColors[field] = normalizeMetadataFieldColor(storedColors[field], core.SOURCE_COLORS[index % core.SOURCE_COLORS.length]);
-    });
-    state.remote.metadataFieldColors = nextColors;
-    writeStoredMetadataFieldColors(nextColors);
   }
 
   function getSelectedMetadataFields() {
@@ -108,15 +80,9 @@
     return state.remote.metadataFieldSelection.filter((field) => metadataFields.includes(field));
   }
 
-  function getMetadataFieldColor(field, index = 0) {
-    return normalizeMetadataFieldColor(
-      state.remote.metadataFieldColors?.[field],
-      core.SOURCE_COLORS[index % core.SOURCE_COLORS.length],
-    );
-  }
-
   function buildMetadataChipHtml(key, value, color, index) {
-    const safeColor = normalizeMetadataFieldColor(color, core.SOURCE_COLORS[index % core.SOURCE_COLORS.length]);
+    const fallback = core.SOURCE_COLORS[index % core.SOURCE_COLORS.length];
+    const safeColor = /^#[0-9a-fA-F]{6}$/.test(String(color || "").trim()) ? String(color).trim() : fallback;
     return `<span class="metadata-chip" style="--metadata-chip-color:${core.escapeHtml(safeColor)}"><strong>${core.escapeHtml(key)}</strong>: ${core.escapeHtml(String(value || ""))}</span>`;
   }
 
@@ -127,15 +93,23 @@
     renderMetadataSummary();
   }
 
-  function handleMetadataFieldColorInput(field, value) {
-    const metadataFields = Array.isArray(state.remote.metadata?.fields) ? state.remote.metadata.fields : [];
-    const fieldIndex = metadataFields.indexOf(field);
-    if (fieldIndex < 0) return;
-    state.remote.metadataFieldColors = {
-      ...state.remote.metadataFieldColors,
-      [field]: normalizeMetadataFieldColor(value, core.SOURCE_COLORS[fieldIndex % core.SOURCE_COLORS.length]),
-    };
-    writeStoredMetadataFieldColors(state.remote.metadataFieldColors);
+  function handleMetadataColorFieldChange() {
+    if (!els.metadataColorFieldSelect) return;
+    const field = String(els.metadataColorFieldSelect.value || "").trim();
+    const mode = field ? `${metadataResolver.FIELD_MODE_PREFIX}${field}` : metadataResolver.NONE_VISUALIZATION_MODE;
+    metadataResolver.setMetadataVisualizationMode(mode);
+    applyMetadataColorsToSeries(state.series, state.remote.datasets.filter((dataset) => state.remote.selectedDatasets.has(dataset.filename)));
+    renderSourceLegendSafe();
+    if (state.tree) globalObject.redraw();
+    renderMetadataSummary();
+  }
+
+  function handleMetadataValueColorInput(field, value, color) {
+    if (!field || value == null) return;
+    metadataResolver.setMetadataValueColor(field, value, color);
+    applyMetadataColorsToSeries(state.series, state.remote.datasets.filter((dataset) => state.remote.selectedDatasets.has(dataset.filename)));
+    renderSourceLegendSafe();
+    if (state.tree) globalObject.redraw();
     renderMetadataSummary();
   }
 
@@ -143,6 +117,10 @@
     if (els.metadataFieldSelect && els.metadataFieldSelect.dataset.bound !== "1") {
       els.metadataFieldSelect.dataset.bound = "1";
       els.metadataFieldSelect.addEventListener("change", handleMetadataFieldSelectionChange);
+    }
+    if (els.metadataColorFieldSelect && els.metadataColorFieldSelect.dataset.bound !== "1") {
+      els.metadataColorFieldSelect.dataset.bound = "1";
+      els.metadataColorFieldSelect.addEventListener("change", handleMetadataColorFieldChange);
     }
   }
 
@@ -260,7 +238,6 @@
       state.remote.selectedDatasets.clear();
       state.remote.metadata = null;
       state.remote.metadataFieldSelection = [];
-      state.remote.metadataFieldColors = {};
       state.remote.requestContext = null;
     }
     syncBackendRuntimeUiState();
@@ -366,6 +343,11 @@
       throw new Error(payload?.detail?.message || `Metadata upload failed for ${file.name} with HTTP ${response.status}`);
     }
     state.remote.metadata = normalizeRemoteMetadata(payload?.metadata);
+    applyMetadataColorsToSeries(
+      state.series,
+      state.remote.datasets.filter((dataset) => state.remote.selectedDatasets.has(dataset.filename)),
+    );
+    renderSourceLegendSafe();
     addClientLog("success", "upload", `Metadata upload finished for ${file.name}.`, state.remote.metadata?.filename || "metadata.txt");
     return payload;
   }
@@ -442,7 +424,7 @@
     const previousVisibility = new Map(
       state.series.map((source) => [source.label, Boolean(source.visible)]),
     );
-    return datasets.map((dataset, index) => {
+    const nextSeries = datasets.map((dataset, index) => {
       const label = dataset.filename || dataset.id || `remote-dataset-${index + 1}`;
       return {
         label,
@@ -450,6 +432,30 @@
         visible: previousVisibility.has(label) ? previousVisibility.get(label) : true,
       };
     });
+    applyMetadataColorsToSeries(nextSeries, datasets);
+    return nextSeries;
+  }
+
+  function applyMetadataColorsToSeries(series, datasets) {
+    const safeSeries = Array.isArray(series) ? series : [];
+    const safeDatasets = Array.isArray(datasets) ? datasets : [];
+    if (!safeSeries.length || !safeDatasets.length) {
+      return safeSeries;
+    }
+    const summaries = safeDatasets.map((dataset, index) => ({
+      filename: String(dataset?.filename || dataset?.id || `remote-dataset-${index + 1}`),
+      color: safeSeries[index]?.color || colorForSource(index),
+      metadata: dataset?.metadata && typeof dataset.metadata === "object" ? { ...dataset.metadata } : null,
+    }));
+    const resolved = metadataResolver.resolveDatasetMetadataDisplays(summaries);
+    const colorByFilename = new Map(
+      resolved.map((entry) => [entry.filename, entry.color]),
+    );
+    safeSeries.forEach((source, index) => {
+      const fallback = colorForSource(index);
+      source.color = colorByFilename.get(source.label) || fallback;
+    });
+    return safeSeries;
   }
 
   async function handleMinReadsChange() {
@@ -1065,7 +1071,7 @@
   }
 
   function renderMetadataSummary() {
-    if (!els.metadataSummaryMeta || !els.metadataSummaryFields || !els.metadataFieldSelect || !els.metadataFieldColorMeta || !els.metadataFieldColorList || !els.metadataSelectedMeta || !els.metadataSelectedList) {
+    if (!els.metadataSummaryMeta || !els.metadataSummaryFields || !els.metadataFieldSelect || !els.metadataColorFieldSelect || !els.metadataFieldColorMeta || !els.metadataFieldColorList || !els.metadataSelectedMeta || !els.metadataSelectedList) {
       return;
     }
     if (!state.remote.connected) {
@@ -1073,8 +1079,10 @@
       els.metadataSummaryFields.innerHTML = "The backend will report whether <strong>metadata.txt</strong> is already present.";
       els.metadataFieldSelect.innerHTML = "";
       els.metadataFieldSelect.disabled = true;
-      els.metadataFieldColorMeta.textContent = "No metadata fields selected";
-      els.metadataFieldColorList.textContent = "Connect to the backend to configure metadata field colors.";
+      els.metadataColorFieldSelect.innerHTML = "";
+      els.metadataColorFieldSelect.disabled = true;
+      els.metadataFieldColorMeta.textContent = "No active metadata color field";
+      els.metadataFieldColorList.textContent = "Connect to the backend to configure metadata value colors.";
       els.metadataSelectedMeta.textContent = "No backend dataset context yet";
       els.metadataSelectedList.textContent = "Connect to the backend to inspect dataset metadata bindings.";
       return;
@@ -1085,8 +1093,10 @@
       els.metadataSummaryFields.innerHTML = "Upload one metadata table to store it on the backend as <strong>metadata.txt</strong>.";
       els.metadataFieldSelect.innerHTML = "";
       els.metadataFieldSelect.disabled = true;
-      els.metadataFieldColorMeta.textContent = "No metadata fields selected";
-      els.metadataFieldColorList.textContent = "Select one or more metadata fields to customize their display colors.";
+      els.metadataColorFieldSelect.innerHTML = "";
+      els.metadataColorFieldSelect.disabled = true;
+      els.metadataFieldColorMeta.textContent = "No active metadata color field";
+      els.metadataFieldColorList.textContent = "Choose a metadata field to edit value colors.";
       els.metadataSelectedMeta.textContent = "No metadata attached to selected datasets";
       els.metadataSelectedList.textContent = "Once metadata is loaded, selected datasets with matching filenames will appear here.";
       return;
@@ -1095,46 +1105,67 @@
     ensureMetadataFieldPreferences(metadata);
     const fieldCount = metadata.fields.length;
     const selectedFields = getSelectedMetadataFields();
+    const activeField = metadataResolver.getActiveMetadataVisualizationField();
+    const selectedSummaries = getSelectedRemoteDatasetSummaries();
+    const resolvedDisplays = getSelectedResolvedMetadataDisplays();
+    const legendPayload = getSelectedMetadataLegendPayload();
+
     els.metadataSummaryMeta.textContent =
       `${metadata.matched_rows.toLocaleString()} matched sample${metadata.matched_rows === 1 ? "" : "s"} • ${fieldCount.toLocaleString()} field${fieldCount === 1 ? "" : "s"} • ${metadata.unmatched_rows.toLocaleString()} unmatched row${metadata.unmatched_rows === 1 ? "" : "s"}`;
     els.metadataSummaryFields.textContent = fieldCount
       ? `${metadata.filename || "metadata.txt"} • available fields: ${metadata.fields.join(", ")}`
       : "No metadata fields were detected beyond the required dataset column.";
+
     els.metadataFieldSelect.disabled = !fieldCount;
     els.metadataFieldSelect.innerHTML = metadata.fields.map((field) => {
       const selected = selectedFields.includes(field) ? " selected" : "";
       return `<option value="${core.escapeHtml(field)}"${selected}>${core.escapeHtml(field)}</option>`;
     }).join("");
-    if (!selectedFields.length) {
-      els.metadataFieldColorMeta.textContent = "No metadata fields selected";
-      els.metadataFieldColorList.textContent = "Select one or more metadata fields to customize their display colors.";
+
+    els.metadataColorFieldSelect.disabled = !fieldCount;
+    els.metadataColorFieldSelect.innerHTML = [
+      `<option value="">No metadata coloring</option>`,
+      ...metadata.fields.map((field) => {
+        const selected = activeField === field ? " selected" : "";
+        return `<option value="${core.escapeHtml(field)}"${selected}>${core.escapeHtml(field)}</option>`;
+      }),
+    ].join("");
+
+    if (!activeField) {
+      els.metadataFieldColorMeta.textContent = "No active metadata color field";
+      els.metadataFieldColorList.textContent = "Choose a metadata field to edit value colors.";
     } else {
+      const values = Array.isArray(legendPayload?.values) ? legendPayload.values : [];
       els.metadataFieldColorMeta.textContent =
-        `${selectedFields.length.toLocaleString()} selected field${selectedFields.length === 1 ? "" : "s"} with editable display colors`;
-      els.metadataFieldColorList.innerHTML = selectedFields.map((field, index) => `
-        <label class="metadata-field-color-item">
-          <span class="metadata-field-color-name">
-            <span class="metadata-selected-swatch" style="background:${core.escapeHtml(getMetadataFieldColor(field, index))}"></span>
-            <span>${core.escapeHtml(field)}</span>
-          </span>
-          <input
-            class="metadata-field-color-input"
-            type="color"
-            value="${core.escapeHtml(getMetadataFieldColor(field, index))}"
-            data-field-name="${core.escapeHtml(field)}"
-            aria-label="Choose display color for ${core.escapeHtml(field)}"
-          >
-        </label>
-      `).join("");
+        `${activeField} • ${values.length.toLocaleString()} value${values.length === 1 ? "" : "s"} with editable display colors`;
+      els.metadataFieldColorList.innerHTML = values.map((entry) => {
+        const valueLabel = entry.value === metadataResolver.MISSING_METADATA_VALUE ? "(missing)" : String(entry.value);
+        return `
+          <label class="metadata-field-color-item">
+            <span class="metadata-field-color-name">
+              <span class="metadata-selected-swatch" style="background:${core.escapeHtml(entry.color)}"></span>
+              <span>${core.escapeHtml(valueLabel)}</span>
+            </span>
+            <input
+              class="metadata-field-color-input"
+              type="color"
+              value="${core.escapeHtml(entry.color)}"
+              data-field-name="${core.escapeHtml(activeField)}"
+              data-field-value="${core.escapeHtml(String(entry.value))}"
+              aria-label="Choose display color for ${core.escapeHtml(valueLabel)} in ${core.escapeHtml(activeField)}"
+            >
+          </label>
+        `;
+      }).join("");
       els.metadataFieldColorList.querySelectorAll(".metadata-field-color-input").forEach((input) => {
         input.addEventListener("input", (event) => {
           const target = event.target;
           if (!(target instanceof HTMLInputElement)) return;
-          handleMetadataFieldColorInput(target.dataset.fieldName || "", target.value);
+          handleMetadataValueColorInput(target.dataset.fieldName || "", target.dataset.fieldValue || "", target.value);
         });
       });
     }
-    const selectedSummaries = getSelectedRemoteDatasetSummaries();
+
     if (!selectedSummaries.length) {
       els.metadataSelectedMeta.textContent = "No selected datasets yet";
       els.metadataSelectedList.textContent = "Select one or more backend datasets to inspect their metadata bindings.";
@@ -1147,21 +1178,26 @@
       els.metadataSelectedList.textContent = "The current dataset selection has no matched metadata rows.";
       return;
     }
+    const resolvedByFilename = new Map(resolvedDisplays.map((entry) => [entry.filename, entry]));
     els.metadataSelectedList.innerHTML = withMetadata.map((dataset) => {
+      const resolvedDataset = resolvedByFilename.get(dataset.filename) || null;
       const metadataEntries = Object.entries(dataset.metadata || {})
         .filter(([key]) => selectedFields.includes(key));
       const metadataRows = metadataEntries
         .map(([key, value], index) => buildMetadataChipHtml(
           key,
           value,
-          getMetadataFieldColor(key, selectedFields.indexOf(key)),
+          metadataResolver.getMetadataValueColor(
+            key,
+            metadataResolver.getDatasetMetadataValue(dataset, key),
+          ),
           index,
         ))
         .join("");
       return `
         <div class="metadata-selected-item">
           <div class="metadata-selected-name">
-            <span class="metadata-selected-swatch" style="background:${core.escapeHtml(dataset.color)}"></span>
+            <span class="metadata-selected-swatch" style="background:${core.escapeHtml(resolvedDataset?.color || dataset.color)}"></span>
             <span title="${core.escapeHtml(dataset.filename)}">${core.escapeHtml(dataset.filename)}</span>
           </div>
           <div class="metadata-selected-values">${metadataRows || '<span class="metadata-selected-empty">No values for the currently selected metadata fields.</span>'}</div>

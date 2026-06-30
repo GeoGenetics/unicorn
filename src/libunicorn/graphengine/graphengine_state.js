@@ -30,7 +30,6 @@
       backendNamesFile: "",
       metadata: null,
       metadataFieldSelection: [],
-      metadataFieldColors: {},
       metadataVisualizationMode: "none",
       metadataValueColors: {},
       expandedTaxids: new Set(),
