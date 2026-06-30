@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import time
 import json
@@ -18,11 +19,21 @@ REPO_ROOT = Path(__file__).resolve().parents[5]
 DATA_DIR = REPO_ROOT / "data"
 VENV_PYTHON = GRAPHENGINE_DIR / ".venv" / "bin" / "python"
 BACKEND_SCRIPT = GRAPHENGINE_DIR / "server_app.py"
-BACKEND_URL = "http://127.0.0.1:8000/ping"
-FRONTEND_URL = "http://127.0.0.1:8081/index.html"
 TEST_LOG_DIR = GRAPHENGINE_DIR / "tests" / "logs"
 BACKEND_LOG = TEST_LOG_DIR / "e2e_backend.log"
 FRONTEND_LOG = TEST_LOG_DIR / "e2e_frontend.log"
+
+
+def is_local_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.25)
+        return sock.connect_ex((host, port)) == 0
+
+
+def find_free_port(host: str = "127.0.0.1") -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
 
 
 def wait_for_url(url: str, timeout_seconds: float = 20.0) -> None:
@@ -61,6 +72,11 @@ def services() -> Iterator[dict[str, str]]:
     if not BACKEND_SCRIPT.is_file():
         pytest.fail(f"Missing backend script: {BACKEND_SCRIPT}")
 
+    backend_port = str(find_free_port())
+    frontend_port = str(find_free_port())
+    backend_url = f"http://127.0.0.1:{backend_port}/ping"
+    frontend_url = f"http://127.0.0.1:{frontend_port}/index.html"
+
     TEST_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     backend_log = BACKEND_LOG.open("wb")
@@ -71,10 +87,14 @@ def services() -> Iterator[dict[str, str]]:
         cwd=GRAPHENGINE_DIR,
         stdout=backend_log,
         stderr=subprocess.STDOUT,
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        env={
+            **os.environ,
+            "PYTHONUNBUFFERED": "1",
+            "UNICORN_GRAPHENGINE_PORT": backend_port,
+        },
     )
     frontend_process = subprocess.Popen(
-        ["python3", "-m", "http.server", "8081"],
+        ["python3", "-m", "http.server", frontend_port],
         cwd=GRAPHENGINE_DIR,
         stdout=frontend_log,
         stderr=subprocess.STDOUT,
@@ -82,12 +102,12 @@ def services() -> Iterator[dict[str, str]]:
     )
 
     try:
-        wait_for_url(BACKEND_URL)
-        wait_for_url(FRONTEND_URL)
+        wait_for_url(backend_url)
+        wait_for_url(frontend_url)
         yield {
-            "backend_url": BACKEND_URL,
-            "frontend_url": FRONTEND_URL,
-            "backend_base_url": "http://127.0.0.1:8000",
+            "backend_url": backend_url,
+            "frontend_url": frontend_url,
+            "backend_base_url": f"http://127.0.0.1:{backend_port}",
         }
     finally:
         terminate_process(frontend_process)
@@ -121,6 +141,30 @@ def browser(playwright_instance: Playwright) -> Iterator[Browser]:
 @pytest.fixture()
 def page(browser: Browser, services: dict[str, str]) -> Iterator[Page]:
     context = browser.new_context()
+    backend_base_url = services["backend_base_url"]
+    context.add_init_script(
+        script=f"""
+        (() => {{
+          const backendBaseUrl = {backend_base_url!r};
+          const originalFetch = window.fetch.bind(window);
+          const rewriteUrl = (value) => {{
+            const source = String(value);
+            return source
+              .replace("http://localhost:8000", backendBaseUrl)
+              .replace("http://127.0.0.1:8000", backendBaseUrl);
+          }};
+          window.fetch = (input, init) => {{
+            if (typeof input === "string") {{
+              return originalFetch(rewriteUrl(input), init);
+            }}
+            if (input instanceof Request) {{
+              return originalFetch(new Request(rewriteUrl(input.url), input), init);
+            }}
+            return originalFetch(input, init);
+          }};
+        }})();
+        """,
+    )
     page = context.new_page()
     page.goto(services["frontend_url"], wait_until="domcontentloaded")
     try:

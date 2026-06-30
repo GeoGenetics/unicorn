@@ -23,4 +23,6 @@ debug/
 src/libunicorn/graphengine/__pycache__/
 src/libunicorn/graphengine/uploads/*.dmp
 src/libunicorn/graphengine/unicorn_compute/__pycache__/
+src/libunicorn/graphengine/tests/e2e/__pycache__
+resources/
 doc/*.pdf

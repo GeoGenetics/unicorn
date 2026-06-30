@@ -31,6 +31,8 @@
       metadata: null,
       metadataFieldSelection: [],
       metadataFieldColors: {},
+      metadataVisualizationMode: "none",
+      metadataValueColors: {},
       expandedTaxids: new Set(),
       serverTreeActive: false,
       totalReads: 0,

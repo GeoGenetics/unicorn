@@ -728,29 +728,7 @@ static int unicorn_bamstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   //Read command line options
-  while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
-    switch(c) {
-      case 'o':
-        opts.outstat = strdup(o.arg);
-        break;
-      case 'b':
-        opts.ifile = strdup(o.arg);
-        break;
-        case 's':
-        opts.statstr = strdup(o.arg);
-        break;
-      case 'h':
-        bamstats_usage(stdout);
-        ret = 0;
-        goto exit;
-      case 310: //filelist
-        opts.filel = strdup(o.arg);
-        break;
-      case 311: //printdists
-        dstflg = 1;
-        break;
-    }
-  }
+  if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
   if (!opts.ifile && !opts.filel) goto exit;
   //Set default statistics if not provided
   if (!opts.outstat) ofp = stdout;

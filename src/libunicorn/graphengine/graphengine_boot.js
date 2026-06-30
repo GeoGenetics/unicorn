@@ -8,14 +8,15 @@
     const state = namespace.state;
     const els = namespace.els;
     const backend = namespace.backend;
+    const metadata = namespace.metadata;
     const treeRender = namespace.treeRender;
     const ui = namespace.ui;
     const selection = namespace.selection;
     const reports = namespace.reports;
     const agent = namespace.agent;
 
-    if (!state || !els || !backend || !treeRender || !ui || !selection || !reports || !agent) {
-      throw new Error("Unicorn graphengine boot expected state, DOM, backend, tree render, UI, selection, reports, and agent modules to load before boot.");
+    if (!state || !els || !backend || !metadata || !treeRender || !ui || !selection || !reports || !agent) {
+      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree render, UI, selection, reports, and agent modules to load before boot.");
     }
     if (!globalObject.UnicornAgentProviderModule || typeof globalObject.UnicornAgentProviderModule.createProviderAdapter !== "function") {
       throw new Error("Unicorn agent provider module failed to load before graphengine boot.");

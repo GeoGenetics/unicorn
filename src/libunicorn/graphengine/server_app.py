@@ -1906,6 +1906,51 @@ def subtree_report(
     names_file: Optional[str] = Query(default=None),
     min_reads: int = Query(default=0, ge=0),
 ) -> Dict[str, Any]:
+    return _subtree_report_payload(taxid, taxids, files, nodes_file, names_file, min_reads)
+
+
+@app.post("/subtree-report")
+def subtree_report_post(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return _subtree_report_payload(
+        payload.get("taxid"),
+        payload.get("taxids"),
+        payload.get("files"),
+        payload.get("nodes_file"),
+        payload.get("names_file"),
+        int(payload.get("min_reads", 0) or 0),
+    )
+
+
+@app.get("/rank-report")
+def rank_report(
+    taxids: Optional[List[int]] = Query(default=None),
+    files: Optional[List[str]] = Query(default=None),
+    nodes_file: Optional[str] = Query(default=None),
+    names_file: Optional[str] = Query(default=None),
+    min_reads: int = Query(default=0, ge=0),
+) -> Dict[str, Any]:
+    return _rank_report_payload(taxids, files, nodes_file, names_file, min_reads)
+
+
+@app.post("/rank-report")
+def rank_report_post(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return _rank_report_payload(
+        payload.get("taxids"),
+        payload.get("files"),
+        payload.get("nodes_file"),
+        payload.get("names_file"),
+        int(payload.get("min_reads", 0) or 0),
+    )
+
+
+def _subtree_report_payload(
+    taxid: Optional[int],
+    taxids: Optional[List[int]],
+    files: Optional[List[str]],
+    nodes_file: Optional[str],
+    names_file: Optional[str],
+    min_reads: int,
+) -> Dict[str, Any]:
     selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
     request_context = _response_context(selection, taxonomy, min_reads, [])
     requested_taxids = _normalize_taxids(taxids)
@@ -1938,13 +1983,12 @@ def subtree_report(
     }
 
 
-@app.get("/rank-report")
-def rank_report(
-    taxids: Optional[List[int]] = Query(default=None),
-    files: Optional[List[str]] = Query(default=None),
-    nodes_file: Optional[str] = Query(default=None),
-    names_file: Optional[str] = Query(default=None),
-    min_reads: int = Query(default=0, ge=0),
+def _rank_report_payload(
+    taxids: Optional[List[int]],
+    files: Optional[List[str]],
+    nodes_file: Optional[str],
+    names_file: Optional[str],
+    min_reads: int,
 ) -> Dict[str, Any]:
     selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
     request_context = _response_context(selection, taxonomy, min_reads, [])
@@ -1993,10 +2037,10 @@ def rank_report(
         "ok": True,
         "report": {
             "summary": {
-                "selected_taxids": requested_taxids,
                 "selected_node_count": len(selected_nodes),
-                "dataset_names": [dataset.fileinfo.name for dataset in selection.datasets],
-                "total_direct": sum(int(node.direct) for node in selected_nodes),
+                "selected_taxids": requested_taxids,
+                "total_direct": sum(node.direct for node in selected_nodes),
+                "dataset_names": list(selection.dataset_names),
             },
             "rows": rows,
         },

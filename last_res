@@ -1,9 +1,22 @@
-Pass 8B is done.
-graphengine.js is now a tiny compatibility shim with no semantic ownership. The last meaningful leftovers were moved where they belong:
-toggleCollapse() moved into [graphengine_selection.js](/Users/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine_selection.js)
-setStatus(), addClientLog(), clearClientLog(), and renderClientLog() moved into [graphengine_ui.js](/Users/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine_ui.js)
-I also made the script order in [index.html](/Users/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/index.html) more explicit while keeping the current dependency-safe order, and preserved the compatibility globals that tests and DevTools still use.
-Regression is green:
-./tests/run_tests.sh
-5 passed in 40.06s
-I didn’t do the extra manual DevTools/fresh-reload check in this pass. The next step is Pass 8C: Remove or freeze graphengine.js.
+Point 10 in [point1.txt](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/point1.txt) is now rewritten as a concrete second-pass plan.
+What it now includes
+one shared metadata visualization contract
+a dedicated shared resolver module plan, centered on graphengine_metadata.js
+the key pivot from:coloring fields
+to:
+coloring metadata values within one active field
+
+a strict reuse order:shared resolver
+tree
+barplot
+PCoA
+agent summaries later
+
+explicit reusable output shapes for:per-dataset display payloads
+per-field legend payloads
+
+This should keep us from doing metadata logic three different times in three different places.
+Natural next steps
+Review the new point 10 text together
+If you like it, we can start with Step 10.1 and freeze the exact active-field/value-color contract
+Then we build graphengine_metadata.js as the shared foundation

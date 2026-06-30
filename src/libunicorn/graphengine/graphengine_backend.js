@@ -5,10 +5,11 @@
   const state = namespace.state;
   const els = namespace.els;
   const core = namespace.core;
+  const metadataResolver = namespace.metadata;
   const treeModel = namespace.treeModel;
 
-  if (!state || !els || !core || !treeModel) {
-    throw new Error("Unicorn graphengine backend expected state, DOM, core, and tree model modules to load first.");
+  if (!state || !els || !core || !metadataResolver || !treeModel) {
+    throw new Error("Unicorn graphengine backend expected state, DOM, core, metadata, and tree model modules to load first.");
   }
 
   const {
@@ -44,10 +45,6 @@
   }
 
   function colorForSource(index) {
-    return core.SOURCE_COLORS[index % core.SOURCE_COLORS.length];
-  }
-
-  function colorForMetadataField(index) {
     return core.SOURCE_COLORS[index % core.SOURCE_COLORS.length];
   }
 
@@ -100,7 +97,7 @@
     const storedColors = readStoredMetadataFieldColors();
     const nextColors = {};
     fields.forEach((field, index) => {
-      nextColors[field] = normalizeMetadataFieldColor(storedColors[field], colorForMetadataField(index));
+      nextColors[field] = normalizeMetadataFieldColor(storedColors[field], core.SOURCE_COLORS[index % core.SOURCE_COLORS.length]);
     });
     state.remote.metadataFieldColors = nextColors;
     writeStoredMetadataFieldColors(nextColors);
@@ -114,12 +111,12 @@
   function getMetadataFieldColor(field, index = 0) {
     return normalizeMetadataFieldColor(
       state.remote.metadataFieldColors?.[field],
-      colorForMetadataField(index),
+      core.SOURCE_COLORS[index % core.SOURCE_COLORS.length],
     );
   }
 
   function buildMetadataChipHtml(key, value, color, index) {
-    const safeColor = normalizeMetadataFieldColor(color, colorForMetadataField(index));
+    const safeColor = normalizeMetadataFieldColor(color, core.SOURCE_COLORS[index % core.SOURCE_COLORS.length]);
     return `<span class="metadata-chip" style="--metadata-chip-color:${core.escapeHtml(safeColor)}"><strong>${core.escapeHtml(key)}</strong>: ${core.escapeHtml(String(value || ""))}</span>`;
   }
 
@@ -136,7 +133,7 @@
     if (fieldIndex < 0) return;
     state.remote.metadataFieldColors = {
       ...state.remote.metadataFieldColors,
-      [field]: normalizeMetadataFieldColor(value, colorForMetadataField(fieldIndex)),
+      [field]: normalizeMetadataFieldColor(value, core.SOURCE_COLORS[fieldIndex % core.SOURCE_COLORS.length]),
     };
     writeStoredMetadataFieldColors(state.remote.metadataFieldColors);
     renderMetadataSummary();
@@ -644,15 +641,18 @@
   }
 
   async function fetchRemoteSubtreeReport(taxid, options = {}) {
-    const url = buildRemoteContextUrl("subtree-report");
-    if (Array.isArray(options.taxids) && options.taxids.length) {
-      for (const selectedTaxid of options.taxids) {
-        url.searchParams.append("taxids", String(selectedTaxid));
-      }
-    } else if (taxid != null) {
-      url.searchParams.set("taxid", String(taxid));
-    }
-    const response = await fetch(url.toString(), { method: "GET" });
+    const body = {
+      ...buildRemoteContextPayload(options),
+      taxid: taxid != null ? Number(taxid) : null,
+      taxids: Array.isArray(options.taxids) ? options.taxids.map((value) => Number(value)) : [],
+    };
+    const response = await fetch("http://localhost:8000/subtree-report", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(payload?.detail?.message || `Remote subtree-report request failed with HTTP ${response.status}`);
@@ -661,11 +661,17 @@
   }
 
   async function fetchRemoteRankReport(taxids) {
-    const url = buildRemoteContextUrl("rank-report");
-    for (const taxid of taxids) {
-      url.searchParams.append("taxids", String(taxid));
-    }
-    const response = await fetch(url.toString(), { method: "GET" });
+    const body = {
+      ...buildRemoteContextPayload({}),
+      taxids: Array.isArray(taxids) ? taxids.map((value) => Number(value)) : [],
+    };
+    const response = await fetch("http://localhost:8000/rank-report", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(payload?.detail?.message || `Remote rank-report request failed with HTTP ${response.status}`);
@@ -949,6 +955,7 @@
     state.remote.backendNamesFile = String(ping?.taxonomy?.names_file || "");
     state.remote.metadata = normalizeRemoteMetadata(ping?.metadata);
     ensureMetadataFieldPreferences(state.remote.metadata);
+    metadataResolver.ensureMetadataVisualizationState(state.remote.metadata);
     renderMetadataSummary();
     syncBackendRuntimeUiState();
   }
@@ -1021,6 +1028,20 @@
         color: getColorForDatasetFilename(dataset.filename),
         metadata: dataset.metadata && typeof dataset.metadata === "object" ? { ...dataset.metadata } : null,
       }));
+  }
+
+  function getSelectedResolvedMetadataDisplays(options = {}) {
+    return metadataResolver.resolveDatasetMetadataDisplays(
+      getSelectedRemoteDatasetSummaries(),
+      options,
+    );
+  }
+
+  function getSelectedMetadataLegendPayload(options = {}) {
+    return metadataResolver.buildMetadataLegendPayload(
+      getSelectedRemoteDatasetSummaries(),
+      options,
+    );
   }
 
   function formatRemoteDatasetDetail(dataset) {
@@ -1208,6 +1229,8 @@
     initMetadataControls,
     getSelectedRemoteDatasets,
     getSelectedRemoteDatasetSummaries,
+    getSelectedResolvedMetadataDisplays,
+    getSelectedMetadataLegendPayload,
     formatRemoteDatasetDetail,
     getVisibleSeriesSafe,
     renderMetadataSummary,

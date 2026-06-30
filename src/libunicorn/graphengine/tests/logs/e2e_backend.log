@@ -1,14 +1,8 @@
-INFO:     Started server process [721054]
+INFO:     Started server process [775505]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://127.0.0.1:48263 (Press CTRL+C to quit)
-INFO:     127.0.0.1:37814 - "GET /ping HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37816 - "GET /ping HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37816 - "GET /datasets HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37816 - "POST /metadata/upload HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37816 - "GET /ping HTTP/1.1" 200 OK
-INFO:     127.0.0.1:37816 - "GET /datasets HTTP/1.1" 200 OK
-INFO:     Shutting down
-INFO:     Waiting for application shutdown.
-INFO:     Application shutdown complete.
-INFO:     Finished server process [721054]
+INFO:     Uvicorn running on http://127.0.0.1:59527 (Press CTRL+C to quit)
+INFO:     127.0.0.1:50912 - "GET /ping HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50916 - "GET /ping HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50916 - "GET /datasets HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50916 - "POST /metadata/upload HTTP/1.1" 400 Bad Request
