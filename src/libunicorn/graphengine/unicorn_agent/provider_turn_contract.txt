@@ -24,6 +24,15 @@ Operating invariant:
 - provider grounding should converge on backend-owned Unicorn state, not dual
   local-vs-remote execution semantics
 
+Frozen compact-turn invariant:
+
+- provider turns should use a compact backend-authoritative context by default
+- full graph inspection belongs behind Unicorn-native tool calls
+- repeated unchanged large payload sections should not be resent in the normal
+  execution path
+- debug inspection may expose fuller payloads, but it must remain opt-in and
+  must not redefine the normal provider-turn contract
+
 
 Frozen V1 scope
 ---------------
@@ -166,7 +175,7 @@ Top-level provider request payload:
   "system_prompt": "You are the Unicorn Graph Engine agent...",
   "user_prompt": "What taxa show the most damage?",
   "graph_context": {
-    "...": "output of buildAgentContext()"
+    "...": "compact backend-authoritative context snapshot"
   },
   "tools": [
     {
@@ -220,8 +229,9 @@ Required request fields
 - raw user input from the Agent panel
 
 `graph_context`
-- output of `buildAgentContext()`
-- this is the model's current Unicorn world state
+- should converge on the compact backend-authoritative context schema
+- this is the model's current Unicorn world state for the normal execution path
+- detailed state should be requested later via Unicorn-native tools
 
 `tools`
 - the allowed Unicorn-native tool definitions for this turn
@@ -242,13 +252,18 @@ Required request fields
 
 `conversation`
 - optional prior turn history for multi-turn continuity
-- V1 may keep this minimal
+- should remain minimal in the compact-turn path
 
 `tool_results`
 - empty on the first provider request of a new turn
 - populated on later loop iterations after Unicorn executes requested tools
 - for provider-facing stability, Unicorn may normalize some tool outputs before
   appending them here
+- compact-turn invariant:
+  - tool results should be summarized before reinjection when raw outputs are
+    large
+  - exact raw detail should be preserved only when it is small or central to
+    the answer
 
 `turn_config`
 - runtime limits set by Unicorn
@@ -258,6 +273,10 @@ Required request fields
 What Unicorn should not send
 ----------------------------
 
+- full raw tree payloads in the normal compact-turn path
+- full raw metadata tables in the normal compact-turn path
+- repeated copies of unchanged context blobs
+- verbose debug payloads in the normal execution path
 - raw DOM or page HTML
 - unrestricted file contents
 - arbitrary browser state

@@ -58,6 +58,37 @@ The provider should not receive:
 - large repeated arrays unless they are essential to reasoning
 
 
+Frozen compact-turn invariant
+-----------------------------
+
+This schema is not just a suggestion for a smaller payload.
+
+It is the intended normal-path provider contract for Unicorn graphengine.
+
+Frozen rules:
+
+1. compact-by-default
+- normal provider execution should use this compact context rather than the
+  older larger `graph_context` envelope
+
+2. tools-before-detail
+- if detailed graph inspection is needed, the provider should request it
+  through Unicorn-native tools rather than receive it proactively
+
+3. backend-authoritative grounding
+- backend-owned analysis state is authoritative for provider grounding
+- browser/UI state appears only when it changes human interpretation of the
+  backend-backed graph
+
+4. no repeated unchanged blobs
+- unchanged large context sections should not be resent turn after turn unless
+  they are truly required by the provider loop design
+
+5. debug is opt-in
+- fuller payload inspection may exist in a debug path, but it must not redefine
+  this compact normal-path contract
+
+
 Target architecture
 -------------------
 
@@ -103,17 +134,47 @@ Proposed top-level object:
   "context_version": "v1-compact",
   "session": {},
   "datasets": {},
-  "taxonomy": {},
-  "filters": {},
   "tree": {},
-  "selection": {},
-  "table": {},
-  "report": {},
-  "capabilities": {}
+  "filters": {},
+  "metadata": {},
+  "report_state": {}
 }
 ```
 
 Field-by-field intent is described below.
+
+
+Frozen step 2 schema decision
+-----------------------------
+
+The compact top-level shape is now intentionally narrower than earlier draft
+versions.
+
+Keep:
+
+- `session`
+- `datasets`
+- `tree`
+- `filters`
+- `metadata`
+- `report_state`
+
+Do not include as separate default top-level sections:
+
+- `taxonomy`
+- `selection`
+- `table`
+- `report`
+- `capabilities`
+
+How those concepts are handled now:
+
+- taxonomy identity is omitted from the compact default path and can be
+  recovered later through Unicorn tools when necessary
+- selection summary is folded into `tree`
+- active table/report scope is folded into `report_state`
+- capability detail belongs in the advertised tool registry, not in the
+  compact context blob
 
 
 Section 1. Session
@@ -191,35 +252,7 @@ If the provider needs per-dataset detail, it should use a Unicorn tool such as
 tool.
 
 
-Section 3. Taxonomy
--------------------
-
-Purpose:
-
-- make active taxonomy provenance explicit
-
-Shape:
-
-```json
-"taxonomy": {
-  "nodes_file": "nodes.dmp",
-  "names_file": "names.dmp"
-}
-```
-
-Rules:
-
-- filenames must come from backend `request_context`
-- this is only active taxonomy identity, not taxonomy metadata
-
-Do not include:
-
-- node count
-- name count
-- taxonomy cache internals
-
-
-Section 4. Filters
+Section 3. Filters
 ------------------
 
 Purpose:
@@ -251,7 +284,7 @@ Important distinction:
   currently UI state
 
 
-Section 5. Tree
+Section 4. Tree
 ---------------
 
 Purpose:
@@ -271,49 +304,6 @@ Shape:
     "child_count": 1
   },
   "visible_node_count": 50,
-  "expanded_taxids": [2759, 33090, 35493],
-  "focused_taxid": 33090,
-  "focused_name": "Viridiplantae"
-}
-```
-
-Rules:
-
-- `visible_root` should come from the active backend tree payload already
-  normalized into the frontend render model
-- `visible_node_count` can remain frontend-derived because it is a render-view
-  count, not an analysis summary the backend currently returns directly
-- `expanded_taxids` must come from backend `request_context.expanded_taxids`
-- `focused_taxid` and `focused_name` are allowed UI state because graph focus
-  is currently client-side interaction state
-
-Keep:
-
-- one root summary
-- one visible node count
-- effective expanded taxids
-
-Do not include:
-
-- the full visible tree
-- child lists
-- lineage arrays
-- per-node breakdowns
-
-If the provider needs more, it should use tools.
-
-
-Section 6. Selection
---------------------
-
-Purpose:
-
-- tell the provider what the human currently has selected
-
-Shape:
-
-```json
-"selection": {
   "selected_taxids": [33090, 4565],
   "selected_count": 2,
   "selected_preview": [
@@ -327,150 +317,154 @@ Shape:
       "name": "Triticum",
       "rank": "genus"
     }
+  ],
+  "expanded_taxids_preview": [2759, 33090, 35493],
+  "expanded_taxids_total": 3,
+  "collapsed_taxids_preview": [],
+  "collapsed_taxids_total": 0,
+  "focused_taxid": 33090,
+  "focused_name": "Viridiplantae"
+}
+```
+
+Rules:
+
+- `visible_root` should come from the active backend tree payload already
+  normalized into the frontend render model
+- `visible_node_count` can remain frontend-derived because it is a render-view
+  count, not an analysis summary the backend currently returns directly
+- `selected_taxids` and `selected_preview` may come from current frontend
+  selection state because selection still reflects user intent strongly
+- `expanded_taxids_preview` and `expanded_taxids_total` should come from backend
+  `request_context.expanded_taxids`
+- `collapsed_taxids_preview` and `collapsed_taxids_total` may remain frontend
+  summaries while collapsed-state handling stays client-side
+- `focused_taxid` and `focused_name` are allowed UI state because graph focus
+  is currently client-side interaction state
+
+Keep:
+
+- one root summary
+- one visible node count
+- selected taxid summary
+- effective expanded/collapsed summary
+- focused node summary
+
+Do not include:
+
+- the full visible tree
+- child lists
+- lineage arrays
+- per-node breakdowns
+
+If the provider needs more, it should use tools.
+
+
+Section 5. Metadata
+-------------------
+
+Purpose:
+- expose only the compact metadata interpretation state relevant to the current
+  graph view
+
+Shape:
+
+```json
+"metadata": {
+  "active_field": "group",
+  "has_missing": true,
+  "values": [
+    { "value": "control", "dataset_count": 12 },
+    { "value": "treated", "dataset_count": 15 },
+    { "value": "__missing__", "dataset_count": 2 }
   ]
 }
 ```
 
 Rules:
 
-- `selected_taxids` may come from current client-side selected node state
-- `selected_preview` should be capped
-- suggested cap: at most 5 nodes
-- preview entries should be short summaries only
+- include this block only when metadata-aware visualization is active or
+  metadata context is relevant to interpretation
+- `active_field` should come from the shared metadata resolver state
+- `has_missing` should be true when one or more active datasets resolve to the
+  canonical missing bucket
+- `values` should summarize visible/active dataset value groups only
+- counts should be scalar summaries, not per-dataset dumps
 
-Rationale:
+Frozen step 3 metadata-summary decision:
 
-- selection is a UI-owned state that strongly affects user intent
-- the provider often needs to know what the human is pointing at
+- the compact metadata block is resolver-derived, not table-derived
+- it is intended to summarize interpretation mode, not dataset detail
+- the default metadata summary contract is:
+  - `active_field`
+  - `has_missing`
+  - `values`
+- each `values[*]` entry should contain:
+  - `value`
+  - `dataset_count`
+- `__missing__` remains the canonical missing-value token in compact metadata
+  summaries just as it does in the shared visualization resolver
 
-Do not include:
+Inclusion rule:
 
-- deep node detail
-- subtree counts for every selected node
-
-That belongs in `get_selected_nodes` or `get_node_details`.
-
-
-Section 7. Table
-----------------
-
-Purpose:
-
-- summarize the active backend-normalized top-table scope without sending rows
-
-Shape:
-
-```json
-"table": {
-  "scope": "root",
-  "target": {
-    "taxid": 1,
-    "name": "root",
-    "rank": "no rank"
-  },
-  "sort": "direct",
-  "limit": 40,
-  "row_count": 40
-}
-```
-
-Rules:
-
-- this should be included only if a backend table scope is active or known
-- values should come from backend table payloads where possible
-- this is a scope summary, not table content
+- include `metadata` when metadata-aware visualization is active or when
+  metadata context materially affects interpretation
+- if no metadata-aware mode is active, runtime may either:
+  - omit `metadata`
+  - or send:
+    - `active_field: null`
+    - `has_missing: false`
+    - `values: []`
+- whichever runtime choice is implemented later should be applied consistently
 
 Do not include:
 
-- full row arrays
-- top-N row detail unless deliberately added as a tiny preview
+- raw metadata rows
+- full metadata dictionaries for every dataset
+- full metadata tables
+- full per-dataset metadata dumps
+- field-color maps unless they become clearly necessary for provider reasoning
 
-Optional future addition:
-
-- `top_row_preview`
-  - one to three rows max
-  - only if direct-answer quality clearly improves enough to justify the tokens
-
-
-Section 8. Report
------------------
-
-Purpose:
-
-- describe the currently active backend report scope compactly
-
-Shape for subtree report:
-
-```json
-"report": {
-  "type": "subtree",
-  "target": {
-    "taxid": 4565,
-    "name": "Triticum",
-    "rank": "genus"
-  },
-  "summary": {
-    "child_count": 12,
-    "matrix_row_count": 10,
-    "dataset_count": 2
-  }
-}
-```
-
-Shape for rank report:
-
-```json
-"report": {
-  "type": "rank",
-  "summary": {
-    "selected_taxids": [33090, 4565],
-    "selected_node_count": 2,
-    "total_direct": 10432,
-    "rank_count": 6,
-    "dataset_count": 2
-  }
-}
-```
-
-Rules:
-
-- include report block only when a report is active
-- all report facts should come from backend report payloads
-- report block should summarize scope and size, not embed matrices
-
-Do not include:
-
-- full matrix payloads
-- per-rank rows
-- per-dataset tables
-
-Those remain tool-driven or UI-rendered data.
+That detail belongs behind Unicorn tools or later explicit dataset inspection
+paths.
 
 
-Section 9. Capabilities
+Section 6. Report State
 -----------------------
 
 Purpose:
 
-- optionally remind the provider what category of grounding/actions exist
-- keep this compact and stable
+- summarize the currently active report or table scope without sending rows or
+  matrices
 
 Shape:
 
 ```json
-"capabilities": {
-  "tool_contract": "v1-read-only",
-  "can_query_graph": true,
-  "can_query_table": true,
-  "can_query_reports": false
+"report_state": {
+  "active": true,
+  "kind": "count_matrix",
+  "scope": "selected_nodes",
+  "target": null,
+  "sort": null,
+  "limit": null,
+  "row_count": 10,
+  "dataset_count": 2
 }
 ```
 
 Rules:
 
-- this is optional
-- if included, it should be short and static
-- avoid duplicating the actual tool list here
+- include this block only when a report or table view is active
+- values should summarize scope and size only
+- this is a report-state summary, not a report payload
+
+Do not include:
+
+- full row arrays
+- full matrix payloads
+- per-rank rows
+- per-dataset tables
+- provider capability declarations
 
 
 Recommended full compact example
@@ -495,10 +489,6 @@ Recommended full compact example
     "total_reads": 79234328,
     "direct_taxa": 1630
   },
-  "taxonomy": {
-    "nodes_file": "nodes.dmp",
-    "names_file": "names.dmp"
-  },
   "filters": {
     "min_reads": 1000,
     "count_mode": "total",
@@ -515,11 +505,6 @@ Recommended full compact example
       "child_count": 1
     },
     "visible_node_count": 50,
-    "expanded_taxids": [2759, 33090, 35493],
-    "focused_taxid": null,
-    "focused_name": null
-  },
-  "selection": {
     "selected_taxids": [33090],
     "selected_count": 1,
     "selected_preview": [
@@ -528,25 +513,24 @@ Recommended full compact example
         "name": "Viridiplantae",
         "rank": "kingdom"
       }
+    ],
+    "expanded_taxids_preview": [2759, 33090, 35493],
+    "expanded_taxids_total": 3,
+    "collapsed_taxids_preview": [],
+    "collapsed_taxids_total": 0,
+    "focused_taxid": null,
+    "focused_name": null
+  },
+  "metadata": {
+    "active_field": "group",
+    "values": [
+      { "value": "control", "dataset_count": 1 },
+      { "value": "treated", "dataset_count": 1 }
     ]
   },
-  "table": {
-    "scope": "root",
-    "target": {
-      "taxid": 1,
-      "name": "root",
-      "rank": "no rank"
-    },
-    "sort": "direct",
-    "limit": 40,
-    "row_count": 40
-  },
-  "report": null,
-  "capabilities": {
-    "tool_contract": "v1-read-only",
-    "can_query_graph": true,
-    "can_query_table": true,
-    "can_query_reports": false
+  "report_state": {
+    "active": false,
+    "kind": null
   }
 }
 ```
@@ -557,11 +541,10 @@ Fields that should be removed from the current large context
 
 The compact schema is explicitly meant to replace or shrink these categories:
 
-- duplicated backend block plus taxonomy block plus dataset block overlap
+- duplicated backend block plus dataset block overlap
 - large conversation-independent frontend context wrappers
-- empty placeholders such as always-empty `collapsed_taxids`
 - anything equivalent to full visible-tree structure
-- report structures beyond minimal active report summary
+- report/table structures beyond minimal active report summary
 - large arrays unless capped and semantically necessary
 
 
@@ -576,20 +559,21 @@ Suggested token discipline for the compact context:
    - `selected_count`
    - `dataset_names_truncated: true`
 3. selected node preview should be capped
-4. expanded taxids may need capping if expansion becomes large
+4. expanded/collapsed summaries may need capping if expansion becomes large
 5. active report summary should stay scalar-heavy and matrix-light
 
 Suggested default caps:
 
 - dataset name preview: 12
 - selected node preview: 5
-- expanded taxids: 64
+- expanded/collapsed taxid preview: 64
 
 If a cap is applied, add a boolean flag such as:
 
 - `selected_names_truncated`
 - `selected_preview_truncated`
 - `expanded_taxids_truncated`
+- `collapsed_taxids_truncated`
 
 
 Assembly rules
@@ -605,8 +589,6 @@ Examples:
 
 - dataset names:
   - source: backend request context
-- taxonomy filenames:
-  - source: backend request context
 - min_reads:
   - source: backend request context
 - expanded taxids:
@@ -619,6 +601,10 @@ Examples:
   - source: frontend render state
 - selected taxids:
   - source: frontend selection state
+- active metadata field/value summary:
+  - source: shared metadata resolver state
+- active report summary:
+  - source: current backend-normalized report/table state
 
 
 Implementation plan

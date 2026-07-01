@@ -26,6 +26,14 @@ Frozen V1 provider scope:
 - `select_taxon`, `focus_taxon`, and `center_root` remain available to internal
   Unicorn code paths, but are outside the first real provider surface
 
+Frozen compact-turn consequence:
+
+- `get_graph_context` remains a valid read-only Unicorn tool
+- however, full `get_graph_context` payloads should not be proactively injected
+  into every provider turn in the normal compact execution path
+- detailed graph inspection should move behind explicit tool requests rather
+  than the initial provider payload
+
 
 Format
 ------
@@ -88,6 +96,12 @@ Canonical context shape
   - `connected`
   - `backend_nodes_file`
   - `backend_names_file`
+
+Compact-turn note:
+
+- this canonical context shape remains useful as a read-only inspection tool
+- but it should be treated as richer detail, not as the default always-sent
+  provider grounding payload once compact mode becomes authoritative
 
 
 Known current transition debt
