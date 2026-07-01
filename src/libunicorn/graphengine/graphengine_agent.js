@@ -133,7 +133,8 @@
 
   function handleAgentProviderChange() {
     if (!els.agentProviderSelect) return;
-    state.agent.configuredProvider = normalizeConfiguredAgentProvider(els.agentProviderSelect.value);
+    const normalizedProvider = normalizeConfiguredAgentProvider(els.agentProviderSelect.value);
+    state.agent.configuredProvider = normalizedProvider;
     els.agentProviderSelect.value = state.agent.configuredProvider;
     populateAgentModelOptions(state.agent.configuredProvider, state.agent.configuredModel);
     syncAgentRuntimeProvider();
@@ -165,6 +166,9 @@
   function normalizeConfiguredAgentProvider(provider) {
     const normalized = String(provider || "").trim();
     if (normalized === "local") {
+      return "local_openai_compat";
+    }
+    if (normalized === "local_openai_compat") {
       return "local_openai_compat";
     }
     const knownTargets = getKnownAgentProviderTargets();
