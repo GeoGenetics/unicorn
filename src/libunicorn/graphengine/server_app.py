@@ -27,6 +27,7 @@ NODES_FILENAME = os.environ.get("UNICORN_GRAPHENGINE_NODES_FILE", "nodes.dmp")
 NAMES_FILENAME = os.environ.get("UNICORN_GRAPHENGINE_NAMES_FILE", "names.dmp")
 OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"
 GOOGLE_INTERACTIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
+LOCAL_OPENAI_COMPAT_DEFAULT_ENDPOINT = "http://localhost:8542/v1/chat/completions"
 AGENT_PROVIDER_LOG_PATH = Path(
     os.environ.get("UNICORN_GRAPHENGINE_AGENT_LOG", str(UPLOAD_DIR / "graphengine_agent_provider.jsonl"))
 ).resolve()
@@ -1288,6 +1289,18 @@ def _resolve_google_interactions_endpoint(base_url: str) -> str:
     return f"{without_trailing_slash}/v1beta/interactions"
 
 
+def _resolve_local_openai_compat_chat_endpoint(base_url: str) -> str:
+    trimmed = str(base_url or "").strip()
+    if not trimmed:
+        return LOCAL_OPENAI_COMPAT_DEFAULT_ENDPOINT
+    without_trailing_slash = trimmed.rstrip("/")
+    if without_trailing_slash.endswith("/v1/chat/completions"):
+        return without_trailing_slash
+    if without_trailing_slash.endswith("/v1"):
+        return f"{without_trailing_slash}/chat/completions"
+    return f"{without_trailing_slash}/v1/chat/completions"
+
+
 def _build_google_interactions_input(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> str:
     conversation = provider_payload.get("conversation") if isinstance(provider_payload.get("conversation"), list) else []
     tool_results = provider_payload.get("tool_results") if isinstance(provider_payload.get("tool_results"), list) else []
@@ -1356,6 +1369,62 @@ def _build_google_interactions_request(provider_payload: Dict[str, Any], runtime
     }
 
 
+def _build_local_openai_compat_chat_request(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
+    model = str(runtime_config.get("configured_model") or provider_payload.get("provider", {}).get("model") or "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B")
+    messages: List[Dict[str, str]] = []
+    system_prompt = str(provider_payload.get("system_prompt") or "").strip()
+    if system_prompt:
+        messages.append({
+            "role": "system",
+            "content": system_prompt,
+        })
+    developer_context = _build_openai_developer_context_message(provider_payload, {
+        **runtime_config,
+        "runtime_provider": runtime_config.get("runtime_provider") or "local_openai_compat",
+    })
+    if developer_context:
+        context_text = ""
+        content = developer_context.get("content")
+        if isinstance(content, list):
+            text_parts = [
+                str(entry.get("text") or "")
+                for entry in content
+                if isinstance(entry, dict) and isinstance(entry.get("text"), str)
+            ]
+            context_text = "\n".join(part for part in text_parts if part.strip())
+        elif isinstance(content, str):
+            context_text = content
+        if context_text.strip():
+            messages.append({
+                "role": "system",
+                "content": context_text,
+            })
+    for message in provider_payload.get("conversation", []):
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "user")
+        if role not in {"user", "assistant", "system"}:
+            role = "user"
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        messages.append({
+            "role": role,
+            "content": content,
+        })
+    user_prompt = str(provider_payload.get("user_prompt") or "").strip()
+    if user_prompt:
+        messages.append({
+            "role": "user",
+            "content": user_prompt,
+        })
+    return {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.0,
+    }
+
+
 def _extract_google_output_text(api_response: Dict[str, Any]) -> str:
     output_text = api_response.get("output_text")
     if isinstance(output_text, str) and output_text.strip():
@@ -1400,6 +1469,34 @@ def _extract_openai_output_text(api_response: Dict[str, Any]) -> str:
         if text_parts:
             return "\n".join(text_parts)
     return ""
+
+
+def _extract_local_openai_compat_output_text(api_response: Dict[str, Any]) -> str:
+    choices = api_response.get("choices")
+    if not isinstance(choices, list):
+        return ""
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+    return ""
+
+
+def _strip_json_code_fences(text: str) -> str:
+    stripped = str(text or "").strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    return stripped
 
 
 def _normalize_internal_provider_response(response: Dict[str, Any]) -> Dict[str, Any]:
@@ -1533,6 +1630,55 @@ def _call_google_provider_turn(provider_payload: Dict[str, Any], runtime_config:
         return _normalize_internal_provider_response(parsed)
     except ValueError as error:
         raise HTTPException(status_code=502, detail={"message": str(error), "code": "google_invalid_provider_shape"})
+
+
+def _call_local_openai_compat_provider_turn(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
+    api_key = str(runtime_config.get("api_key") or "").strip()
+    request_body = _build_local_openai_compat_chat_request(provider_payload, runtime_config)
+    endpoint = _resolve_local_openai_compat_chat_endpoint(str(runtime_config.get("base_url") or ""))
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    request = urllib_request.Request(
+        endpoint,
+        data=json.dumps(request_body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=90) as response:
+            response_body = response.read().decode("utf-8")
+            response_json = json.loads(response_body)
+    except urllib_error.HTTPError as error:
+        detail_message = f"Local OpenAI-compatible request failed with HTTP {error.code}"
+        try:
+            error_body = error.read().decode("utf-8")
+            error_json = json.loads(error_body)
+            detail_message = str(error_json.get("error", {}).get("message") or error_json.get("message") or detail_message)
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail={"message": detail_message, "code": "local_openai_compat_http_error"})
+    except urllib_error.URLError as error:
+        raise HTTPException(status_code=502, detail={"message": f"Local OpenAI-compatible request failed before reaching the API: {error.reason}", "code": "local_openai_compat_network_error"})
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail={"message": "Local OpenAI-compatible request timed out.", "code": "local_openai_compat_timeout"})
+
+    if isinstance(response_json, dict) and isinstance(response_json.get("error"), dict) and response_json["error"].get("message"):
+        raise HTTPException(status_code=502, detail={"message": str(response_json["error"]["message"]), "code": "local_openai_compat_api_error"})
+
+    output_text = _extract_local_openai_compat_output_text(response_json)
+    if not output_text:
+        raise HTTPException(status_code=502, detail={"message": "Local OpenAI-compatible endpoint returned no assistant JSON output.", "code": "local_openai_compat_empty_output"})
+    try:
+        parsed = json.loads(_strip_json_code_fences(output_text))
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=502, detail={"message": f"Local OpenAI-compatible endpoint returned non-JSON output: {error}", "code": "local_openai_compat_invalid_json"})
+    try:
+        return _normalize_internal_provider_response(parsed)
+    except ValueError as error:
+        raise HTTPException(status_code=502, detail={"message": str(error), "code": "local_openai_compat_invalid_provider_shape"})
 
 
 def _node_passes_filter(node: TreeNodeModel, tree: TreeModel, min_reads: int) -> bool:
@@ -2246,6 +2392,8 @@ def agent_provider_turn(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             response = _call_openai_provider_turn(provider_payload, runtime_config)
         elif provider_name == "google":
             response = _call_google_provider_turn(provider_payload, runtime_config)
+        elif provider_name == "local_openai_compat":
+            response = _call_local_openai_compat_provider_turn(provider_payload, runtime_config)
         else:
             raise HTTPException(status_code=400, detail={"message": f"Unsupported backend provider runtime: {provider_name}"})
     except HTTPException as error:

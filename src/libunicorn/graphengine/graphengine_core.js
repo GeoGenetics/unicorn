@@ -75,9 +75,14 @@
       { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
       { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
     ],
+    local_openai_compat: [
+      { value: "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B", label: "DeepSeek-R1-Distill-Qwen-14B" },
+      { value: "Qwen/Qwen2.5-14B-Instruct", label: "Qwen2.5-14B-Instruct" },
+      { value: "Qwen/QwQ-32B", label: "QwQ-32B" },
+    ],
   };
 
-  const AGENT_SUPPORTED_PROVIDER_TARGETS = ["openai", "google"];
+  const AGENT_SUPPORTED_PROVIDER_TARGETS = ["openai", "google", "local_openai_compat"];
   const AGENT_V1_READ_ONLY_TOOL_NAMES = [
     "get_graph_context",
     "list_selected_datasets",

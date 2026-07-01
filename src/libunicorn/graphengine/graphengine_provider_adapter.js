@@ -7,7 +7,7 @@
     const getRuntimeConfig = typeof options.getRuntimeConfig === "function"
       ? options.getRuntimeConfig
       : () => ({
-        runtime_provider: options.runtimeProviderName === "openai" || options.runtimeProviderName === "google"
+        runtime_provider: options.runtimeProviderName === "openai" || options.runtimeProviderName === "google" || options.runtimeProviderName === "local_openai_compat"
           ? options.runtimeProviderName
           : "mock",
         transport_mode: "browser",
@@ -26,6 +26,7 @@
       mock: createMockProvider({ extractTaxidFromPrompt }),
       openai: createOpenAIProvider({ getRuntimeConfig }),
       google: createGoogleProvider({ getRuntimeConfig }),
+      local_openai_compat: createLocalOpenAICompatProvider({ getRuntimeConfig }),
     };
 
     function getRuntimeProviderName() {
@@ -141,6 +142,52 @@
       name: "google",
       label: "Google",
       mode: "interactions-json",
+      clientSide: false,
+      async runRequest(payload) {
+        const runtimeConfig = getRuntimeConfig();
+        const endpoint = resolveBackendProviderTurnEndpoint(runtimeConfig.backend_base_url);
+        let response;
+        try {
+          response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              provider_payload: payload,
+              runtime_config: runtimeConfig,
+            }),
+          });
+        } catch (error) {
+          throw new Error(`Backend provider-turn request failed before reaching the backend: ${error.message || error}`);
+        }
+        let responseJson = null;
+        try {
+          responseJson = await response.json();
+        } catch (error) {
+          throw new Error(`Backend provider-turn endpoint returned a non-JSON response (HTTP ${response.status}): ${error.message || error}`);
+        }
+        if (!response.ok) {
+          const detail = String(responseJson?.detail?.message || responseJson?.error?.message || `HTTP ${response.status}`);
+          throw new Error(`Backend provider-turn request failed: ${detail}`);
+        }
+        return normalizeInternalProviderResponse(responseJson);
+      },
+    };
+  }
+
+  function createLocalOpenAICompatProvider(options = {}) {
+    const getRuntimeConfig = typeof options.getRuntimeConfig === "function"
+      ? options.getRuntimeConfig
+      : () => ({
+        configured_model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        api_key: "",
+        base_url: "",
+      });
+    return {
+      name: "local_openai_compat",
+      label: "Local (OpenAI-compatible)",
+      mode: "chat-completions-json",
       clientSide: false,
       async runRequest(payload) {
         const runtimeConfig = getRuntimeConfig();

@@ -113,6 +113,24 @@
     state.agent.configuredModel = nextSelected;
   }
 
+  function getKnownAgentProviderTargets() {
+    const fromModels = Object.keys(AGENT_PROVIDER_MODELS || {}).filter(Boolean);
+    const fromCore = Array.isArray(AGENT_SUPPORTED_PROVIDER_TARGETS)
+      ? AGENT_SUPPORTED_PROVIDER_TARGETS.filter(Boolean)
+      : [];
+    const fromDom = els.agentProviderSelect
+      ? Array.from(els.agentProviderSelect.options || [])
+        .map((option) => String(option.value || "").trim())
+        .filter(Boolean)
+      : [];
+    return Array.from(new Set([
+      ...fromModels,
+      ...fromCore,
+      ...fromDom,
+      "local_openai_compat",
+    ]));
+  }
+
   function handleAgentProviderChange() {
     if (!els.agentProviderSelect) return;
     state.agent.configuredProvider = normalizeConfiguredAgentProvider(els.agentProviderSelect.value);
@@ -145,9 +163,14 @@
   }
 
   function normalizeConfiguredAgentProvider(provider) {
-    return AGENT_SUPPORTED_PROVIDER_TARGETS.includes(provider)
-      ? provider
-      : AGENT_SUPPORTED_PROVIDER_TARGETS[0];
+    const normalized = String(provider || "").trim();
+    if (normalized === "local") {
+      return "local_openai_compat";
+    }
+    const knownTargets = getKnownAgentProviderTargets();
+    return knownTargets.includes(normalized)
+      ? normalized
+      : knownTargets[0] || "openai";
   }
 
   function normalizeAgentBaseUrl(baseUrl) {
@@ -180,6 +203,10 @@
       && Boolean(String(state.agent.apiKey || "").trim());
   }
 
+  function shouldUseLocalOpenAICompatRuntime() {
+    return getConfiguredAgentProvider() === "local_openai_compat";
+  }
+
   function syncAgentRuntimeProvider() {
     if (shouldUseOpenAIRuntime()) {
       state.agent.runtimeProvider = "openai";
@@ -187,6 +214,10 @@
     }
     if (shouldUseGoogleRuntime()) {
       state.agent.runtimeProvider = "google";
+      return;
+    }
+    if (shouldUseLocalOpenAICompatRuntime()) {
+      state.agent.runtimeProvider = "local_openai_compat";
       return;
     }
     state.agent.runtimeProvider = "mock";
@@ -254,6 +285,10 @@
       runtimeHint = "Backend-side OpenAI transport is active through the graphengine server.";
     } else if (runtimeConfig.runtime_provider === "google") {
       runtimeHint = "Backend-side Google Gemini transport is active through the graphengine server.";
+    } else if (runtimeConfig.runtime_provider === "local_openai_compat") {
+      runtimeHint = "Backend-side local OpenAI-compatible transport is active through the graphengine server. API key is optional; base URL defaults to http://localhost:8542.";
+    } else if (configuredProvider === "local_openai_compat") {
+      runtimeHint = "Local OpenAI-compatible runtime is selected. Prompts will go through the graphengine backend to the configured base URL, or default to http://localhost:8542.";
     } else if (configuredProvider === "google") {
       runtimeHint = "Enter a Google API key to switch the runtime adapter to backend-side Gemini transport.";
     } else {
@@ -1133,9 +1168,13 @@
             ? "Backend-side OpenAI transport is active. Check backend reachability, API key, and provider response details in the client log."
             : state.agent.runtimeProvider === "google"
               ? "Backend-side Google Gemini transport is active. Check backend reachability, API key, model access, and provider response details in the client log."
-              : getConfiguredAgentProvider() === "google"
-                ? "Mock runtime is still active. Enter a Google API key to switch the runtime adapter to backend-side Gemini transport."
-                : "Mock runtime is still active. Enter an OpenAI API key to switch the runtime adapter to backend-side OpenAI transport.",
+              : state.agent.runtimeProvider === "local_openai_compat"
+                ? "Backend-side local OpenAI-compatible transport is active. Check backend reachability, the local base URL, and provider response details in the client log."
+                : getConfiguredAgentProvider() === "local_openai_compat"
+                  ? "Local OpenAI-compatible target is selected, but the runtime adapter did not switch out of mock mode. Refresh the page once, then check the provider-state line for runtime adapter and base URL."
+                : getConfiguredAgentProvider() === "google"
+                  ? "Mock runtime is still active. Enter a Google API key to switch the runtime adapter to backend-side Gemini transport."
+                  : "Mock runtime is still active. Enter an OpenAI API key to switch the runtime adapter to backend-side OpenAI transport.",
         });
         setStatus(`Agent provider reply failed: ${error.message || error}`);
       });
