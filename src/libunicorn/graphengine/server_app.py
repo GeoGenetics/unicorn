@@ -31,6 +31,9 @@ LOCAL_OPENAI_COMPAT_DEFAULT_ENDPOINT = "http://localhost:8542/v1/chat/completion
 AGENT_PROVIDER_LOG_PATH = Path(
     os.environ.get("UNICORN_GRAPHENGINE_AGENT_LOG", str(UPLOAD_DIR / "graphengine_agent_provider.jsonl"))
 ).resolve()
+AGENT_PROVIDER_RAW_LOG_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_AGENT_RAW_LOG_DIR", "logs/agent_provider")
+).resolve()
 METADATA_FILENAME = "metadata.txt"
 
 
@@ -62,6 +65,32 @@ def _append_agent_provider_log(event: str, payload: Dict[str, Any]) -> None:
     }
     with AGENT_PROVIDER_LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(line, ensure_ascii=True) + "\n")
+
+
+def _dump_agent_provider_raw_response(
+    provider_name: str,
+    response_body: str,
+    *,
+    provider_payload: Optional[Dict[str, Any]] = None,
+    runtime_config: Optional[Dict[str, Any]] = None,
+    endpoint: str = "",
+) -> Path:
+    AGENT_PROVIDER_RAW_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    outpath = AGENT_PROVIDER_RAW_LOG_DIR / f"{timestamp}.log"
+    redacted_runtime_config = _redact_provider_runtime_config(runtime_config or {})
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "provider_name": provider_name,
+        "endpoint": endpoint,
+        "runtime_config": redacted_runtime_config,
+        "provider_payload": provider_payload or {},
+        "raw_response": response_body,
+    }
+    with outpath.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    return outpath
 
 
 def _normalize_requested_files(files: Optional[List[str]]) -> List[str]:
@@ -1669,16 +1698,44 @@ def _call_local_openai_compat_provider_turn(provider_payload: Dict[str, Any], ru
         raise HTTPException(status_code=502, detail={"message": str(response_json["error"]["message"]), "code": "local_openai_compat_api_error"})
 
     output_text = _extract_local_openai_compat_output_text(response_json)
+    raw_log_path = _dump_agent_provider_raw_response(
+        "local_openai_compat",
+        output_text,
+        provider_payload=provider_payload,
+        runtime_config=runtime_config,
+        endpoint=endpoint,
+    )
     if not output_text:
-        raise HTTPException(status_code=502, detail={"message": "Local OpenAI-compatible endpoint returned no assistant JSON output.", "code": "local_openai_compat_empty_output"})
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Local OpenAI-compatible endpoint returned no assistant JSON output.",
+                "code": "local_openai_compat_empty_output",
+                "raw_response_log": str(raw_log_path),
+            },
+        )
     try:
         parsed = json.loads(_strip_json_code_fences(output_text))
     except json.JSONDecodeError as error:
-        raise HTTPException(status_code=502, detail={"message": f"Local OpenAI-compatible endpoint returned non-JSON output: {error}", "code": "local_openai_compat_invalid_json"})
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": f"Local OpenAI-compatible endpoint returned non-JSON output: {error}",
+                "code": "local_openai_compat_invalid_json",
+                "raw_response_log": str(raw_log_path),
+            },
+        )
     try:
         return _normalize_internal_provider_response(parsed)
     except ValueError as error:
-        raise HTTPException(status_code=502, detail={"message": str(error), "code": "local_openai_compat_invalid_provider_shape"})
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": str(error),
+                "code": "local_openai_compat_invalid_provider_shape",
+                "raw_response_log": str(raw_log_path),
+            },
+        )
 
 
 def _node_passes_filter(node: TreeNodeModel, tree: TreeModel, min_reads: int) -> bool:
