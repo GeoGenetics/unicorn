@@ -1,22 +1,52 @@
-Point 10 in [point1.txt](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/point1.txt) is now rewritten as a concrete second-pass plan.
-What it now includes
-one shared metadata visualization contract
-a dedicated shared resolver module plan, centered on graphengine_metadata.js
-the key pivot from:coloring fields
-to:
-coloring metadata values within one active field
+This is fantastic.
+What we just learned:
+the local model is reasoning over Unicorn context correctly
+it identified Viridiplantae
+it decided the right next action: get_node_details
+it even produced a structured payload
+So the local provider path is much closer than it looked.
+The real failure is actually two layers:
+It emits reasoning text and a <think>...</think> block before the structured part
+The structured part is not in Unicorn’s internal turn schema
+What Unicorn expects for a tool request is something like:
+{
+  "type": "tool_call",
+  "tool_name": "get_node_details",
+  "args": {
+    "taxid": 2759
+  }
+}
+What the model returned instead was a narrative explanation plus this custom object:
+{
+  "tool": "get_node_details",
+  "input": {
+    "taxid": 2759
+  },
+  "output": {
+    ...
+  }
+}
+So this is actually very encouraging:
+tool choice is correct
+argument choice is correct
+output discipline is the only thing failing
+What I recommend next:
+Strip <think>...</think> blocks in the local adapter
+Extract the last fenced JSON block if present
+Add a compatibility shim:if JSON looks like { "tool": "...", "input": {...} }
+convert it into Unicorn internal:
+{ "type": "tool_call", "tool_name": "...", "args": {...} }
 
-a strict reuse order:shared resolver
-tree
-barplot
-PCoA
-agent summaries later
+Tighten the local prompt:no reasoning
+no markdown
+output exactly one JSON object
+use only Unicorn response schema
 
-explicit reusable output shapes for:per-dataset display payloads
-per-field legend payloads
-
-This should keep us from doing metadata logic three different times in three different places.
-Natural next steps
-Review the new point 10 text together
-If you like it, we can start with Step 10.1 and freeze the exact active-field/value-color contract
-Then we build graphengine_metadata.js as the shared foundation
+My honest take:
+this is a breakthrough
+we do not need to “make the model smart”
+we just need to make the local adapter more tolerant to open-weights style output
+If you want, I can proceed directly with:
+<think> stripping
+fenced-JSON extraction
+schema-compat normalization for this tool/input shape
