@@ -1187,6 +1187,27 @@
     const toolName = String(toolResult.tool_name || "");
     const result = toolResult.result && typeof toolResult.result === "object" ? toolResult.result : {};
 
+    if (toolName === "get_graph_context") {
+      const datasets = result.datasets && typeof result.datasets === "object" ? result.datasets : {};
+      const tree = result.tree && typeof result.tree === "object" ? result.tree : {};
+      const filters = result.filters && typeof result.filters === "object" ? result.filters : {};
+      const selectedCount = Array.isArray(tree.selected_taxids) ? tree.selected_taxids.length : 0;
+      const root = tree.visible_root && typeof tree.visible_root === "object" ? tree.visible_root : null;
+      const answerParts = [
+        `${Number(datasets.count || 0).toLocaleString()} dataset${Number(datasets.count || 0) === 1 ? "" : "s"} ${Number(datasets.count || 0) === 1 ? "is" : "are"} active`,
+        `${selectedCount.toLocaleString()} node${selectedCount === 1 ? "" : "s"} ${selectedCount === 1 ? "is" : "are"} selected`,
+        `min_reads is ${Number(filters.min_reads || 0).toLocaleString()}`,
+      ];
+      if (root) {
+        answerParts.push(`the visible root is ${root.name} (${root.taxid})`);
+      }
+      return {
+        answer: `Current Unicorn tree state summary: ${answerParts.join(", ")}.`,
+        note: "Repeated provider tool request was stopped after Unicorn had already returned the current graph context.",
+        toolsUsed: ["get_graph_context"],
+      };
+    }
+
     if (toolName === "get_node_details") {
       const nodes = Array.isArray(result.nodes) ? result.nodes : [];
       if (nodes.length > 1) {

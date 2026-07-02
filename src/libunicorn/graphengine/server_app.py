@@ -1284,6 +1284,9 @@ def _build_provider_contract_instruction_text(provider_payload: Dict[str, Any], 
         "- Do not emit prose, markdown, code fences, or chain-of-thought outside that JSON object.",
         "- For a tool request, return only a Unicorn internal tool_call object.",
         "- For a direct answer, return only a Unicorn internal final_answer object.",
+        "- Use find_visible_nodes to ground a node name to one or more visible taxids.",
+        "- If the user asked for details about a named node and find_visible_nodes returns one grounded match, call get_node_details next with that grounded taxid.",
+        "- Do not stop at find_visible_nodes when the user explicitly asked for node details, reads, counts, or rank information.",
         "",
         "ADVERTISED_TOOL_NAMES",
         json.dumps(tool_names, ensure_ascii=True),
@@ -1316,10 +1319,15 @@ def _build_provider_contract_instruction_text(provider_payload: Dict[str, Any], 
         json.dumps(
             {
                 "user_prompt": "Tell me about node Viridiplantae.",
-                "response": {
+                "step_1_response": {
                     "type": "tool_call",
                     "tool_name": "find_visible_nodes",
                     "args": {"query": "Viridiplantae", "limit": 5},
+                },
+                "step_2_if_tool_result_has_one_match": {
+                    "type": "tool_call",
+                    "tool_name": "get_node_details",
+                    "args": {"taxid": 33090, "taxids": None, "query": None, "scope": None, "sort": None, "limit": None},
                 },
             },
             ensure_ascii=True,
