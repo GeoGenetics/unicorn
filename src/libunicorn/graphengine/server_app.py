@@ -1254,6 +1254,73 @@ def _build_unicorn_internal_response_schema() -> Dict[str, Any]:
     }
 
 
+def _build_provider_contract_instruction_text(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> str:
+    tool_names = [
+        str(tool.get("name") or "").strip()
+        for tool in provider_payload.get("tools", [])
+        if isinstance(tool, dict) and str(tool.get("name") or "").strip()
+    ]
+    runtime_provider = str(runtime_config.get("runtime_provider") or runtime_config.get("configured_provider") or "provider")
+    contract_lines = [
+        "UNICORN PROVIDER CONTRACT",
+        f"- runtime provider: {runtime_provider}",
+        "- graph_context is authoritative. Treat it as the source of truth for current session state.",
+        "- If the answer is already present in graph_context or tool_results, answer directly.",
+        "- Use a Unicorn tool only when the answer is not already present in graph_context or tool_results.",
+        "- Never invent a tool name.",
+        "- You may only call a tool whose name exactly appears in the advertised tool list.",
+        "- If no listed tool applies, return a final_answer or error object instead of a made-up tool.",
+        "- Return exactly one JSON object and nothing else.",
+        "- Do not emit prose, markdown, code fences, or chain-of-thought outside that JSON object.",
+        "- For a tool request, return only a Unicorn internal tool_call object.",
+        "- For a direct answer, return only a Unicorn internal final_answer object.",
+        "",
+        "ADVERTISED_TOOL_NAMES",
+        json.dumps(tool_names, ensure_ascii=True),
+        "",
+        "POSITIVE_EXAMPLES",
+        json.dumps(
+            {
+                "user_prompt": "What min_reads threshold am I using?",
+                "graph_context_fact": {"filters": {"min_reads": 1000}},
+                "response": {
+                    "type": "final_answer",
+                    "content": "The current min_reads threshold is 1000.",
+                    "tool_summary": [],
+                    "notes": "",
+                },
+            },
+            ensure_ascii=True,
+        ),
+        json.dumps(
+            {
+                "user_prompt": "Tell me about taxid 2759.",
+                "response": {
+                    "type": "tool_call",
+                    "tool_name": "get_node_details",
+                    "args": {"taxid": 2759},
+                },
+            },
+            ensure_ascii=True,
+        ),
+        json.dumps(
+            {
+                "user_prompt": "Use a threshold helper tool.",
+                "response": {
+                    "type": "error",
+                    "code": "tool_not_available",
+                    "message": "No advertised Unicorn tool matches that request.",
+                },
+            },
+            ensure_ascii=True,
+        ),
+        "",
+        "NEVER_RETURN_TOP_LEVEL_KEYS",
+        json.dumps(["tool", "input", "output"], ensure_ascii=True),
+    ]
+    return "\n".join(contract_lines)
+
+
 def _build_openai_developer_context_message(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     developer_envelope = {
         "graph_context": provider_payload.get("graph_context") if isinstance(provider_payload.get("graph_context"), dict) else None,
@@ -1275,8 +1342,7 @@ def _build_openai_developer_context_message(provider_payload: Dict[str, Any], ru
         "developer",
         "\n\n".join([
             "Unicorn provider turn context follows as JSON.",
-            "Use only the advertised Unicorn tools.",
-            "Return exactly one JSON object that matches the requested schema.",
+            _build_provider_contract_instruction_text(provider_payload, runtime_config),
             json.dumps(developer_envelope, indent=2),
         ]),
     )
@@ -1341,9 +1407,7 @@ def _build_google_interactions_input(provider_payload: Dict[str, Any], runtime_c
 
     sections = [
         "Unicorn provider turn context follows.",
-        "Return exactly one JSON object matching the requested response schema.",
-        "Use only the advertised Unicorn tools.",
-        "Do not use native provider tool calling.",
+        _build_provider_contract_instruction_text(provider_payload, runtime_config),
         "",
         "GRAPH_CONTEXT_JSON",
         json.dumps(graph_context, indent=2),
@@ -1431,44 +1495,7 @@ def _build_local_openai_compat_chat_request(provider_payload: Dict[str, Any], ru
             })
     messages.append({
         "role": "system",
-        "content": "\n".join([
-            "Return exactly one JSON object and nothing else.",
-            "Do not include chain-of-thought, <think> blocks, markdown, code fences, prefaces, or explanations.",
-            "If you need a Unicorn tool, return only a Unicorn internal tool_call object.",
-            "If you can answer from the current Unicorn context or existing tool results, return only a Unicorn internal final_answer object.",
-            "Do not invent tool outputs. Ask for a tool call instead.",
-            "",
-            "Allowed response shapes:",
-            json.dumps(
-                {
-                    "type": "tool_call",
-                    "tool_name": "get_node_details",
-                    "args": {
-                        "taxid": 2759,
-                    },
-                },
-                ensure_ascii=True,
-            ),
-            json.dumps(
-                {
-                    "type": "final_answer",
-                    "content": "Answer grounded in Unicorn context or tool results.",
-                    "tool_summary": ["get_node_details"],
-                    "notes": "",
-                },
-                ensure_ascii=True,
-            ),
-            json.dumps(
-                {
-                    "type": "error",
-                    "code": "cannot_answer_from_context",
-                    "message": "Short machine-readable error message.",
-                },
-                ensure_ascii=True,
-            ),
-            "",
-            "Never return keys named 'tool', 'input', or 'output' at the top level.",
-        ]),
+        "content": _build_provider_contract_instruction_text(provider_payload, runtime_config),
     })
     for message in provider_payload.get("conversation", []):
         if not isinstance(message, dict):
