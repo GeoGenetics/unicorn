@@ -5,13 +5,14 @@
   const state = namespace.state;
   const els = namespace.els;
   const core = namespace.core;
+  const metadataResolver = namespace.metadata;
   const treeModel = namespace.treeModel;
   const backend = namespace.backend;
   const selection = namespace.selection;
   const ui = namespace.ui;
 
-  if (!state || !els || !core || !treeModel || !backend || !selection || !ui) {
-    throw new Error("Unicorn graphengine agent expected state, DOM, core, tree model, backend, selection, and UI modules to load first.");
+  if (!state || !els || !core || !metadataResolver || !treeModel || !backend || !selection || !ui) {
+    throw new Error("Unicorn graphengine agent expected state, DOM, core, metadata, tree model, backend, selection, and UI modules to load first.");
   }
 
   const {
@@ -310,43 +311,50 @@
       : backendConnected
         ? getSelectedRemoteDatasets()
         : [];
-    const selectedDatasetSummaries = backendConnected && typeof globalObject.getSelectedRemoteDatasetSummaries === "function"
-      ? globalObject.getSelectedRemoteDatasetSummaries()
-      : [];
-    const expandedTaxids = activeRequestContext?.expanded_taxids?.length
-      ? activeRequestContext.expanded_taxids.slice()
-      : [];
     const selectedTaxids = backendTreeReady
       ? getSelectedNodes().map((node) => Number(node.taxid))
       : [];
     const focusNode = backendTreeReady ? getFocusedNode() : null;
+    const activeMetadataField = typeof metadataResolver.getActiveMetadataVisualizationField === "function"
+      ? metadataResolver.getActiveMetadataVisualizationField()
+      : null;
     const visibleRoot = backendTreeReady
       ? {
           taxid: Number(state.tree.taxid),
           name: String(state.tree.name || ""),
           rank: String(state.tree.rank || ""),
-          direct: Number(state.tree.direct || 0),
-          total: Number(state.tree.total || 0),
+          subtree: Number(state.tree.total || 0),
           child_count: Array.isArray(state.tree.children) ? state.tree.children.length : 0,
+        }
+      : null;
+    const focusedNode = focusNode
+      ? {
+          taxid: Number(focusNode.taxid),
+          name: String(focusNode.name || ""),
+          rank: String(focusNode.rank || ""),
+          direct: Number(focusNode.direct || 0),
+          subtree: Number(focusNode.total || 0),
+          child_count: Number(focusNode.childCount || 0),
         }
       : null;
     const currentReport = backendTreeReady && state.remote.currentReport
       ? summarizeCurrentAgentReport(state.remote.currentReport)
       : null;
+    const selectedDatasetNames = selectedDatasets.length > 0 && selectedDatasets.length <= 3
+      ? selectedDatasets.slice()
+      : [];
 
     return {
       captured_at: new Date().toISOString(),
-      mode: "backend",
-      datasets: {
-        selected: selectedDatasets,
-        selected_summaries: selectedDatasetSummaries,
-        count: selectedDatasets.length,
-        total_reads: Number(backendConnected ? state.remote.totalReads : 0),
-        direct_taxa: Number(backendConnected ? state.remote.directTaxa : 0),
+      context_version: "agentic-v2-tiny",
+      session: {
+        backend_connected: backendConnected,
+        runtime_provider: String(state.agent.runtimeProvider || "mock"),
+        transport_mode: String(state.agent.transportMode || "backend"),
       },
-      taxonomy: {
-        nodes_file: getActiveNodesFilename(),
-        names_file: getActiveNamesFilename(),
+      datasets: {
+        count: selectedDatasets.length,
+        names: selectedDatasetNames,
       },
       filters: {
         min_reads: activeRequestContext && Number.isFinite(activeRequestContext.min_reads)
@@ -354,26 +362,47 @@
           : getMinReadsValue(),
         count_mode: String(els.countMode?.value || "total"),
         scale_mode: String(els.scaleMode?.value || "sqrt"),
-        search: String(els.searchBox?.value || "").trim(),
       },
       tree: {
-        loaded: backendTreeReady,
-        server_tree_active: backendTreeReady,
         visible_root: visibleRoot,
         visible_node_count: backendTreeReady ? state.flat.length : 0,
-        focused_taxid: focusNode ? Number(focusNode.taxid) : null,
-        focused_name: focusNode ? String(focusNode.name || "") : null,
-        selected_taxids: selectedTaxids,
-        expanded_taxids: expandedTaxids,
-        collapsed_taxids: [],
+        selected_node_count: selectedTaxids.length,
+        focused_node: focusedNode,
       },
-      report: currentReport,
-      backend: {
-        connected: backendConnected,
-        backend_nodes_file: state.remote.backendNodesFile || null,
-        backend_names_file: state.remote.backendNamesFile || null,
-        request_context: activeRequestContext,
+      metadata: activeMetadataField ? {
+        active_field: String(activeMetadataField),
+      } : null,
+      report_state: currentReport ? {
+        type: String(currentReport.type || "unknown"),
+        selected_node_count: Number(currentReport.selected_node_count || currentReport.rank_count || 0),
+      } : null,
+    };
+  }
+
+  function buildSelectedDatasetsToolPayload(graphContext) {
+    const selectedDatasetNames = getSelectedRemoteDatasets();
+    const selectedDatasetSummaries = typeof globalObject.getSelectedRemoteDatasetSummaries === "function"
+      ? globalObject.getSelectedRemoteDatasetSummaries()
+      : [];
+    return {
+      ok: true,
+      mode: "backend",
+      tool: "list_selected_datasets",
+      request: {},
+      datasets: {
+        selected: selectedDatasetNames,
+        selected_summaries: selectedDatasetSummaries.map((dataset) => ({
+          filename: String(dataset?.filename || ""),
+          color: String(dataset?.color || ""),
+          metadata: dataset?.metadata && typeof dataset.metadata === "object"
+            ? dataset.metadata
+            : null,
+        })),
+        count: selectedDatasetNames.length,
+        total_reads: Number(state.remote.totalReads || 0),
+        direct_taxa: Number(state.remote.directTaxa || 0),
       },
+      context: normalizeGraphContextForProviderContext(graphContext),
     };
   }
 
@@ -409,46 +438,17 @@
       return null;
     }
     return {
-      dataset_names: Array.isArray(graphContext.datasets?.selected)
-        ? graphContext.datasets.selected.map((name) => String(name))
-        : [],
-      nodes_file: graphContext.taxonomy?.nodes_file ? String(graphContext.taxonomy.nodes_file) : null,
-      names_file: graphContext.taxonomy?.names_file ? String(graphContext.taxonomy.names_file) : null,
+      dataset_count: Number(graphContext.datasets?.count || 0),
       min_reads: Number(graphContext.filters?.min_reads || 0),
-      expanded_taxids: Array.isArray(graphContext.tree?.expanded_taxids)
-        ? graphContext.tree.expanded_taxids.map((value) => Number(value))
-        : [],
+      visible_node_count: Number(graphContext.tree?.visible_node_count || 0),
+      selected_node_count: Number(graphContext.tree?.selected_node_count || 0),
+      active_metadata_field: graphContext.metadata?.active_field ? String(graphContext.metadata.active_field) : null,
+      report_type: graphContext.report_state?.type ? String(graphContext.report_state.type) : null,
     };
   }
 
   function normalizeSelectedDatasetsForProvider(graphContext) {
-    const datasets = graphContext?.datasets && typeof graphContext.datasets === "object"
-      ? graphContext.datasets
-      : {};
-    return {
-      ok: true,
-      mode: "backend",
-      tool: "list_selected_datasets",
-      request: {},
-      datasets: {
-        selected: Array.isArray(datasets.selected)
-          ? datasets.selected.map((name) => String(name))
-          : [],
-        selected_summaries: Array.isArray(datasets.selected_summaries)
-          ? datasets.selected_summaries.map((dataset) => ({
-            filename: String(dataset?.filename || ""),
-            color: String(dataset?.color || ""),
-            metadata: dataset?.metadata && typeof dataset.metadata === "object"
-              ? dataset.metadata
-              : null,
-          }))
-          : [],
-        count: Number(datasets.count || 0),
-        total_reads: Number(datasets.total_reads || 0),
-        direct_taxa: Number(datasets.direct_taxa || 0),
-      },
-      context: normalizeGraphContextForProviderContext(graphContext),
-    };
+    return buildSelectedDatasetsToolPayload(graphContext);
   }
 
   function normalizeSelectedNodesForProvider(selectedNodes, graphContext) {
@@ -699,7 +699,7 @@
       get_graph_context: async () => buildAgentContext(),
       list_selected_datasets: async () => {
         requireAgentBackendConnection();
-        return normalizeSelectedDatasetsForProvider(buildAgentContext());
+        return buildSelectedDatasetsToolPayload(buildAgentContext());
       },
       get_selected_nodes: async () => {
         requireAgentBackendTree();
@@ -1035,7 +1035,7 @@
     const toolsUsed = ["get_graph_context"];
     const lower = String(prompt || "").trim().toLowerCase();
 
-    if (!context.backend.connected) {
+    if (!context.session?.backend_connected) {
       return {
         answer: "No Unicorn backend connection is active yet. Start the graphengine backend, connect to it, render a tree, then ask me about the current graph state.",
         toolsUsed,
@@ -1043,7 +1043,7 @@
       };
     }
 
-    if (!context.tree.loaded) {
+    if (!context.tree?.visible_root) {
       return {
         answer: "No active backend-backed Unicorn tree is loaded yet. Render a tree first, then ask me about the current graph state.",
         toolsUsed,
@@ -1121,7 +1121,7 @@
     }
 
     return {
-      answer: `The current Unicorn session is using ${context.mode} mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
+      answer: `The current Unicorn session is using backend mode with ${Number(context.datasets.count || 0).toLocaleString()} active dataset${Number(context.datasets.count || 0) === 1 ? "" : "s"} and ${Number(context.tree.visible_node_count || 0).toLocaleString()} visible nodes.`,
       toolsUsed,
       note: "Mock mode only. This response is grounded in the current backend-backed graph context.",
     };
@@ -1191,7 +1191,7 @@
       const datasets = result.datasets && typeof result.datasets === "object" ? result.datasets : {};
       const tree = result.tree && typeof result.tree === "object" ? result.tree : {};
       const filters = result.filters && typeof result.filters === "object" ? result.filters : {};
-      const selectedCount = Array.isArray(tree.selected_taxids) ? tree.selected_taxids.length : 0;
+      const selectedCount = Number(tree.selected_node_count || 0);
       const root = tree.visible_root && typeof tree.visible_root === "object" ? tree.visible_root : null;
       const answerParts = [
         `${Number(datasets.count || 0).toLocaleString()} dataset${Number(datasets.count || 0) === 1 ? "" : "s"} ${Number(datasets.count || 0) === 1 ? "is" : "are"} active`,
