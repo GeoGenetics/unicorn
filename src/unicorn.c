@@ -714,10 +714,9 @@ static int unicorn_refstats(int argc, char **argv)
 
 static int unicorn_bamstats(int argc, char **argv)
 {
-  int c, ret = -1;
+  int ret = -1;
   struct timespec start, stop;
   uint64_t ns;
-  ketopt_t o = KETOPT_INIT;
   unicorn_opt_t opts = {0};
   opts.threads = 4;
   unicorn_t *u = NULL;
@@ -729,14 +728,17 @@ static int unicorn_bamstats(int argc, char **argv)
     _argv[i] = strdup(argv[i]);
   //Read command line options
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
-  if (!opts.ifile && !opts.filel) goto exit;
+  if (!opts.ifile && !opts.filel) {
+		ret = 2;
+		goto exit;
+	}
   //Set default statistics if not provided
   if (!opts.outstat) ofp = stdout;
   else {
     ofp = fopen(opts.outstat, "w");
-    if (!ofp) goto exit;
+    ret = 3;
+		if (!ofp) goto exit;
   }
-  fprintf(ofp, "#name\ttaln\ttread\tmreadl\tvreadl\tmdreadl\tmoreadl\tmani\tmnm\ttbases\tcovbases\tcovbreath\n");
   ret = -2;
   //Add files to queue
   strq_t fileq = {0};
@@ -797,15 +799,23 @@ static int unicorn_bamstats(int argc, char **argv)
     unicorn_destroy(u);
     u = NULL;
   }
-  for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
+
+	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     free(_argv[i]);
   kv_destroy(fileq);
   ret = 0;
   exit:
-    if (ret < 0) {
-      fprintf(stderr, "[unicorn::%s] Error: %d\n",__func__, ret);
-      bamstats_usage(stderr);
-    }
+    fprintf(stderr, "RET: %d\n", ret);
+	  if (ret) {
+		  if (2 <= ret) {
+				bamstats_usage(stderr);
+			  fprintf(stderr, "[unicorn::%s] Error: %s\n", __func__, ERRORS[ret]);
+			}
+			else if (1 == ret) {
+				bamstats_usage(stderr);
+				ret = 0;
+			}
+		}
     if (opts.ifile)   free(opts.ifile);
     if (opts.statstr) free(opts.statstr);
     if (opts.outstat) free(opts.outstat);
@@ -1232,8 +1242,8 @@ static int unicorn_alntag(int argc, char **argv)
 			else if (1 == ret) {
 				alntag_usage(stderr);
 				ret = 0;
-			 }
-		else fprintf(stderr, "[unicorn::%s] Error: %s %d\n",__func__, ERRORS[ret], ret);
+			}
+		  else fprintf(stderr, "[unicorn::%s] Error: %s %d\n",__func__, ERRORS[ret], ret);
 		}
     if (u) unicorn_destroy(u);
     unicorn_freeopts(opts);

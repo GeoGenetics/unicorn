@@ -10,7 +10,7 @@
 KHASHL_MAP_INIT(static,
 								covmap_t,
 								covmap,
-								int32_t,   
+								int32_t,
 								ueventq_t,
 								kh_hash_uint32,
 								kh_eq_generic)
@@ -57,11 +57,11 @@ static void worker_for(void *data, long i, int tid)
 	}
 }
 
-int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
+static int _bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 {
 	if (!u || !stats) return -1;
   bam1_t *b = bam_init1();
-	covmap_t *covmap = covmap_init(); 
+	covmap_t *covmap = covmap_init();
 	uint64_t nalns = 0, nreads = 0;
 	khint_t k;
 	u64set_t *readset = u64set_init();
@@ -116,7 +116,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 		_ktpooldata_t d = {0};
 		d.covmap   = covmap;
 		d.hdr      = u->hdr;
-		d.covbases = calloc(kh_end(covmap), sizeof(uint64_t));		
+		d.covbases = calloc(kh_end(covmap), sizeof(uint64_t));
 		void *forpool = kt_forpool_init(8);
 		kt_forpool(forpool, worker_for, &d, kh_end(covmap));
 		kt_forpool_destroy(forpool);
@@ -138,11 +138,59 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	stats->_meannm	= meannm;
 	stats->_tlen = tlen;
 	stats->_clen = clen;
-	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
+	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));
 	bam_destroy1(b);
 	u64set_destroy(readset);
 	stats->fc = 1;
 	return 0;
+}
+
+static int _bamstat_qgroupedcompute(unicorn_t *u, unicorn_stat_t *stats)
+{
+	int ret = 1;
+	(void)stats;
+  char *qname = NULL;
+	bam1_t *b = bam_init1();
+	if ( sam_read1(u->_FP, u->hdr, b) < 0 ) goto exit;
+
+	qname = strdup(bam_get_qname(b));
+  uint64_t nalns = 1, nreads = 1;
+	float meanalnsread = 0.0f, readalns = 1, delta;
+	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
+		if (_unmapped(b)) continue;
+		nalns++;
+		if (strcmp(qname, bam_get_qname(b)) != 0) {
+			delta = readalns-meanalnsread;
+	    meanalnsread += delta/(float)nreads;
+      //meanalnsread += delta * (readalns - meanalnsread);
+			fprintf(stderr, "read with %f alignments running mean: %f\n", readalns, meanalnsread);
+			nreads++;
+			readalns = 0;
+			free(qname);
+			qname = strdup(bam_get_qname(b));
+		}
+		readalns++;
+	}
+  if (readalns > 0) {
+    delta = readalns - meanalnsread;
+    meanalnsread += delta / (float)nreads;
+  }
+	fprintf(stderr, "nalns: %lu, nreads: %lu, meanalnsread: %f\n", nalns, nreads, meanalnsread);
+	stats->_nalns  = nalns;
+	stats->_nreads = nreads;
+	ret = 0;
+	exit:
+	  bam_destroy1(b);
+	  free(qname);
+	  return ret;
+}
+
+
+int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
+{
+	if ( unicorn_isqgrouped(u) )
+	  return _bamstat_qgroupedcompute(u, stats);
+	return _bamstat_compute(u, stats);
 }
 
 /**
@@ -175,7 +223,7 @@ void unicorn_bamstat_print(const unicorn_t *u,
 		if (!stats->fc) return;
     //fprintf(fp, STATSTR);
     //float breath = v.REFCOVB/(double)v.REFLEN;
-    //float expbreath =  1.0f - expf(-breath); 
+    //float expbreath =  1.0f - expf(-breath);
     const char *basename = get_basename(u->ifile);
     fprintf(fp, "%s\t%"PRIu64"\t%"PRIu64"\t%f\t%f\t%u\t%u\t%f\t%f\t%"PRIu64"\t%"PRIu64"\t%f\n",
                 basename,
