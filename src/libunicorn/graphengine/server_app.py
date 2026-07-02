@@ -1183,11 +1183,15 @@ def _build_openai_internal_response_format() -> Dict[str, Any]:
                     "type": ["object", "null"],
                     "properties": {
                         "taxid": {"type": ["integer", "null"]},
+                        "taxids": {
+                            "type": ["array", "null"],
+                            "items": {"type": "integer"},
+                        },
                         "scope": {"type": ["string", "null"], "enum": ["root", "node", None]},
                         "sort": {"type": ["string", "null"], "enum": ["direct", "subtree", None]},
                         "limit": {"type": ["integer", "null"]},
                     },
-                    "required": ["taxid", "scope", "sort", "limit"],
+                    "required": ["taxid", "taxids", "scope", "sort", "limit"],
                     "additionalProperties": False,
                 },
                 "tool_summary": {
@@ -1228,11 +1232,15 @@ def _build_unicorn_internal_response_schema() -> Dict[str, Any]:
                 "type": ["object", "null"],
                 "properties": {
                     "taxid": {"type": ["integer", "null"]},
+                    "taxids": {
+                        "type": ["array", "null"],
+                        "items": {"type": "integer"},
+                    },
                     "scope": {"type": ["string", "null"], "enum": ["root", "node", None]},
                     "sort": {"type": ["string", "null"], "enum": ["direct", "subtree", None]},
                     "limit": {"type": ["integer", "null"]},
                 },
-                "required": ["taxid", "scope", "sort", "limit"],
+                "required": ["taxid", "taxids", "scope", "sort", "limit"],
                 "additionalProperties": False,
             },
             "tool_summary": {
@@ -1299,6 +1307,18 @@ def _build_provider_contract_instruction_text(provider_payload: Dict[str, Any], 
                     "type": "tool_call",
                     "tool_name": "get_node_details",
                     "args": {"taxid": 2759},
+                },
+            },
+            ensure_ascii=True,
+        ),
+        json.dumps(
+            {
+                "user_prompt": "Tell me about the selected nodes.",
+                "known_selected_taxids": [33090, 33154],
+                "response": {
+                    "type": "tool_call",
+                    "tool_name": "get_node_details",
+                    "args": {"taxid": None, "taxids": [33090, 33154]},
                 },
             },
             ensure_ascii=True,

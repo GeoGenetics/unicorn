@@ -473,12 +473,44 @@
 
   function normalizeNodeDetailsForProvider(payload, request = {}) {
     const node = payload?.node && typeof payload.node === "object" ? payload.node : {};
+    const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
+    const normalizedTaxids = Array.isArray(request.taxids)
+      ? request.taxids.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+      : [];
+    const requestTaxid = normalizedTaxids.length
+      ? null
+      : (request.taxid == null ? null : Number(request.taxid));
+    const normalizedNodes = nodes.map((entry) => ({
+      taxid: Number(entry?.taxid || 0),
+      name: String(entry?.name || ""),
+      rank: String(entry?.rank || ""),
+      parent: entry?.parent == null ? null : Number(entry.parent),
+      depth: Number(entry?.depth || 0),
+      direct: Number(entry?.direct || 0),
+      subtree: Number(entry?.subtree || 0),
+      child_count: Number(entry?.child_count || 0),
+      lineage: Array.isArray(entry?.lineage)
+        ? entry.lineage.map((lineageEntry) => ({
+          taxid: Number(lineageEntry?.taxid || 0),
+          name: String(lineageEntry?.name || ""),
+          rank: String(lineageEntry?.rank || ""),
+        }))
+        : [],
+      datasets: Array.isArray(entry?.datasets)
+        ? entry.datasets.map((datasetEntry) => ({
+          dataset: String(datasetEntry?.dataset || ""),
+          direct: Number(datasetEntry?.direct || 0),
+          subtree: Number(datasetEntry?.subtree || 0),
+        }))
+        : [],
+    }));
     return {
       ok: Boolean(payload?.ok),
       mode: "backend",
       tool: "get_node_details",
       request: {
-        taxid: Number(request.taxid),
+        taxid: requestTaxid,
+        taxids: normalizedTaxids,
       },
       node: {
         taxid: Number(node.taxid || 0),
@@ -504,6 +536,10 @@
           }))
           : [],
       },
+      count: Number(
+        payload?.count ?? (normalizedNodes.length || (payload?.node ? 1 : 0))
+      ),
+      nodes: normalizedNodes,
       context: normalizeProviderRequestContext(payload?.request_context),
     };
   }
@@ -580,6 +616,23 @@
     return Number.isFinite(taxid) ? taxid : null;
   }
 
+  function normalizeToolTaxids(value) {
+    const rawValues = Array.isArray(value)
+      ? value
+      : value == null
+        ? []
+        : [value];
+    const seen = new Set();
+    const taxids = [];
+    rawValues.forEach((entry) => {
+      const normalized = normalizeToolTaxid(entry);
+      if (normalized == null || seen.has(normalized)) return;
+      seen.add(normalized);
+      taxids.push(normalized);
+    });
+    return taxids;
+  }
+
   function normalizeToolLimit(value, fallback) {
     const limit = Number(value);
     if (!Number.isFinite(limit) || limit <= 0) return fallback;
@@ -602,12 +655,26 @@
       },
       get_node_details: async (args = {}) => {
         requireAgentBackendTree();
-        const taxid = normalizeToolTaxid(args.taxid);
-        if (taxid == null) {
-          throw new Error("get_node_details requires a numeric taxid.");
+        const taxidsFromTaxid = Array.isArray(args.taxid) ? normalizeToolTaxids(args.taxid) : [];
+        const taxids = taxidsFromTaxid.length
+          ? taxidsFromTaxid
+          : normalizeToolTaxids(args.taxids);
+        const taxid = taxids.length ? null : normalizeToolTaxid(args.taxid);
+        if (taxid == null && !taxids.length) {
+          throw new Error("get_node_details requires a numeric taxid or a non-empty taxids array.");
         }
-        const payload = await fetchRemoteNodeTooltip(taxid);
-        return normalizeNodeDetailsForProvider(payload, { taxid });
+        if (taxids.length > 1) {
+          const payloads = await Promise.all(taxids.map((value) => fetchRemoteNodeTooltip(value)));
+          return normalizeNodeDetailsForProvider({
+            ok: payloads.every((payload) => Boolean(payload?.ok)),
+            count: payloads.length,
+            nodes: payloads.map((payload) => payload?.node).filter((payloadNode) => payloadNode && typeof payloadNode === "object"),
+            request_context: payloads[0]?.request_context || null,
+          }, { taxids });
+        }
+        const resolvedTaxid = taxids.length ? taxids[0] : taxid;
+        const payload = await fetchRemoteNodeTooltip(resolvedTaxid);
+        return normalizeNodeDetailsForProvider(payload, { taxid: resolvedTaxid });
       },
       get_table_view: async (args = {}) => {
         requireAgentBackendTree();
@@ -719,7 +786,7 @@
       get_graph_context: "Returns the current Unicorn graph context snapshot.",
       list_selected_datasets: "Returns selected datasets and aggregate totals.",
       get_selected_nodes: "Returns the nodes currently selected in the graph.",
-      get_node_details: "Returns detailed information for one taxon in the current graph context.",
+      get_node_details: "Returns detailed information for one taxon or several taxa in the current graph context.",
       get_table_view: "Returns ranked rows for the current root or one node scope.",
       select_taxon: "Selects one taxon in the active Unicorn graph.",
       focus_taxon: "Focuses the graph on one taxon and centers the chart.",
@@ -1055,6 +1122,17 @@
     const result = toolResult.result && typeof toolResult.result === "object" ? toolResult.result : {};
 
     if (toolName === "get_node_details") {
+      const nodes = Array.isArray(result.nodes) ? result.nodes : [];
+      if (nodes.length > 1) {
+        const summary = nodes
+          .map((entry) => `${entry.name} (${entry.taxid})`)
+          .join(", ");
+        return {
+          answer: `${nodes.length} nodes were returned: ${summary}.`,
+          note: "Repeated provider tool request was stopped after Unicorn had already returned multi-node detail payloads.",
+          toolsUsed: ["get_node_details"],
+        };
+      }
       const node = result.node && typeof result.node === "object" ? result.node : {};
       const taxid = Number(node.taxid || toolResult.args?.taxid || 0);
       return {
