@@ -4,6 +4,7 @@ import csv
 import logging
 import os
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1528,6 +1529,60 @@ def _strip_json_code_fences(text: str) -> str:
     return stripped
 
 
+def _strip_think_blocks(text: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", str(text or ""), flags=re.DOTALL | re.IGNORECASE).strip()
+
+
+def _extract_last_fenced_json_block(text: str) -> str:
+    matches = re.findall(r"```(?:json)?\s*(.*?)```", str(text or ""), flags=re.DOTALL | re.IGNORECASE)
+    if not matches:
+        return ""
+    return str(matches[-1]).strip()
+
+
+def _extract_first_top_level_json_object(text: str) -> str:
+    source = str(text or "")
+    start = source.find("{")
+    if start < 0:
+        return ""
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(source)):
+        char = source[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == "\"":
+                in_string = False
+            continue
+        if char == "\"":
+            in_string = True
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:index + 1].strip()
+    return ""
+
+
+def _extract_best_json_candidate(text: str) -> str:
+    stripped = _strip_json_code_fences(str(text or ""))
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+    fenced = _extract_last_fenced_json_block(text)
+    if fenced:
+        return fenced
+    top_level = _extract_first_top_level_json_object(text)
+    if top_level:
+        return top_level
+    return stripped
+
+
 def _normalize_internal_provider_response(response: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(response, dict):
         raise ValueError("Provider returned an invalid response payload.")
@@ -1561,6 +1616,33 @@ def _normalize_internal_provider_response(response: Dict[str, Any]) -> Dict[str,
             "message": str(response.get("message") or "Provider returned an error payload."),
         }
     raise ValueError(f"Provider returned unsupported response type: {response_type}")
+
+
+def _normalize_local_openai_compat_provider_response(response: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(response, dict):
+        raise ValueError("Provider returned an invalid response payload.")
+    if "type" in response:
+        return _normalize_internal_provider_response(response)
+
+    tool_name = response.get("tool")
+    tool_args = response.get("input")
+    if isinstance(tool_name, str) and tool_name.strip():
+        return _normalize_internal_provider_response({
+            "type": "tool_call",
+            "tool_name": tool_name.strip(),
+            "args": tool_args if isinstance(tool_args, dict) else {},
+        })
+
+    content = response.get("final") or response.get("answer") or response.get("content") or response.get("message")
+    if isinstance(content, str) and content.strip():
+        return _normalize_internal_provider_response({
+            "type": "final_answer",
+            "content": content.strip(),
+            "tool_summary": [],
+            "notes": "",
+        })
+
+    raise ValueError("Provider response did not match Unicorn's internal turn schema or the local compatibility shim.")
 
 
 def _call_openai_provider_turn(provider_payload: Dict[str, Any], runtime_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -1714,8 +1796,10 @@ def _call_local_openai_compat_provider_turn(provider_payload: Dict[str, Any], ru
                 "raw_response_log": str(raw_log_path),
             },
         )
+    sanitized_output_text = _strip_think_blocks(output_text)
+    json_candidate_text = _extract_best_json_candidate(sanitized_output_text)
     try:
-        parsed = json.loads(_strip_json_code_fences(output_text))
+        parsed = json.loads(json_candidate_text)
     except json.JSONDecodeError as error:
         raise HTTPException(
             status_code=502,
@@ -1726,7 +1810,7 @@ def _call_local_openai_compat_provider_turn(provider_payload: Dict[str, Any], ru
             },
         )
     try:
-        return _normalize_internal_provider_response(parsed)
+        return _normalize_local_openai_compat_provider_response(parsed)
     except ValueError as error:
         raise HTTPException(
             status_code=502,
