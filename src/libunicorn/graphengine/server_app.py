@@ -1429,6 +1429,47 @@ def _build_local_openai_compat_chat_request(provider_payload: Dict[str, Any], ru
                 "role": "system",
                 "content": context_text,
             })
+    messages.append({
+        "role": "system",
+        "content": "\n".join([
+            "Return exactly one JSON object and nothing else.",
+            "Do not include chain-of-thought, <think> blocks, markdown, code fences, prefaces, or explanations.",
+            "If you need a Unicorn tool, return only a Unicorn internal tool_call object.",
+            "If you can answer from the current Unicorn context or existing tool results, return only a Unicorn internal final_answer object.",
+            "Do not invent tool outputs. Ask for a tool call instead.",
+            "",
+            "Allowed response shapes:",
+            json.dumps(
+                {
+                    "type": "tool_call",
+                    "tool_name": "get_node_details",
+                    "args": {
+                        "taxid": 2759,
+                    },
+                },
+                ensure_ascii=True,
+            ),
+            json.dumps(
+                {
+                    "type": "final_answer",
+                    "content": "Answer grounded in Unicorn context or tool results.",
+                    "tool_summary": ["get_node_details"],
+                    "notes": "",
+                },
+                ensure_ascii=True,
+            ),
+            json.dumps(
+                {
+                    "type": "error",
+                    "code": "cannot_answer_from_context",
+                    "message": "Short machine-readable error message.",
+                },
+                ensure_ascii=True,
+            ),
+            "",
+            "Never return keys named 'tool', 'input', or 'output' at the top level.",
+        ]),
+    })
     for message in provider_payload.get("conversation", []):
         if not isinstance(message, dict):
             continue
