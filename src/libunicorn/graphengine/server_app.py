@@ -1181,19 +1181,20 @@ def _build_openai_internal_response_format() -> Dict[str, Any]:
                 },
                 "args": {
                     "type": ["object", "null"],
-                    "properties": {
-                        "taxid": {"type": ["integer", "null"]},
-                        "taxids": {
-                            "type": ["array", "null"],
-                            "items": {"type": "integer"},
-                        },
-                        "scope": {"type": ["string", "null"], "enum": ["root", "node", None]},
-                        "sort": {"type": ["string", "null"], "enum": ["direct", "subtree", None]},
-                        "limit": {"type": ["integer", "null"]},
+                "properties": {
+                    "taxid": {"type": ["integer", "null"]},
+                    "taxids": {
+                        "type": ["array", "null"],
+                        "items": {"type": "integer"},
                     },
-                    "required": ["taxid", "taxids", "scope", "sort", "limit"],
-                    "additionalProperties": False,
+                    "query": {"type": ["string", "null"]},
+                    "scope": {"type": ["string", "null"], "enum": ["root", "node", None]},
+                    "sort": {"type": ["string", "null"], "enum": ["direct", "subtree", None]},
+                    "limit": {"type": ["integer", "null"]},
                 },
+                "required": ["taxid", "taxids", "query", "scope", "sort", "limit"],
+                "additionalProperties": False,
+            },
                 "tool_summary": {
                     "type": ["array", "null"],
                     "items": {"type": "string"},
@@ -1236,11 +1237,12 @@ def _build_unicorn_internal_response_schema() -> Dict[str, Any]:
                         "type": ["array", "null"],
                         "items": {"type": "integer"},
                     },
+                    "query": {"type": ["string", "null"]},
                     "scope": {"type": ["string", "null"], "enum": ["root", "node", None]},
                     "sort": {"type": ["string", "null"], "enum": ["direct", "subtree", None]},
                     "limit": {"type": ["integer", "null"]},
                 },
-                "required": ["taxid", "taxids", "scope", "sort", "limit"],
+                "required": ["taxid", "taxids", "query", "scope", "sort", "limit"],
                 "additionalProperties": False,
             },
             "tool_summary": {
@@ -1307,6 +1309,17 @@ def _build_provider_contract_instruction_text(provider_payload: Dict[str, Any], 
                     "type": "tool_call",
                     "tool_name": "get_node_details",
                     "args": {"taxid": 2759},
+                },
+            },
+            ensure_ascii=True,
+        ),
+        json.dumps(
+            {
+                "user_prompt": "Tell me about node Viridiplantae.",
+                "response": {
+                    "type": "tool_call",
+                    "tool_name": "find_visible_nodes",
+                    "args": {"query": "Viridiplantae", "limit": 5},
                 },
             },
             ensure_ascii=True,

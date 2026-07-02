@@ -87,6 +87,7 @@
     "get_graph_context",
     "list_selected_datasets",
     "get_selected_nodes",
+    "find_visible_nodes",
     "get_node_details",
     "get_table_view",
   ];

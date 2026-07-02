@@ -471,6 +471,32 @@
     };
   }
 
+  function normalizeVisibleNodeMatchesForProvider(matches, request = {}, graphContext) {
+    const rows = Array.isArray(matches) ? matches : [];
+    const query = normalizeToolQuery(request.query);
+    const limit = normalizeToolLimit(request.limit, 10);
+    return {
+      ok: true,
+      mode: "backend",
+      tool: "find_visible_nodes",
+      request: {
+        query,
+        limit,
+      },
+      count: rows.length,
+      matches: rows.map((row) => ({
+        taxid: Number(row?.taxid || 0),
+        name: String(row?.name || ""),
+        rank: String(row?.rank || ""),
+        direct: Number(row?.direct || 0),
+        subtree: Number(row?.subtree || 0),
+        child_count: Number(row?.child_count || 0),
+        match_type: String(row?.match_type || ""),
+      })),
+      context: normalizeGraphContextForProviderContext(graphContext),
+    };
+  }
+
   function normalizeNodeDetailsForProvider(payload, request = {}) {
     const node = payload?.node && typeof payload.node === "object" ? payload.node : {};
     const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
@@ -639,6 +665,35 @@
     return Math.max(1, Math.min(200, Math.round(limit)));
   }
 
+  function normalizeToolQuery(value) {
+    return String(value || "").trim();
+  }
+
+  function findVisibleNodesByName(query, limit = 10) {
+    const normalizedQuery = normalizeToolQuery(query).toLowerCase();
+    if (!normalizedQuery) return [];
+    const rows = [];
+    const pushMatches = (matchType, predicate) => {
+      const seen = new Set(rows.map((row) => row.taxid));
+      (Array.isArray(state.flat) ? state.flat : []).forEach((node) => {
+        const name = String(node?.name || "");
+        const lowered = name.toLowerCase();
+        if (!predicate(lowered)) return;
+        const taxid = Number(node?.taxid || 0);
+        if (seen.has(taxid)) return;
+        seen.add(taxid);
+        rows.push({
+          ...summarizeNodeForAgent(node),
+          match_type: matchType,
+        });
+      });
+    };
+    pushMatches("exact", (lowered) => lowered === normalizedQuery);
+    pushMatches("prefix", (lowered) => lowered.startsWith(normalizedQuery));
+    pushMatches("substring", (lowered) => lowered.includes(normalizedQuery));
+    return rows.slice(0, normalizeToolLimit(limit, 10));
+  }
+
   function createUnicornAgentRegistry() {
     const tools = {
       get_graph_context: async () => buildAgentContext(),
@@ -652,6 +707,16 @@
           getSelectedNodes().map((node) => summarizeNodeForAgent(node)),
           buildAgentContext(),
         );
+      },
+      find_visible_nodes: async (args = {}) => {
+        requireAgentBackendTree();
+        const query = normalizeToolQuery(args.query);
+        if (!query) {
+          throw new Error("find_visible_nodes requires a non-empty query string.");
+        }
+        const limit = normalizeToolLimit(args.limit, 10);
+        const matches = findVisibleNodesByName(query, limit);
+        return normalizeVisibleNodeMatchesForProvider(matches, { query, limit }, buildAgentContext());
       },
       get_node_details: async (args = {}) => {
         requireAgentBackendTree();
@@ -786,6 +851,7 @@
       get_graph_context: "Returns the current Unicorn graph context snapshot.",
       list_selected_datasets: "Returns selected datasets and aggregate totals.",
       get_selected_nodes: "Returns the nodes currently selected in the graph.",
+      find_visible_nodes: "Finds visible nodes in the current graph by name and returns grounded taxid matches.",
       get_node_details: "Returns detailed information for one taxon or several taxa in the current graph context.",
       get_table_view: "Returns ranked rows for the current root or one node scope.",
       select_taxon: "Selects one taxon in the active Unicorn graph.",
@@ -1157,6 +1223,23 @@
         answer: `${count} node${count === 1 ? "" : "s"} ${count === 1 ? "is" : "are"} currently selected. The current selection includes ${top}.`,
         note: "Repeated provider tool request was stopped after Unicorn had already returned the current selection state.",
         toolsUsed: ["get_selected_nodes"],
+      };
+    }
+
+    if (toolName === "find_visible_nodes") {
+      const rows = Array.isArray(result.matches) ? result.matches : [];
+      if (!rows.length) {
+        return {
+          answer: "No visible nodes matched that query.",
+          note: "Repeated provider tool request was stopped after Unicorn had already returned the current visible-node matches.",
+          toolsUsed: ["find_visible_nodes"],
+        };
+      }
+      const preview = rows.map((row) => `${row.name} (${row.taxid})`).join(", ");
+      return {
+        answer: `${rows.length} visible node${rows.length === 1 ? "" : "s"} matched the query: ${preview}.`,
+        note: "Repeated provider tool request was stopped after Unicorn had already returned grounded visible-node matches.",
+        toolsUsed: ["find_visible_nodes"],
       };
     }
 

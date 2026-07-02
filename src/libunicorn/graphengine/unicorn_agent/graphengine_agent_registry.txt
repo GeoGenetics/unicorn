@@ -18,7 +18,9 @@ New invariant:
 
 Frozen V1 provider scope:
 
-- OpenAI is the only first-pass real provider target
+- OpenAI, Google, and an experimental local OpenAI-compatible target now exist
+- provider behavior still varies by model quality, but the internal Unicorn
+  tool registry and turn contract remain shared
 - the live internal Unicorn registry still contains both read-only and
   state-mutating tools
 - the provider-advertised V1 tool surface is intentionally narrower and includes
@@ -44,13 +46,20 @@ Column 2: current runtime behavior
 
 Tool Call                                      Current Runtime Behavior
 ---------------------------------------------  --------------------------------------------------------------
-invokeTool("get_graph_context", {})            Returns `buildAgentContext()` exactly. This is the canonical graph snapshot and includes `captured_at`, `mode`, `datasets`, `taxonomy`, `filters`, `tree`, `report`, and `backend`.
+invokeTool("get_graph_context", {})            Returns `buildAgentContext()` exactly. This is the canonical graph snapshot
+                                               and includes `captured_at`, `mode`, `datasets`, `taxonomy`, `filters`, `tree`,
+																							 `report`, and `backend`.
 
-invokeTool("list_selected_datasets", {})       Requires a backend connection. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "list_selected_datasets", request, datasets, context }`. `datasets` contains `selected`, `count`, `total_reads`, and `direct_taxa`.
+invokeTool("list_selected_datasets", {})       Requires a backend connection. Returns a provider-facing normalized payload:
+                                               `{ ok, mode: "backend", tool: "list_selected_datasets", request, datasets,
+																							 context }`. `datasets` contains `selected`, `selected_summaries`, `count`,
+																							 `total_reads`, and `direct_taxa`.
 
 invokeTool("get_selected_nodes", {})           Requires a backend-backed rendered tree. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_selected_nodes", request, count, selected, context }`. `selected` is the current selected-node list with `taxid`, `name`, `rank`, `direct`, `subtree`, and `child_count`.
 
-invokeTool("get_node_details", { taxid })      Requires a backend-backed rendered tree and a numeric `taxid`. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_node_details", request, node, context }`. `node` is normalized from backend `/node-tooltip` data.
+invokeTool("find_visible_nodes", { query, limit })  Requires a backend-backed rendered tree and a non-empty query string. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "find_visible_nodes", request, count, matches, context }`. `matches` contains grounded visible-node rows with `taxid`, `name`, `rank`, `direct`, `subtree`, `child_count`, and `match_type`.
+
+invokeTool("get_node_details", { taxid })      Requires a backend-backed rendered tree and either a numeric `taxid` or a non-empty numeric `taxids` array. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_node_details", request, node, count, nodes, context }`. For one taxon, `node` contains normalized backend `/node-tooltip` data. For several taxa, `nodes` contains the normalized per-node list and `count` reports how many node payloads were returned.
 
 invokeTool("get_table_view", { scope, taxid, sort, limit })  Requires a backend-backed rendered tree. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_table_view", request, target, row_count, rows, context }`. Data is normalized from backend `/table-view`. Supported inputs are `scope=root|node`, `sort=direct|subtree`, and numeric `limit`.
 
@@ -134,8 +143,14 @@ Live today:
 - browser-local tool execution
 - backend-required agent grounding
 - provider-normalized read-only tool envelopes for:
-  `list_selected_datasets`, `get_selected_nodes`, `get_node_details`, and
-  `get_table_view`
+  `list_selected_datasets`, `get_selected_nodes`, `find_visible_nodes`,
+  `get_node_details`, and `get_table_view`
+- `get_node_details` now supports:
+  - one taxon via `taxid`
+  - several taxa via `taxids`
+- `find_visible_nodes` now supports:
+  - visible-name lookup via `query`
+  - optional result capping via `limit`
 - V1 provider-facing tool exposure is frozen to the read-only subset
 
 Not live yet:
@@ -152,4 +167,7 @@ Why this matters for the next agentic step
 The current tool set is now in much better shape for a first real provider
 adapter because the read-only inspection tools share a stable top-level
 contract. The next step is less about wrapper cleanup and more about making the
-provider loop consume that contract deliberately.
+provider loop consume that contract deliberately. The next validation target is
+confirming that named-node prompts route through `find_visible_nodes` before
+`get_node_details`, rather than trying to stuff node names directly into a
+taxid-only detail request.
