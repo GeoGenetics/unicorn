@@ -1,52 +1,47 @@
-This is fantastic.
-What we just learned:
-the local model is reasoning over Unicorn context correctly
-it identified Viridiplantae
-it decided the right next action: get_node_details
-it even produced a structured payload
-So the local provider path is much closer than it looked.
-The real failure is actually two layers:
-It emits reasoning text and a <think>...</think> block before the structured part
-The structured part is not in Unicorn’s internal turn schema
-What Unicorn expects for a tool request is something like:
-{
-  "type": "tool_call",
-  "tool_name": "get_node_details",
-  "args": {
-    "taxid": 2759
-  }
-}
-What the model returned instead was a narrative explanation plus this custom object:
-{
-  "tool": "get_node_details",
-  "input": {
-    "taxid": 2759
-  },
-  "output": {
-    ...
-  }
-}
-So this is actually very encouraging:
-tool choice is correct
-argument choice is correct
-output discipline is the only thing failing
-What I recommend next:
-Strip <think>...</think> blocks in the local adapter
-Extract the last fenced JSON block if present
-Add a compatibility shim:if JSON looks like { "tool": "...", "input": {...} }
-convert it into Unicorn internal:
-{ "type": "tool_call", "tool_name": "...", "args": {...} }
+I agree with you. The current agent stack is functional, but it is not understandable enough, and that makes every bug much harder than it should be.
+I’ve turned that into a concrete rewrite direction in:
+[point2_agentic_graphengine.txt](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/point2_agentic_graphengine.txt)
+[graphengine_agent_registry.txt](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/unicorn_agent/graphengine_agent_registry.txt)
+What I changed
+Completely rewrote point2_agentic_graphengine.txt around a trace-first architecture.
+Reframed the problem as architectural opacity, not provider quality.
+Defined the new rewrite target:one canonical Unicorn turn request
+one canonical Unicorn turn response
+explicit provider mapping stages
+iteration-level trace records
 
-Tighten the local prompt:no reasoning
-no markdown
-output exactly one JSON object
-use only Unicorn response schema
+Set the recommended rewrite sequence:freeze canonical turn contract
+add trace logging
+expose provider mapping stages
+keep tiny graph_context
+add stable tool IDs
+add get_tool_info
 
-My honest take:
-this is a breakthrough
-we do not need to “make the model smart”
-we just need to make the local adapter more tolerant to open-weights style output
-If you want, I can proceed directly with:
-<think> stripping
-fenced-JSON extraction
-schema-compat normalization for this tool/input shape
+Updated graphengine_agent_registry.txt so it no longer lies about the current get_graph_context shape.
+My honest opinion
+You were exactly right to call this out now.
+The problem is not that the model is “bad at reasoning”.
+The problem is that one Unicorn turn currently passes through too many hidden transformations:
+browser Unicorn payload
+backend prompt rewriting
+provider-native request
+raw provider prose
+backend compatibility shim
+normalized Unicorn response
+browser tool loop
+That is too much invisible machinery for serious development.
+The rewrite path in the new point2 file is the one I would strongly recommend:
+make the turn fully reconstructable first, then improve provider quality second.
+Best next step
+The highest-value next implementation is now very clear:
+define one canonical trace record
+log one trace record per iteration
+include:canonical Unicorn request
+provider-native request
+raw provider response
+normalized Unicorn response
+executed tool result
+
+Once that exists, the rest of the agentic work becomes much less confusing.
+If you want, next I can start implementing exactly that first rewrite slice:
+the canonical per-iteration trace record and logging path.
