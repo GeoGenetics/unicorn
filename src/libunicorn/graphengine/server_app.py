@@ -38,6 +38,9 @@ AGENT_PROVIDER_RAW_LOG_DIR = Path(
 AGENT_CLIENT_PAYLOAD_LOG_DIR = Path(
     os.environ.get("UNICORN_GRAPHENGINE_AGENT_CLIENT_PAYLOAD_LOG_DIR", "logs/agent_client_payload")
 ).resolve()
+AGENT_PROVIDER_RESPONSE_LOG_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_AGENT_PROVIDER_RESPONSE_LOG_DIR", "logs/agent_provider_response")
+).resolve()
 METADATA_FILENAME = "metadata.txt"
 
 
@@ -107,6 +110,31 @@ def _append_agent_client_payload_log(payload: Dict[str, Any]) -> Path:
         "session_id": payload.get("session_id"),
         "turn_id": payload.get("turn_id"),
         "payload": payload,
+    }
+    with outpath.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line, ensure_ascii=True) + "\n")
+    return outpath
+
+
+def _append_agent_provider_response_log(
+    response: Dict[str, Any],
+    *,
+    provider_name: str,
+    runtime_config: Optional[Dict[str, Any]] = None,
+    provider_payload: Optional[Dict[str, Any]] = None,
+) -> Path:
+    AGENT_PROVIDER_RESPONSE_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    date_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    outpath = AGENT_PROVIDER_RESPONSE_LOG_DIR / f"{date_label}.log"
+    payload = provider_payload if isinstance(provider_payload, dict) else {}
+    line = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": "canonical_turn_response_v2",
+        "provider_name": provider_name,
+        "turn_id": payload.get("turn_id"),
+        "session_id": payload.get("session_id"),
+        "runtime_config": _redact_provider_runtime_config(runtime_config or {}),
+        "response": response,
     }
     with outpath.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(line, ensure_ascii=True) + "\n")
@@ -2681,6 +2709,12 @@ def agent_provider_turn(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             **log_context,
             "response": response,
         },
+    )
+    _append_agent_provider_response_log(
+        response,
+        provider_name=provider_name,
+        runtime_config=runtime_config,
+        provider_payload=provider_payload,
     )
     return response
 

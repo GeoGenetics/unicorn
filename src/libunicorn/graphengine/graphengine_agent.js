@@ -340,10 +340,6 @@
     const currentReport = backendTreeReady && state.remote.currentReport
       ? summarizeCurrentAgentReport(state.remote.currentReport)
       : null;
-    const selectedDatasetNames = selectedDatasets.length > 0 && selectedDatasets.length <= 3
-      ? selectedDatasets.slice()
-      : [];
-
     return {
       captured_at: new Date().toISOString(),
       context_version: "agentic-v2-tiny",
@@ -354,7 +350,6 @@
       },
       datasets: {
         count: selectedDatasets.length,
-        names: selectedDatasetNames,
       },
       filters: {
         min_reads: activeRequestContext && Number.isFinite(activeRequestContext.min_reads)

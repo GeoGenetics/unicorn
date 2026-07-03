@@ -176,7 +176,6 @@ Minimum canonical fields for V1 compact mode:
   "captured_at": "2026-07-03T12:00:00.000Z",
   "mode": "backend",
   "datasets": {
-    "selected": ["dataset_a", "dataset_b"],
     "count": 2,
     "total_reads": 79234328,
     "direct_taxa": 1630
@@ -380,6 +379,7 @@ Rewrite direction:
 - add `turn_id`
 - add `session_id`
 - standardize tool items around `tool_id`
+- keep `datasets` compact and count-oriented in the default graph context
 
 
 Recommended Browser/Backend Shared Contract
