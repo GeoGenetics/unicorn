@@ -1,0 +1,419 @@
+Unicorn Canonical Turn Request Schema
+=====================================
+
+Purpose
+-------
+
+This document defines the canonical Unicorn turn request shape shared between:
+
+- browser-side agent orchestration
+- backend-side provider transport/orchestration
+
+This is not a provider-native request.
+
+It is the single Unicorn-internal semantic request that must exist before any
+provider-specific mapping happens.
+
+
+Design Goals
+------------
+
+1. One canonical request per turn.
+2. Compact by default.
+3. Explicitly provider-neutral.
+4. Reconstructable in traces.
+5. Stable enough to become the parent object for per-iteration trace records.
+
+
+Top-Level Shape
+---------------
+
+Required top-level object:
+
+```json
+{
+  "turn_id": "turn_20260703_0001",
+  "session_id": "session_localhost_001",
+  "provider": {
+    "runtime_provider": "local_openai_compat",
+    "configured_provider": "local_openai_compat",
+    "configured_model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "transport_mode": "backend",
+    "base_url": null,
+    "client_side": false
+  },
+  "instructions": {
+    "system": "You are the Unicorn Graph Engine agent. Answer only from Unicorn context and Unicorn tool outputs. Use only Unicorn-native tools when needed, and do not invent unsupported facts."
+  },
+  "user": {
+    "prompt": "Tell me about Viridiplantae"
+  },
+  "graph_context": {},
+  "tools": [],
+  "conversation": [],
+  "tool_results": [],
+  "turn_config": {
+    "max_tool_iterations": 4,
+    "compact_context": true
+  }
+}
+```
+
+
+Field Definitions
+-----------------
+
+`turn_id`
+- required
+- string
+- uniquely identifies one Unicorn turn
+- generated before any provider mapping
+- stable across all iterations of the same turn
+
+Recommended format:
+- `turn_<timestamp-or-sequence>`
+
+
+`session_id`
+- optional but strongly recommended
+- string
+- identifies the enclosing Unicorn agent session
+- useful for correlating several turns in trace logs
+- if no durable session identity exists yet, a browser-generated ephemeral
+  session ID is acceptable
+
+
+`provider`
+- required
+- object
+- summarizes the Unicorn-side provider target and transport configuration
+- this is not the provider-native payload
+
+Canonical fields:
+
+```json
+{
+  "runtime_provider": "mock | openai | google | local_openai_compat",
+  "configured_provider": "mock | openai | google | local_openai_compat",
+  "configured_model": "string",
+  "transport_mode": "client | backend",
+  "base_url": "string or null",
+  "client_side": false
+}
+```
+
+Field intent:
+- `runtime_provider`
+  - the actual active Unicorn runtime path for this turn
+- `configured_provider`
+  - the user-selected target/provider identity
+- `configured_model`
+  - the selected model string Unicorn intends to use
+- `transport_mode`
+  - where provider transport occurs
+- `base_url`
+  - optional provider endpoint override
+- `client_side`
+  - whether the effective runtime is browser-only
+
+Important note:
+- secret material such as API keys must not live in the canonical turn request
+- secrets belong in separate runtime config or transport-only state
+
+
+`instructions`
+- required
+- object
+- contains Unicorn-owned system instructions
+
+Canonical shape:
+
+```json
+{
+  "system": "string"
+}
+```
+
+Rules:
+- one canonical field: `system`
+- provider-specific instruction rewriting happens later in mapping stages
+- do not duplicate the same instruction in several top-level fields
+
+
+`user`
+- required
+- object
+- contains the user’s current turn input
+
+Canonical shape:
+
+```json
+{
+  "prompt": "string"
+}
+```
+
+Rules:
+- this is the raw Unicorn user prompt for the current turn
+- do not inject rewritten provider prose here
+
+
+`graph_context`
+- required
+- object
+- compact canonical graph grounding payload
+- authoritative Unicorn turn context
+- provider-neutral
+
+Current rewrite target:
+- this should converge on the compact context mode rather than the older large
+  browser-built envelope
+
+Minimum canonical fields for V1 compact mode:
+
+```json
+{
+  "captured_at": "2026-07-03T12:00:00.000Z",
+  "mode": "backend",
+  "datasets": {
+    "selected": ["dataset_a", "dataset_b"],
+    "count": 2,
+    "total_reads": 79234328,
+    "direct_taxa": 1630
+  },
+  "taxonomy": {
+    "nodes_file": "nodes.dmp",
+    "names_file": "names.dmp"
+  },
+  "filters": {
+    "min_reads": 1000,
+    "count_mode": "direct",
+    "scale_mode": "sqrt",
+    "search": ""
+  },
+  "tree": {
+    "loaded": true,
+    "visible_root": {
+      "taxid": 1,
+      "name": "root",
+      "rank": "no rank"
+    },
+    "visible_node_count": 53,
+    "focused_taxid": null,
+    "selected_taxids": [],
+    "expanded_taxids": [2759, 131567]
+  },
+  "report": null,
+  "backend": {
+    "connected": true
+  }
+}
+```
+
+Rules:
+- `graph_context` is the Unicorn semantic source of truth for the turn
+- keep it compact by default
+- richer inspection belongs behind explicit tool calls
+- the exact compact context schema should remain separately documented and
+  versioned if it grows independently
+
+
+`tools`
+- required
+- array
+- the exact tool surface exposed for this turn
+
+Canonical item shape:
+
+```json
+{
+  "tool_id": "get_node_details",
+  "display_name": "get_node_details",
+  "description": "Returns detailed information for one taxon in the current graph context.",
+  "input_schema": {},
+  "mutation": false
+}
+```
+
+Required item fields:
+- `tool_id`
+- `display_name`
+- `description`
+- `input_schema`
+
+Recommended item fields:
+- `mutation`
+- `provider_exposed`
+
+Rules:
+- `tool_id` is the stable canonical identifier
+- one turn request must include the exact exposed tool list for that turn
+- internal registry/tools outside scope should not be silently implied
+
+
+`conversation`
+- required
+- array
+- prior conversation slice available to the current turn
+
+Canonical item shape:
+
+```json
+{
+  "role": "user | assistant",
+  "content": "string"
+}
+```
+
+Rules:
+- keep this to the provider-relevant recent slice, not an unlimited transcript
+- do not include raw provider payloads here
+- tool execution records belong in `tool_results`, not in `conversation`
+
+
+`tool_results`
+- required
+- array
+- prior executed tool results already available to the current turn
+
+Canonical item shape:
+
+```json
+{
+  "tool_id": "get_node_details",
+  "args": {
+    "taxid": 1648030
+  },
+  "result": {
+    "ok": true
+  }
+}
+```
+
+Required item fields:
+- `tool_id`
+- `args`
+- `result`
+
+Rules:
+- this array represents grounded Unicorn results already available to the turn
+- these are provider-visible semantic results, not provider-native transport
+  artifacts
+- if a tool failed and Unicorn still wants to expose that failure to the next
+  iteration, the failure should be normalized into `result`
+
+
+`turn_config`
+- required
+- object
+- turn-level execution policy
+
+Canonical shape:
+
+```json
+{
+  "max_tool_iterations": 4,
+  "compact_context": true
+}
+```
+
+Recommended fields:
+- `max_tool_iterations`
+- `compact_context`
+- `allow_mutation_tools`
+- `trace_enabled`
+
+Field intent:
+- `max_tool_iterations`
+  - maximum provider/tool loop iterations allowed for this turn
+- `compact_context`
+  - whether compact grounding mode was used
+- `allow_mutation_tools`
+  - whether state-mutating tools are allowed in this turn
+- `trace_enabled`
+  - whether backend/browser should emit full trace records
+
+
+Canonical Rules
+---------------
+
+1. This request is provider-neutral.
+- no OpenAI-native messages structure here
+- no Google-native request body here
+- no local OpenAI-compatible chat body here
+
+2. This request is turn-scoped, not iteration-scoped.
+- one canonical turn request may be referenced by several iterations
+- iteration-specific trace records should point back to this request
+
+3. Secrets do not live here.
+- API keys and transport-only secrets stay in runtime config outside the
+  canonical request
+
+4. Tool surface must be explicit.
+- do not rely on hidden default tool availability
+
+5. `graph_context` must stay compact by default.
+- richer state should be retrieved through tools
+
+
+Current Transition Mapping
+--------------------------
+
+Today’s live payload uses fields such as:
+
+- `provider`
+- `system_prompt`
+- `user_prompt`
+- `graph_context`
+- `tools`
+- `conversation`
+- `tool_results`
+- `turn_config`
+
+Rewrite direction:
+
+- keep `graph_context`, `tools`, `conversation`, `tool_results`, `turn_config`
+- replace `system_prompt` with `instructions.system`
+- replace `user_prompt` with `user.prompt`
+- expand `provider` into the canonical provider summary above
+- add `turn_id`
+- add `session_id`
+- standardize tool items around `tool_id`
+
+
+Recommended Browser/Backend Shared Contract
+-------------------------------------------
+
+Recommended canonical request keys:
+
+```json
+{
+  "turn_id": "string",
+  "session_id": "string",
+  "provider": {},
+  "instructions": {
+    "system": "string"
+  },
+  "user": {
+    "prompt": "string"
+  },
+  "graph_context": {},
+  "tools": [],
+  "conversation": [],
+  "tool_results": [],
+  "turn_config": {}
+}
+```
+
+
+Definition of Success
+---------------------
+
+This request schema is successful when:
+
+- browser and backend agree on one Unicorn turn request shape
+- provider-specific request builders map from this shape only
+- one trace record can embed or reference this request without translation
+- debugging no longer depends on reverse-engineering several hidden payload
+  variants
