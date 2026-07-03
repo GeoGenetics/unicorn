@@ -14,6 +14,7 @@
     clientLog: [],
     agent: {
       history: [],
+      sessionId: "",
       runtimeProvider: "mock",
       transportMode: "backend",
       configuredProvider: "openai",

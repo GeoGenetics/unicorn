@@ -35,6 +35,9 @@ AGENT_PROVIDER_LOG_PATH = Path(
 AGENT_PROVIDER_RAW_LOG_DIR = Path(
     os.environ.get("UNICORN_GRAPHENGINE_AGENT_RAW_LOG_DIR", "logs/agent_provider")
 ).resolve()
+AGENT_CLIENT_PAYLOAD_LOG_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_AGENT_CLIENT_PAYLOAD_LOG_DIR", "logs/agent_client_payload")
+).resolve()
 METADATA_FILENAME = "metadata.txt"
 
 
@@ -91,6 +94,22 @@ def _dump_agent_provider_raw_response(
     with outpath.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=2)
         handle.write("\n")
+    return outpath
+
+
+def _append_agent_client_payload_log(payload: Dict[str, Any]) -> Path:
+    AGENT_CLIENT_PAYLOAD_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    date_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    outpath = AGENT_CLIENT_PAYLOAD_LOG_DIR / f"{date_label}.log"
+    line = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": "canonical_turn_request_v2",
+        "session_id": payload.get("session_id"),
+        "turn_id": payload.get("turn_id"),
+        "payload": payload,
+    }
+    with outpath.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line, ensure_ascii=True) + "\n")
     return outpath
 
 
@@ -2664,6 +2683,25 @@ def agent_provider_turn(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         },
     )
     return response
+
+
+@app.post("/agent/client-payload")
+def agent_client_payload(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    client_payload = payload.get("client_payload")
+    if not isinstance(client_payload, dict):
+        raise HTTPException(status_code=400, detail={"message": "client_payload is required and must be an object."})
+    if not str(client_payload.get("turn_id") or "").strip():
+        raise HTTPException(status_code=400, detail={"message": "client_payload.turn_id is required."})
+    if not isinstance(client_payload.get("provider"), dict):
+        raise HTTPException(status_code=400, detail={"message": "client_payload.provider must be an object."})
+    log_path = _append_agent_client_payload_log(client_payload)
+    return {
+        "ok": True,
+        "logged": True,
+        "path": str(log_path),
+        "turn_id": str(client_payload.get("turn_id") or ""),
+        "session_id": str(client_payload.get("session_id") or ""),
+    }
 
 
 if __name__ == "__main__":

@@ -861,6 +861,112 @@
     return descriptions[name] || "Unicorn-native tool.";
   }
 
+  function getOrCreateAgentSessionId() {
+    const existing = String(state.agent.sessionId || "").trim();
+    if (existing) return existing;
+    let stored = "";
+    try {
+      stored = String(globalObject.localStorage?.getItem("unicorn.agentSessionId") || "").trim();
+    } catch (error) {
+      stored = "";
+    }
+    if (stored) {
+      state.agent.sessionId = stored;
+      return stored;
+    }
+    const created = `session_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    state.agent.sessionId = created;
+    try {
+      globalObject.localStorage?.setItem("unicorn.agentSessionId", created);
+    } catch (error) {
+      // Ignore localStorage failures and keep the in-memory session ID.
+    }
+    return created;
+  }
+
+  function generateAgentTurnId() {
+    return `turn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function buildCanonicalTurnToolDefinitions(providerName = "openai") {
+    return getProviderExposedToolNames(providerName).map((toolId) => ({
+      tool_id: String(toolId),
+      display_name: String(toolId),
+      description: describeAgentTool(toolId),
+      input_schema: {},
+      mutation: false,
+      provider_exposed: true,
+    }));
+  }
+
+  function buildCanonicalTurnRequest(input, toolResults = []) {
+    const runtimeConfig = getAgentRuntimeConfig();
+    const providerMeta = getProviderAdapter().getCurrentProviderMeta();
+    const graphContext = input?.context || buildAgentContext();
+    return {
+      schema_version: "unicorn_turn_request_v2",
+      turn_id: String(input?.turnId || generateAgentTurnId()),
+      session_id: getOrCreateAgentSessionId(),
+      provider: {
+        runtime_provider: String(runtimeConfig.runtime_provider || providerMeta?.name || "mock"),
+        configured_provider: String(runtimeConfig.configured_provider || "mock"),
+        configured_model: String(runtimeConfig.configured_model || ""),
+        transport_mode: String(runtimeConfig.transport_mode || "backend"),
+        base_url: runtimeConfig.base_url ? String(runtimeConfig.base_url) : null,
+        client_side: Boolean(providerMeta?.client_side),
+      },
+      instructions: {
+        system: "You are the Unicorn Graph Engine agent. Answer only from Unicorn context and Unicorn tool outputs. Use only Unicorn-native tools when needed, and do not invent unsupported facts.",
+      },
+      user: {
+        prompt: String(input?.prompt || ""),
+      },
+      graph_context: graphContext,
+      tools: buildCanonicalTurnToolDefinitions(runtimeConfig.configured_provider || providerMeta?.name || "openai"),
+      conversation: state.agent.history
+        .filter((entry) => entry.role === "user" || entry.role === "assistant")
+        .map((entry) => ({
+          role: String(entry.role),
+          content: String(entry.message || ""),
+        })),
+      tool_results: toolResults.map((toolResult) => ({
+        tool_id: String(toolResult.tool_name || toolResult.tool_id || ""),
+        args: toolResult.args && typeof toolResult.args === "object" ? toolResult.args : {},
+        result: toolResult.result,
+      })),
+      turn_config: {
+        max_tool_iterations: core.AGENT_MAX_TOOL_ITERATIONS,
+        compact_context: true,
+      },
+    };
+  }
+
+  async function logCanonicalTurnRequestShadow(payload) {
+    const runtimeConfig = getAgentRuntimeConfig();
+    const backendBaseUrl = String(runtimeConfig.backend_base_url || "http://localhost:8000").replace(/\/+$/, "");
+    const endpoint = `${backendBaseUrl}/agent/client-payload`;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        client_payload: payload,
+      }),
+    });
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      try {
+        const responseJson = await response.json();
+        detail = String(responseJson?.detail?.message || responseJson?.error?.message || detail);
+      } catch (error) {
+        // Keep the HTTP status detail.
+      }
+      throw new Error(detail);
+    }
+    return response.json().catch(() => ({}));
+  }
+
   function buildProviderRequestPayload(providerMeta, input, toolResults, iteration) {
     const configuredProvider = getConfiguredAgentProvider();
     return {
@@ -1307,6 +1413,21 @@
       role: "user",
       message: prompt,
     });
+    const context = buildAgentContext();
+    const canonicalTurnRequest = buildCanonicalTurnRequest({
+      prompt,
+      context,
+    });
+    logCanonicalTurnRequestShadow(canonicalTurnRequest)
+      .then(() => {
+        addClientLog("info", "agent", "Logged canonical V2 agent request shadow payload.", JSON.stringify({
+          turn_id: canonicalTurnRequest.turn_id,
+          session_id: canonicalTurnRequest.session_id,
+        }, null, 2));
+      })
+      .catch((error) => {
+        addClientLog("error", "agent", "Could not log canonical V2 agent request shadow payload.", errorToDetail(error));
+      });
     const unsupportedMutation = detectUnsupportedAgentMutationRequest(prompt);
     if (unsupportedMutation) {
       addClientLog(
@@ -1325,7 +1446,6 @@
       return;
     }
     const providerMeta = getProviderAdapter().getCurrentProviderMeta();
-    const context = buildAgentContext();
     setStatus(`${providerMeta?.label || "Agent"} is drafting a reply from Unicorn backend state...`);
     getProviderAdapter().runTurn({
       prompt,
@@ -1407,6 +1527,7 @@
     pushAgentEntry,
     renderAgentTranscript,
     buildAgentContext,
+    buildCanonicalTurnRequest,
     createUnicornAgentRegistry,
     executeAgentProviderTurn,
     extractTaxidFromPrompt,
