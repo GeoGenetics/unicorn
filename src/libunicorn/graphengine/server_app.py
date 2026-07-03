@@ -41,6 +41,18 @@ AGENT_CLIENT_PAYLOAD_LOG_DIR = Path(
 AGENT_PROVIDER_RESPONSE_LOG_DIR = Path(
     os.environ.get("UNICORN_GRAPHENGINE_AGENT_PROVIDER_RESPONSE_LOG_DIR", "logs/agent_provider_response")
 ).resolve()
+AGENT_PROVIDER_REQUEST_MAPPING_LOG_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_AGENT_PROVIDER_REQUEST_MAPPING_LOG_DIR", "logs/agent_provider_request_mapping")
+).resolve()
+AGENT_PROVIDER_NATIVE_REQUEST_LOG_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_AGENT_PROVIDER_NATIVE_REQUEST_LOG_DIR", "logs/agent_provider_native_request")
+).resolve()
+AGENT_PROVIDER_NATIVE_RESPONSE_RAW_LOG_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_AGENT_PROVIDER_NATIVE_RESPONSE_RAW_LOG_DIR", "logs/agent_provider_native_response_raw")
+).resolve()
+AGENT_PROVIDER_RESPONSE_MAPPING_LOG_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_AGENT_PROVIDER_RESPONSE_MAPPING_LOG_DIR", "logs/agent_provider_response_mapping")
+).resolve()
 METADATA_FILENAME = "metadata.txt"
 
 
@@ -139,6 +151,135 @@ def _append_agent_provider_response_log(
     with outpath.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(line, ensure_ascii=True) + "\n")
     return outpath
+
+
+def _extract_turn_identity(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    return {
+        "turn_id": payload.get("turn_id"),
+        "session_id": payload.get("session_id"),
+    }
+
+
+def _redact_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
+    redacted: Dict[str, Any] = {}
+    for key, value in (headers or {}).items():
+        normalized_key = str(key)
+        if normalized_key.lower() in {"authorization", "x-goog-api-key"} and value:
+            redacted[normalized_key] = "***redacted***"
+        else:
+            redacted[normalized_key] = value
+    return redacted
+
+
+def _append_agent_stage_log(log_dir: Path, event: str, payload: Dict[str, Any]) -> Path:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    date_label = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    outpath = log_dir / f"{date_label}.log"
+    line = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        **payload,
+    }
+    with outpath.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(line, ensure_ascii=True) + "\n")
+    return outpath
+
+
+def _append_provider_request_mapping_log(
+    provider_name: str,
+    provider_payload: Dict[str, Any],
+    runtime_config: Dict[str, Any],
+    mapped_request: Dict[str, Any],
+) -> Path:
+    identity = _extract_turn_identity(provider_payload)
+    return _append_agent_stage_log(
+        AGENT_PROVIDER_REQUEST_MAPPING_LOG_DIR,
+        "provider_request_mapping",
+        {
+            "provider_name": provider_name,
+            **identity,
+            "runtime_config": _redact_provider_runtime_config(runtime_config or {}),
+            "provider_payload": provider_payload,
+            "mapped_request": mapped_request,
+        },
+    )
+
+
+def _append_provider_native_request_log(
+    provider_name: str,
+    provider_payload: Dict[str, Any],
+    runtime_config: Dict[str, Any],
+    *,
+    endpoint: str,
+    method: str,
+    headers: Dict[str, Any],
+    body: Dict[str, Any],
+) -> Path:
+    identity = _extract_turn_identity(provider_payload)
+    return _append_agent_stage_log(
+        AGENT_PROVIDER_NATIVE_REQUEST_LOG_DIR,
+        "provider_native_request",
+        {
+            "provider_name": provider_name,
+            **identity,
+            "runtime_config": _redact_provider_runtime_config(runtime_config or {}),
+            "request": {
+                "endpoint": endpoint,
+                "method": method,
+                "headers": _redact_headers(headers),
+                "body": body,
+            },
+        },
+    )
+
+
+def _append_provider_native_response_raw_log(
+    provider_name: str,
+    provider_payload: Dict[str, Any],
+    runtime_config: Dict[str, Any],
+    *,
+    endpoint: str,
+    raw_response: str,
+) -> Path:
+    identity = _extract_turn_identity(provider_payload)
+    return _append_agent_stage_log(
+        AGENT_PROVIDER_NATIVE_RESPONSE_RAW_LOG_DIR,
+        "provider_native_response_raw",
+        {
+            "provider_name": provider_name,
+            **identity,
+            "runtime_config": _redact_provider_runtime_config(runtime_config or {}),
+            "endpoint": endpoint,
+            "raw_response": raw_response,
+        },
+    )
+
+
+def _append_provider_response_mapping_log(
+    provider_name: str,
+    provider_payload: Dict[str, Any],
+    runtime_config: Dict[str, Any],
+    *,
+    mapping_input: Dict[str, Any],
+    normalized_response: Optional[Dict[str, Any]] = None,
+    status: str = "success",
+    error: Optional[Dict[str, Any]] = None,
+) -> Path:
+    identity = _extract_turn_identity(provider_payload)
+    return _append_agent_stage_log(
+        AGENT_PROVIDER_RESPONSE_MAPPING_LOG_DIR,
+        "provider_response_mapping",
+        {
+            "provider_name": provider_name,
+            **identity,
+            "runtime_config": _redact_provider_runtime_config(runtime_config or {}),
+            "status": status,
+            "mapping_input": mapping_input,
+            "normalized_response": normalized_response,
+            "error": error,
+        },
+    )
 
 
 def _normalize_requested_files(files: Optional[List[str]]) -> List[str]:
@@ -1807,13 +1948,24 @@ def _call_openai_provider_turn(provider_payload: Dict[str, Any], runtime_config:
         raise HTTPException(status_code=400, detail={"message": "No OpenAI API key was provided for backend-side provider transport."})
     request_body = _build_openai_responses_request(provider_payload, runtime_config)
     endpoint = _resolve_openai_responses_endpoint(str(runtime_config.get("base_url") or ""))
+    request_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    _append_provider_request_mapping_log("openai", provider_payload, runtime_config, request_body)
+    _append_provider_native_request_log(
+        "openai",
+        provider_payload,
+        runtime_config,
+        endpoint=endpoint,
+        method="POST",
+        headers=request_headers,
+        body=request_body,
+    )
     request = urllib_request.Request(
         endpoint,
         data=json.dumps(request_body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=request_headers,
         method="POST",
     )
     try:
@@ -1834,6 +1986,13 @@ def _call_openai_provider_turn(provider_payload: Dict[str, Any], runtime_config:
     except TimeoutError:
         raise HTTPException(status_code=504, detail={"message": "OpenAI request timed out.", "code": "openai_timeout"})
 
+    _append_provider_native_response_raw_log(
+        "openai",
+        provider_payload,
+        runtime_config,
+        endpoint=endpoint,
+        raw_response=response_body,
+    )
     if isinstance(response_json, dict) and isinstance(response_json.get("error"), dict) and response_json["error"].get("message"):
         raise HTTPException(status_code=502, detail={"message": str(response_json["error"]["message"]), "code": "openai_api_error"})
 
@@ -1843,10 +2002,51 @@ def _call_openai_provider_turn(provider_payload: Dict[str, Any], runtime_config:
     try:
         parsed = json.loads(output_text)
     except json.JSONDecodeError as error:
+        _append_provider_response_mapping_log(
+            "openai",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+            },
+            status="error",
+            error={
+                "code": "openai_invalid_json",
+                "message": f"OpenAI Responses API returned non-JSON output: {error}",
+            },
+        )
         raise HTTPException(status_code=502, detail={"message": f"OpenAI Responses API returned non-JSON output: {error}", "code": "openai_invalid_json"})
     try:
-        return _normalize_internal_provider_response(parsed)
+        normalized = _normalize_internal_provider_response(parsed)
+        _append_provider_response_mapping_log(
+            "openai",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+                "parsed_response": parsed,
+            },
+            normalized_response=normalized,
+        )
+        return normalized
     except ValueError as error:
+        _append_provider_response_mapping_log(
+            "openai",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+                "parsed_response": parsed,
+            },
+            status="error",
+            error={
+                "code": "openai_invalid_provider_shape",
+                "message": str(error),
+            },
+        )
         raise HTTPException(status_code=502, detail={"message": str(error), "code": "openai_invalid_provider_shape"})
 
 
@@ -1856,13 +2056,24 @@ def _call_google_provider_turn(provider_payload: Dict[str, Any], runtime_config:
         raise HTTPException(status_code=400, detail={"message": "No Google API key was provided for backend-side provider transport."})
     request_body = _build_google_interactions_request(provider_payload, runtime_config)
     endpoint = _resolve_google_interactions_endpoint(str(runtime_config.get("base_url") or ""))
+    request_headers = {
+        "x-goog-api-key": api_key,
+        "Content-Type": "application/json",
+    }
+    _append_provider_request_mapping_log("google", provider_payload, runtime_config, request_body)
+    _append_provider_native_request_log(
+        "google",
+        provider_payload,
+        runtime_config,
+        endpoint=endpoint,
+        method="POST",
+        headers=request_headers,
+        body=request_body,
+    )
     request = urllib_request.Request(
         endpoint,
         data=json.dumps(request_body).encode("utf-8"),
-        headers={
-            "x-goog-api-key": api_key,
-            "Content-Type": "application/json",
-        },
+        headers=request_headers,
         method="POST",
     )
     try:
@@ -1883,6 +2094,13 @@ def _call_google_provider_turn(provider_payload: Dict[str, Any], runtime_config:
     except TimeoutError:
         raise HTTPException(status_code=504, detail={"message": "Google Gemini request timed out.", "code": "google_timeout"})
 
+    _append_provider_native_response_raw_log(
+        "google",
+        provider_payload,
+        runtime_config,
+        endpoint=endpoint,
+        raw_response=response_body,
+    )
     if isinstance(response_json, dict) and isinstance(response_json.get("error"), dict) and response_json["error"].get("message"):
         raise HTTPException(status_code=502, detail={"message": str(response_json["error"]["message"]), "code": "google_api_error"})
 
@@ -1892,10 +2110,51 @@ def _call_google_provider_turn(provider_payload: Dict[str, Any], runtime_config:
     try:
         parsed = json.loads(output_text)
     except json.JSONDecodeError as error:
+        _append_provider_response_mapping_log(
+            "google",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+            },
+            status="error",
+            error={
+                "code": "google_invalid_json",
+                "message": f"Google Gemini Interactions API returned non-JSON output: {error}",
+            },
+        )
         raise HTTPException(status_code=502, detail={"message": f"Google Gemini Interactions API returned non-JSON output: {error}", "code": "google_invalid_json"})
     try:
-        return _normalize_internal_provider_response(parsed)
+        normalized = _normalize_internal_provider_response(parsed)
+        _append_provider_response_mapping_log(
+            "google",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+                "parsed_response": parsed,
+            },
+            normalized_response=normalized,
+        )
+        return normalized
     except ValueError as error:
+        _append_provider_response_mapping_log(
+            "google",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+                "parsed_response": parsed,
+            },
+            status="error",
+            error={
+                "code": "google_invalid_provider_shape",
+                "message": str(error),
+            },
+        )
         raise HTTPException(status_code=502, detail={"message": str(error), "code": "google_invalid_provider_shape"})
 
 
@@ -1908,6 +2167,16 @@ def _call_local_openai_compat_provider_turn(provider_payload: Dict[str, Any], ru
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    _append_provider_request_mapping_log("local_openai_compat", provider_payload, runtime_config, request_body)
+    _append_provider_native_request_log(
+        "local_openai_compat",
+        provider_payload,
+        runtime_config,
+        endpoint=endpoint,
+        method="POST",
+        headers=headers,
+        body=request_body,
+    )
     request = urllib_request.Request(
         endpoint,
         data=json.dumps(request_body).encode("utf-8"),
@@ -1932,6 +2201,13 @@ def _call_local_openai_compat_provider_turn(provider_payload: Dict[str, Any], ru
     except TimeoutError:
         raise HTTPException(status_code=504, detail={"message": "Local OpenAI-compatible request timed out.", "code": "local_openai_compat_timeout"})
 
+    _append_provider_native_response_raw_log(
+        "local_openai_compat",
+        provider_payload,
+        runtime_config,
+        endpoint=endpoint,
+        raw_response=response_body,
+    )
     if isinstance(response_json, dict) and isinstance(response_json.get("error"), dict) and response_json["error"].get("message"):
         raise HTTPException(status_code=502, detail={"message": str(response_json["error"]["message"]), "code": "local_openai_compat_api_error"})
 
@@ -1957,6 +2233,22 @@ def _call_local_openai_compat_provider_turn(provider_payload: Dict[str, Any], ru
     try:
         parsed = json.loads(json_candidate_text)
     except json.JSONDecodeError as error:
+        _append_provider_response_mapping_log(
+            "local_openai_compat",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+                "sanitized_output_text": sanitized_output_text,
+                "json_candidate_text": json_candidate_text,
+            },
+            status="error",
+            error={
+                "code": "local_openai_compat_invalid_json",
+                "message": f"Local OpenAI-compatible endpoint returned non-JSON output: {error}",
+            },
+        )
         raise HTTPException(
             status_code=502,
             detail={
@@ -1966,8 +2258,39 @@ def _call_local_openai_compat_provider_turn(provider_payload: Dict[str, Any], ru
             },
         )
     try:
-        return _normalize_local_openai_compat_provider_response(parsed)
+        normalized = _normalize_local_openai_compat_provider_response(parsed)
+        _append_provider_response_mapping_log(
+            "local_openai_compat",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+                "sanitized_output_text": sanitized_output_text,
+                "json_candidate_text": json_candidate_text,
+                "parsed_response": parsed,
+            },
+            normalized_response=normalized,
+        )
+        return normalized
     except ValueError as error:
+        _append_provider_response_mapping_log(
+            "local_openai_compat",
+            provider_payload,
+            runtime_config,
+            mapping_input={
+                "raw_response_json": response_json,
+                "output_text": output_text,
+                "sanitized_output_text": sanitized_output_text,
+                "json_candidate_text": json_candidate_text,
+                "parsed_response": parsed,
+            },
+            status="error",
+            error={
+                "code": "local_openai_compat_invalid_provider_shape",
+                "message": str(error),
+            },
+        )
         raise HTTPException(
             status_code=502,
             detail={
