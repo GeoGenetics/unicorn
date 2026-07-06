@@ -47,8 +47,8 @@ Column 2: current runtime behavior
 Tool Call                                      Current Runtime Behavior
 ---------------------------------------------  --------------------------------------------------------------
 invokeTool("get_graph_context", {})            Returns `buildAgentContext()` exactly. This is the canonical graph snapshot
-                                               and includes `captured_at`, `mode`, `datasets`, `taxonomy`, `filters`, `tree`,
-																							 `report`, and `backend`.
+                                               and currently includes `captured_at`, `context_version`, `session`,
+                                               `datasets`, `filters`, `tree`, `metadata`, and `report_state`.
 
 invokeTool("list_selected_datasets", {})       Requires a backend connection. Returns a provider-facing normalized payload:
                                                `{ ok, mode: "backend", tool: "list_selected_datasets", request, datasets,
@@ -76,35 +76,28 @@ Canonical context shape
 `get_graph_context` currently returns:
 
 - `captured_at`
-- `mode`
+- `context_version`
+- `session`
+  - `backend_connected`
+  - `runtime_provider`
+  - `transport_mode`
 - `datasets`
-  - `selected`
   - `count`
-  - `total_reads`
-  - `direct_taxa`
-- `taxonomy`
-  - `nodes_file`
-  - `names_file`
+  - `names`
 - `filters`
   - `min_reads`
   - `count_mode`
   - `scale_mode`
-  - `search`
 - `tree`
-  - `loaded`
-  - `server_tree_active`
   - `visible_root`
   - `visible_node_count`
-  - `focused_taxid`
-  - `focused_name`
-  - `selected_taxids`
-  - `expanded_taxids`
-  - `collapsed_taxids`
-- `report`
-- `backend`
-  - `connected`
-  - `backend_nodes_file`
-  - `backend_names_file`
+  - `selected_node_count`
+  - `focused_node`
+- `metadata`
+  - `active_field`
+- `report_state`
+  - `type`
+  - `selected_node_count`
 
 Compact-turn note:
 
