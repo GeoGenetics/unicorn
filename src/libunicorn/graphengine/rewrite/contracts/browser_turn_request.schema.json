@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn.local/schemas/unicorn-agent-turn-v1.json",
+  "title": "Unicorn Agent Browser Turn Request V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "turn_id",
+    "session_id",
+    "prompt",
+    "provider",
+    "graph_scope",
+    "conversation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "unicorn_agent_turn_v1"
+    },
+    "turn_id": {
+      "type": "string",
+      "pattern": "^turn_[A-Za-z0-9._-]+$"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^session_[A-Za-z0-9._-]+$"
+    },
+    "prompt": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "base_url"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "google",
+            "local_openai_compat"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "base_url": {
+          "type": "string"
+        }
+      }
+    },
+    "graph_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "datasets",
+        "nodes_file",
+        "names_file",
+        "min_reads",
+        "count_mode",
+        "selected_taxids",
+        "focused_taxid"
+      ],
+      "properties": {
+        "datasets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "nodes_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "names_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "min_reads": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "count_mode": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "subtree"
+          ]
+        },
+        "selected_taxids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true
+        },
+        "focused_taxid": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    },
+    "conversation": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/conversation_message"
+      }
+    }
+  },
+  "$defs": {
+    "conversation_message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "content"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "unicorn_agent_turn_v1",
+      "turn_id": "turn_example_001",
+      "session_id": "session_example_001",
+      "prompt": "Tell me about Viridiplantae",
+      "provider": {
+        "name": "local_openai_compat",
+        "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        "base_url": "http://localhost:8542"
+      },
+      "graph_scope": {
+        "datasets": [
+          "sample_a.bdamage.txt"
+        ],
+        "nodes_file": "nodes.dmp",
+        "names_file": "names.dmp",
+        "min_reads": 1000,
+        "count_mode": "subtree",
+        "selected_taxids": [],
+        "focused_taxid": null
+      },
+      "conversation": []
+    }
+  ]
+}
+

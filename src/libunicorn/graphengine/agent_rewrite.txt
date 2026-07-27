@@ -1,0 +1,412 @@
+I would structure this as a backend-first replacement project with a clean deletion boundary. We preserve only test evidence and agreed data contracts, then remove the old runtime rather than operating two agent frameworks in parallel.
+
+## Phase 0: Freeze Scope
+
+Decide what the first rewritten version must support.
+
+Keep:
+
+- backend-authoritative graph state
+- read-only agent behavior
+- OpenAI
+- Google Gemini
+- local OpenAI-compatible/vLLM
+- JSON-only provider responses
+- Unicorn-controlled tool loop
+- raw provider-response logging
+- existing Agent panel configuration fields
+
+Defer:
+
+- graph mutations
+- native provider tool calling
+- streaming responses
+- persistent multi-user backend sessions
+- advanced tool discovery
+- token compaction beyond obvious duplication removal
+
+Definition of done:
+
+- one short scope document clearly distinguishes V1 from deferred work.
+
+## Phase 1: Inventory the Deletion Boundary
+
+Identify everything belonging to the old framework.
+
+Browser removal targets:
+
+- [graphengine_agent.js](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine_agent.js)
+- [graphengine_provider_adapter.js](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/graphengine_provider_adapter.js)
+- old Agent boot wiring
+- old Agent state fields
+- obsolete provider constants
+- old client-log payload dumping
+
+Backend removal targets:
+
+- provider request builders in `server_app.py`
+- provider response parsers and normalizers
+- old agent logging helpers
+- `/agent/provider-turn`
+- `/agent/client-payload`
+- canonical shadow handling
+- local compatibility code embedded in `server_app.py`
+
+Preserve:
+
+- Agent panel markup and useful styling
+- backend tree and report infrastructure
+- metadata resolver
+- graph data models and store
+- Git history
+
+Definition of done:
+
+- a checklist identifies every old agent symbol, route, state field, and script include.
+
+## Phase 2: Capture Provider Fixtures
+
+Before deletion, preserve sanitized examples from the working integrations.
+
+Suggested structure:
+
+```text
+tests/fixtures/agent/
+    openai/
+        final_answer.json
+        tool_call.json
+        malformed_output.json
+    google/
+        final_answer.json
+        tool_call.json
+        malformed_output.json
+    local_openai_compat/
+        final_answer.json
+        think_and_tool_call.json
+        fenced_json.json
+        compatibility_tool_input.json
+        malformed_output.json
+```
+
+Each fixture should contain:
+
+```json
+{
+  "description": "Local model returns reasoning followed by a tool call",
+  "provider_request": {},
+  "raw_provider_response": {},
+  "expected_extracted_text": "",
+  "expected_normalized_response": {}
+}
+```
+
+Rules:
+
+- remove API keys;
+- replace private dataset names where appropriate;
+- retain `<think>` content when testing raw-response preservation;
+- retain complete provider-native response envelopes;
+- record where each fixture came from.
+
+Definition of done:
+
+- parsers can later be implemented entirely against fixtures without contacting a provider.
+
+## Phase 3: Freeze New Contracts
+
+Status: DONE
+
+The frozen V1 contracts live in `rewrite/contracts/`.
+
+Canonical documentation:
+
+- `rewrite/contracts/README.md`
+
+Machine-readable boundaries:
+
+- `rewrite/contracts/browser_turn_request.schema.json`
+- `rewrite/contracts/provider_adapter_input.schema.json`
+- `rewrite/contracts/normalized_provider_response.schema.json`
+- `rewrite/contracts/tool_result.schema.json`
+- `rewrite/contracts/browser_turn_response.schema.json`
+- `rewrite/contracts/trace_event.schema.json`
+
+The contract package freezes:
+
+- one strict, versioned shape for every provider-neutral boundary
+- backend-owned iteration semantics
+- terminal and nonterminal provider response behavior
+- transport-only API-key handling
+- ordered, secret-free trace semantics
+
+These contracts are the sole V1 authorities. Historical documents under
+`unicorn_agent/` remain implementation references until the old runtime is
+removed, but they do not override the frozen schemas.
+
+## Phase 4: Add Contract and Fixture Tests
+
+Before deleting the runtime, prepare tests for the new system.
+
+Test categories:
+
+- request validation
+- provider request mapping
+- raw response extraction
+- `<think>` preservation and stripping
+- fenced JSON extraction
+- normalization
+- malformed output
+- unknown tool rejection
+- invalid arguments
+- repeated tool call
+- max-iteration handling
+- trace completeness
+
+These tests initially fail because the new implementation does not exist yet. That is expected.
+
+## Phase 5: Remove the Old Agent Framework
+
+Perform the deletion as one isolated change.
+
+After deletion:
+
+- graphengine should still connect and render normally;
+- tree, selection, metadata, reports, barplot, and PCoA remain untouched;
+- the Agent panel can temporarily show “Agent framework rebuilding”;
+- there must be no old provider route or shadow logger left;
+- there must be no second implementation retained as a fallback.
+
+Git history remains the archive. We should not move the old source into a `legacy/` directory.
+
+## Phase 6: Create the Backend Agent Package
+
+Suggested structure:
+
+```text
+unicorn_agent/
+    __init__.py
+    contracts.py
+    context.py
+    registry.py
+    tools.py
+    orchestrator.py
+    tracing.py
+    routes.py
+    providers/
+        __init__.py
+        base.py
+        openai.py
+        google.py
+        openai_compat.py
+```
+
+Responsibilities:
+
+- `contracts.py`: validated request/response models
+- `context.py`: backend-authoritative compact context
+- `registry.py`: stable tool definitions and dispatch
+- `tools.py`: tool implementations
+- `orchestrator.py`: iteration state machine
+- `tracing.py`: ordered persistent trace
+- `routes.py`: `/agent/turn` and trace access
+- `providers/*`: pure provider mapping and parsing
+
+`server_app.py` should only include the Agent router.
+
+## Phase 7: Implement Tracing First
+
+Before real provider calls, implement the full event stream with a fake provider.
+
+Suggested storage:
+
+```text
+logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
+```
+
+Use a path based on `server_app.py` or an explicit environment variable, not the server’s current working directory.
+
+Minimum events:
+
+```text
+turn_received
+turn_validated
+context_built
+iteration_started
+provider_request_mapped
+provider_http_started
+provider_http_completed
+provider_output_extracted
+provider_response_normalized
+tool_call_validated
+tool_execution_started
+tool_execution_completed
+iteration_completed
+turn_completed
+turn_failed
+```
+
+Trace requirements:
+
+- ordered `sequence`;
+- elapsed time;
+- payload byte size;
+- HTTP status;
+- raw provider response;
+- sanitized parsing input;
+- normalized response;
+- exact tool arguments and results;
+- redacted credentials.
+
+## Phase 8: Implement the Read-Only Tool Registry
+
+Start with stable IDs:
+
+```text
+graph.context
+datasets.selected
+nodes.selected
+nodes.find_visible
+node.details
+table.view
+```
+
+Each definition should contain:
+
+- stable ID;
+- description;
+- when to use it;
+- JSON input schema;
+- output summary;
+- implementation;
+- mutation flag.
+
+The backend should execute these tools directly against existing graph models and helpers. Browser callbacks should not be needed for read-only execution.
+
+Browser-owned state such as selected taxids must arrive explicitly in `graph_scope`.
+
+## Phase 9: Implement the Orchestrator with a Fake Provider
+
+The orchestrator should:
+
+1. validate the request;
+2. build context;
+3. start iteration zero;
+4. invoke the provider adapter;
+5. normalize the response;
+6. validate and execute tool calls;
+7. reinject tool results;
+8. stop on final answer, error, repetition, or iteration limit;
+9. return the final result with `trace_id`.
+
+Use a deterministic fake provider first so the entire loop is testable without external services.
+
+## Phase 10: Add Provider Adapters
+
+Recommended order:
+
+1. local OpenAI-compatible/vLLM
+2. Google
+3. OpenAI
+
+Each adapter must expose only:
+
+```text
+map_request(canonical_input) -> provider-native request
+send_request(provider-native request) -> raw provider response
+parse_response(raw provider response) -> normalized response
+```
+
+Provider-specific compatibility handling remains inside its adapter.
+
+The orchestrator must never know about:
+
+- OpenAI Responses objects;
+- Gemini Interactions objects;
+- `choices[*].message.content`;
+- `<think>` blocks;
+- fenced JSON extraction.
+
+## Phase 11: Rebuild the Browser Agent Client
+
+Create a small `graphengine_agent_ui.js`.
+
+Responsibilities:
+
+- provider/model/base URL/API-key controls;
+- prompt submission;
+- minimal graph-scope collection;
+- transcript rendering;
+- error display;
+- showing the `turn_id`;
+- opening or downloading the trace.
+
+It should make one call:
+
+```text
+POST /agent/turn
+```
+
+No browser-side provider loop, tool registry, response parser, or provider adapter should remain.
+
+## Phase 12: Validate Representative Workflows
+
+Required scenarios:
+
+1. `What min_reads threshold am I using?`
+   - direct answer from context
+
+2. `How many datasets are loaded?`
+   - direct answer from context
+
+3. `Tell me about Viridiplantae`
+   - `nodes.find_visible`
+   - `node.details`
+   - final grounded answer
+
+4. `Tell me about the selected nodes`
+   - selected-node lookup
+   - multi-node detail
+   - final answer
+
+5. Unknown tool request
+   - clean rejection
+
+6. Repeated tool call
+   - explicit trace and controlled termination
+
+7. `<think>` response
+   - raw reasoning retained
+   - sanitized JSON parsed
+
+8. Network failure
+   - structured error with complete trace
+
+For every scenario, one trace file must reconstruct the complete turn.
+
+## Phase 13: Remove Transition Documentation
+
+Once the new runtime works:
+
+- rewrite `provider_turn_contract.txt`;
+- rewrite the tool registry document;
+- replace the old compact-context proposal;
+- update `server_README.md`;
+- update `TODO.txt`;
+- remove references to canonical shadows and browser orchestration;
+- document how to locate and inspect traces.
+
+## Recommended Commit Sequence
+
+1. Freeze scope and contracts.
+2. Add sanitized fixtures.
+3. Add new contract/fixture tests.
+4. Remove old agent runtime.
+5. Add backend package and tracing.
+6. Add registry and fake-provider orchestrator.
+7. Add local vLLM adapter.
+8. Add browser client.
+9. Add Google adapter.
+10. Add OpenAI adapter.
+11. Rewrite documentation.
+
+The key checkpoint is after Phase 9: before reconnecting a real LLM, we should be able to inspect a deterministic fake-provider turn from browser request through multiple tool iterations and final response. That proves the architecture is traceable before provider behavior complicates it.

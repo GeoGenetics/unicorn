@@ -1,0 +1,403 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn.local/schemas/unicorn-provider-input-v1.json",
+  "title": "Unicorn Provider Adapter Input V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "turn_id",
+    "iteration",
+    "model",
+    "instructions",
+    "graph_context",
+    "tools",
+    "tool_results",
+    "conversation",
+    "user_prompt"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "unicorn_provider_input_v1"
+    },
+    "turn_id": {
+      "type": "string",
+      "pattern": "^turn_[A-Za-z0-9._-]+$"
+    },
+    "iteration": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instructions": {
+      "type": "string",
+      "minLength": 1
+    },
+    "graph_context": {
+      "$ref": "#/$defs/graph_context"
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/tool_definition"
+      }
+    },
+    "tool_results": {
+      "type": "array",
+      "items": {
+        "$ref": "https://unicorn.local/schemas/unicorn-tool-result-v1.json"
+      }
+    },
+    "conversation": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/conversation_message"
+      }
+    },
+    "user_prompt": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "graph_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session",
+        "datasets",
+        "tree",
+        "filters",
+        "metadata",
+        "report_state"
+      ],
+      "properties": {
+        "session": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "backend_connected"
+          ],
+          "properties": {
+            "backend_connected": {
+              "type": "boolean"
+            }
+          }
+        },
+        "datasets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "selected_count"
+          ],
+          "properties": {
+            "selected_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "tree": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "visible_node_count",
+            "selected_node_count",
+            "visible_root",
+            "focused_node"
+          ],
+          "properties": {
+            "visible_node_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "selected_node_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "visible_root": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/node_summary"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "focused_node": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/node_summary"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "filters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "min_reads",
+            "count_mode"
+          ],
+          "properties": {
+            "min_reads": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "count_mode": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "subtree"
+              ]
+            }
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "active_field"
+          ],
+          "properties": {
+            "active_field": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            }
+          }
+        },
+        "report_state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "active",
+            "mode"
+          ],
+          "properties": {
+            "active": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "node_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taxid",
+        "name",
+        "rank"
+      ],
+      "properties": {
+        "taxid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rank": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "tool_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_id",
+        "description",
+        "arguments_schema"
+      ],
+      "properties": {
+        "tool_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "arguments_schema": {
+          "type": "object"
+        }
+      }
+    },
+    "conversation_message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "content"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "unicorn_provider_input_v1",
+      "turn_id": "turn_example_001",
+      "iteration": 0,
+      "model": "example-model",
+      "instructions": "Answer from graph context and use only advertised Unicorn tools.",
+      "graph_context": {
+        "session": {
+          "backend_connected": true
+        },
+        "datasets": {
+          "selected_count": 1
+        },
+        "tree": {
+          "visible_node_count": 24,
+          "selected_node_count": 0,
+          "visible_root": {
+            "taxid": 1,
+            "name": "root",
+            "rank": "no rank"
+          },
+          "focused_node": null
+        },
+        "filters": {
+          "min_reads": 1000,
+          "count_mode": "subtree"
+        },
+        "metadata": {
+          "active_field": null
+        },
+        "report_state": {
+          "active": false,
+          "mode": null
+        }
+      },
+      "tools": [
+        {
+          "tool_id": "node.details",
+          "description": "Return backend-authoritative details for one taxid.",
+          "arguments_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "taxid"
+            ],
+            "properties": {
+              "taxid": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ],
+      "tool_results": [],
+      "conversation": [],
+      "user_prompt": "Tell me about Viridiplantae"
+    },
+    {
+      "schema_version": "unicorn_provider_input_v1",
+      "turn_id": "turn_example_002",
+      "iteration": 1,
+      "model": "example-model",
+      "instructions": "Answer from graph context and tool results.",
+      "graph_context": {
+        "session": {
+          "backend_connected": true
+        },
+        "datasets": {
+          "selected_count": 1
+        },
+        "tree": {
+          "visible_node_count": 24,
+          "selected_node_count": 0,
+          "visible_root": {
+            "taxid": 1,
+            "name": "root",
+            "rank": "no rank"
+          },
+          "focused_node": null
+        },
+        "filters": {
+          "min_reads": 1000,
+          "count_mode": "subtree"
+        },
+        "metadata": {
+          "active_field": null
+        },
+        "report_state": {
+          "active": false,
+          "mode": null
+        }
+      },
+      "tools": [
+        {
+          "tool_id": "node.details",
+          "description": "Return backend-authoritative details for one taxid.",
+          "arguments_schema": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "taxid"
+            ],
+            "properties": {
+              "taxid": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      ],
+      "tool_results": [
+        {
+          "schema_version": "unicorn_tool_result_v1",
+          "tool_id": "node.details",
+          "arguments": {
+            "taxid": 33090
+          },
+          "ok": true,
+          "result": {
+            "taxid": 33090,
+            "name": "Viridiplantae",
+            "rank": "kingdom"
+          },
+          "error": null
+        }
+      ],
+      "conversation": [],
+      "user_prompt": "Tell me about Viridiplantae"
+    }
+  ]
+}

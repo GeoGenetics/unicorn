@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn.local/schemas/unicorn-tool-result-v1.json",
+  "title": "Unicorn Tool Result V1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/success"
+    },
+    {
+      "$ref": "#/$defs/failure"
+    }
+  ],
+  "$defs": {
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "tool_id",
+        "arguments",
+        "ok",
+        "result",
+        "error"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "unicorn_tool_result_v1"
+        },
+        "tool_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "ok": {
+          "const": true
+        },
+        "result": {
+          "type": "object"
+        },
+        "error": {
+          "type": "null"
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "tool_id",
+        "arguments",
+        "ok",
+        "result",
+        "error"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "unicorn_tool_result_v1"
+        },
+        "tool_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "ok": {
+          "const": false
+        },
+        "result": {
+          "type": "null"
+        },
+        "error": {
+          "$ref": "#/$defs/error_detail"
+        }
+      }
+    },
+    "error_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "unicorn_tool_result_v1",
+      "tool_id": "node.details",
+      "arguments": {
+        "taxid": 33090
+      },
+      "ok": true,
+      "result": {
+        "taxid": 33090,
+        "name": "Viridiplantae",
+        "rank": "kingdom"
+      },
+      "error": null
+    },
+    {
+      "schema_version": "unicorn_tool_result_v1",
+      "tool_id": "node.details",
+      "arguments": {
+        "taxid": 999999999
+      },
+      "ok": false,
+      "result": null,
+      "error": {
+        "code": "node_not_found",
+        "message": "The requested taxid is not available."
+      }
+    }
+  ]
+}
+

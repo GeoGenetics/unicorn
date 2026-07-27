@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn.local/schemas/unicorn-provider-response-v1.json",
+  "title": "Unicorn Normalized Provider Response V1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/assistant_message"
+    },
+    {
+      "$ref": "#/$defs/tool_call"
+    },
+    {
+      "$ref": "#/$defs/final_answer"
+    },
+    {
+      "$ref": "#/$defs/error"
+    }
+  ],
+  "$defs": {
+    "assistant_message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "type",
+        "content"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "unicorn_provider_response_v1"
+        },
+        "type": {
+          "const": "assistant_message"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "tool_call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "type",
+        "tool_id",
+        "arguments"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "unicorn_provider_response_v1"
+        },
+        "type": {
+          "const": "tool_call"
+        },
+        "tool_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+        },
+        "arguments": {
+          "type": "object"
+        }
+      }
+    },
+    "final_answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "type",
+        "content"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "unicorn_provider_response_v1"
+        },
+        "type": {
+          "const": "final_answer"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "type",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "unicorn_provider_response_v1"
+        },
+        "type": {
+          "const": "error"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "unicorn_provider_response_v1",
+      "type": "tool_call",
+      "tool_id": "node.details",
+      "arguments": {
+        "taxid": 33090
+      }
+    },
+    {
+      "schema_version": "unicorn_provider_response_v1",
+      "type": "final_answer",
+      "content": "Viridiplantae has 57,344,348 subtree reads."
+    }
+  ]
+}
+

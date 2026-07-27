@@ -1,0 +1,527 @@
+Unicorn Agent Rewrite - Old Framework Removal Checklist
+=======================================================
+
+Purpose
+-------
+
+This checklist defines the deletion boundary for the current agent framework.
+It inventories the live browser runtime, backend provider runtime, integration
+hooks, generated artifacts, tests, and documentation that belong to the old
+architecture.
+
+No item in this document should be removed until Phase 2 provider fixtures and
+Phase 3 replacement contracts have been frozen.
+
+Checklist labels:
+
+- REMOVE: old implementation should be deleted
+- REPLACE: old integration point should remain usable but receive a new owner
+- PRESERVE: not part of the old runtime and must survive the deletion pass
+- REVIEW: retain until its replacement or fixture value has been resolved
+
+
+1. Browser Runtime Files
+------------------------
+
+[ ] REMOVE `graphengine_agent.js` in full.
+
+Old symbols contained in this file:
+
+[ ] REMOVE `initAgentControls`
+[ ] REMOVE `populateAgentModelOptions`
+[ ] REMOVE `getKnownAgentProviderTargets`
+[ ] REMOVE `handleAgentProviderChange`
+[ ] REMOVE `handleAgentModelChange`
+[ ] REMOVE `handleAgentApiKeyInput`
+[ ] REMOVE `handleAgentBaseUrlInput`
+[ ] REMOVE `normalizeConfiguredAgentProvider`
+[ ] REMOVE `normalizeAgentBaseUrl`
+[ ] REMOVE `getAgentRuntimeConfig`
+[ ] REMOVE `getConfiguredAgentProvider`
+[ ] REMOVE `shouldUseOpenAIRuntime`
+[ ] REMOVE `shouldUseGoogleRuntime`
+[ ] REMOVE `shouldUseLocalOpenAICompatRuntime`
+[ ] REMOVE `syncAgentRuntimeProvider`
+[ ] REMOVE `clearAgentTranscript`
+[ ] REMOVE `pushAgentEntry`
+[ ] REMOVE `renderAgentTranscript`
+[ ] REMOVE `renderAgentProviderState`
+[ ] REMOVE `buildAgentContext`
+[ ] REMOVE `buildSelectedDatasetsToolPayload`
+[ ] REMOVE `summarizeCurrentAgentReport`
+[ ] REMOVE `normalizeGraphContextForProviderContext`
+[ ] REMOVE `normalizeSelectedDatasetsForProvider`
+[ ] REMOVE `normalizeSelectedNodesForProvider`
+[ ] REMOVE `normalizeVisibleNodeMatchesForProvider`
+[ ] REMOVE `normalizeNodeDetailsForProvider`
+[ ] REMOVE `normalizeTableViewForProvider`
+[ ] REMOVE `requireAgentBackendConnection`
+[ ] REMOVE `requireAgentBackendTree`
+[ ] REMOVE the agent-local `getActiveNodesFilename`
+[ ] REMOVE the agent-local `getActiveNamesFilename`
+[ ] REMOVE `normalizeToolTaxid`
+[ ] REMOVE `normalizeToolTaxids`
+[ ] REMOVE `normalizeToolLimit`
+[ ] REMOVE `normalizeToolQuery`
+[ ] REMOVE `findVisibleNodesByName`
+[ ] REMOVE `createUnicornAgentRegistry`
+[ ] REMOVE `getProviderExposedToolNames`
+[ ] REMOVE `buildProviderToolDefinitions`
+[ ] REMOVE `describeAgentTool`
+[ ] REMOVE `getOrCreateAgentSessionId`
+[ ] REMOVE `generateAgentTurnId`
+[ ] REMOVE `buildCanonicalTurnToolDefinitions`
+[ ] REMOVE `buildCanonicalTurnRequest`
+[ ] REMOVE `logCanonicalTurnRequestShadow`
+[ ] REMOVE `buildProviderRequestPayload`
+[ ] REMOVE `executeAgentProviderTurn`
+[ ] REMOVE `runMockAgent`
+[ ] REMOVE `runMockAgentLegacy`
+[ ] REMOVE `extractTaxidFromPrompt`
+[ ] REMOVE `detectUnsupportedAgentMutationRequest`
+[ ] REMOVE `buildUnsupportedAgentMutationMessage`
+[ ] REMOVE `serializeAgentToolCall`
+[ ] REMOVE `synthesizeFinalAnswerFromToolResult`
+[ ] REMOVE `handleAgentSend`
+[ ] REMOVE the agent-local `setStatus` wrapper
+[ ] REMOVE the agent-local `addClientLog` wrapper
+[ ] REMOVE the agent-local `errorToDetail` wrapper
+[ ] REMOVE `getAgentRegistry`
+[ ] REMOVE `getProviderAdapter`
+[ ] REMOVE `namespace.agent`
+[ ] REMOVE the `Object.assign(globalObject, namespace.agent)` global export
+
+
+[ ] REMOVE `graphengine_provider_adapter.js` in full.
+
+Old symbols contained in this file:
+
+[ ] REMOVE `createProviderAdapter`
+[ ] REMOVE `createMockProvider`
+[ ] REMOVE `createOpenAIProvider`
+[ ] REMOVE `createGoogleProvider`
+[ ] REMOVE `createLocalOpenAICompatProvider`
+[ ] REMOVE `resolveBackendProviderTurnEndpoint`
+[ ] REMOVE `buildOpenAIResponsesRequest`
+[ ] REMOVE `buildOpenAIDeveloperContextMessage`
+[ ] REMOVE `buildOpenAIInternalResponseFormat`
+[ ] REMOVE `toOpenAIInputMessage`
+[ ] REMOVE `normalizeOpenAIInputRole`
+[ ] REMOVE `parseOpenAIResponsesApiResponse`
+[ ] REMOVE `extractOpenAIOutputText`
+[ ] REMOVE `normalizeInternalProviderResponse`
+[ ] REMOVE `runMockProviderRequest`
+[ ] REMOVE `defaultExtractTaxidFromPrompt`
+[ ] REMOVE the `OPENAI_INTERNAL_RESPONSE_SCHEMA_NAME` constant
+[ ] REMOVE the `window.UnicornAgentProviderModule` global export
+
+
+2. Browser Script Includes
+--------------------------
+
+Current includes in `index.html`:
+
+[ ] REMOVE `<script src="graphengine_provider_adapter.js?v=20260701a"></script>`
+[ ] REMOVE `<script src="graphengine_agent.js?v=20260701a"></script>`
+
+[ ] REPLACE these includes later with the new small browser Agent UI client.
+[ ] PRESERVE the explicit dependency-order comment and boot-last structure.
+
+
+3. Browser Boot Wiring
+----------------------
+
+Current wiring in `graphengine_boot.js`:
+
+[ ] REMOVE `const agent = namespace.agent`
+[ ] REMOVE `agent` from the required-module startup guard
+[ ] REMOVE the `UnicornAgentProviderModule.createProviderAdapter` startup guard
+[ ] REMOVE creation of `unicornAgentRegistry`
+[ ] REMOVE `window.unicornAgentRegistry`
+[ ] REMOVE creation of `unicornAgentProviderAdapter`
+[ ] REMOVE `window.unicornAgentProviderAdapter`
+[ ] REMOVE `window.handleAgentSend`
+[ ] REMOVE the call to `agent.initAgentControls()`
+[ ] REMOVE the call to `agent.renderAgentTranscript()`
+
+[ ] REPLACE old boot wiring with one initializer for the future
+    `graphengine_agent_ui.js` client.
+[ ] PRESERVE all non-Agent boot event wiring.
+
+
+4. Browser State
+----------------
+
+Current `state.agent` object in `graphengine_state.js`:
+
+[ ] REMOVE `state.agent.history`
+[ ] REMOVE `state.agent.sessionId`
+[ ] REMOVE `state.agent.runtimeProvider`
+[ ] REMOVE `state.agent.transportMode`
+[ ] REMOVE `state.agent.configuredProvider`
+[ ] REMOVE `state.agent.configuredModel`
+[ ] REMOVE `state.agent.apiKey`
+[ ] REMOVE `state.agent.baseUrl`
+[ ] REMOVE the enclosing old `state.agent` object
+
+[ ] REPLACE it later with minimal UI-only state.
+[ ] Ensure the replacement never treats API credentials as persistent graph
+    state or trace data.
+[ ] PRESERVE all tree, selection, metadata, report, and backend state.
+
+
+5. Browser Core Constants
+-------------------------
+
+Current declarations and exports in `graphengine_core.js`:
+
+[ ] REMOVE `AGENT_PROVIDER_MODELS`
+[ ] REMOVE `AGENT_SUPPORTED_PROVIDER_TARGETS`
+[ ] REMOVE `AGENT_V1_READ_ONLY_TOOL_NAMES`
+[ ] REMOVE `AGENT_MAX_TOOL_ITERATIONS`
+[ ] REMOVE their four `namespace.core` exports
+
+[ ] REPLACE provider/model UI choices in the new Agent UI client or a dedicated
+    configuration module.
+[ ] Move tool identities and iteration policy to the backend rewrite.
+[ ] PRESERVE shared utilities such as `formatLogTime`, `errorToDetail`, and
+    `escapeHtml`.
+
+
+6. Browser Agent-Specific Shared Helper
+---------------------------------------
+
+Current declaration and export in `graphengine_tree_model.js`:
+
+[ ] REMOVE `summarizeNodeForAgent`
+[ ] REMOVE `summarizeNodeForAgent` from `namespace.treeModel`
+
+This helper is used only by the old browser agent runtime. Preserve all general
+tree-model helpers.
+
+
+7. Browser DOM, Markup, and Styling
+----------------------------------
+
+The existing panel is part of the Phase 0 preserved surface.
+
+PRESERVE Agent panel markup in `index.html`:
+
+[ ] PRESERVE `toggleAgentSection`
+[ ] PRESERVE `agentSectionBody`
+[ ] PRESERVE `agentMeta`
+[ ] PRESERVE `agentProviderSelect`
+[ ] PRESERVE `agentModelSelect`
+[ ] PRESERVE `agentApiKey`
+[ ] PRESERVE `agentBaseUrl`
+[ ] PRESERVE `agentProviderState`
+[ ] PRESERVE `agentPrompt`
+[ ] PRESERVE `agentSendBtn`
+[ ] PRESERVE `agentClearBtn`
+[ ] PRESERVE `agentTranscript`
+
+PRESERVE matching handles in `graphengine_dom.js`:
+
+[ ] PRESERVE all twelve Agent DOM references listed above
+
+PRESERVE useful Agent styles in `styles.css`:
+
+[ ] PRESERVE `.agent-shell`
+[ ] PRESERVE `.agent-shell-head`
+[ ] PRESERVE `.agent-meta`
+[ ] PRESERVE `.agent-config`
+[ ] PRESERVE `.agent-api-key-label`
+[ ] PRESERVE `.agent-provider-state`
+[ ] PRESERVE `.agent-prompt`
+[ ] PRESERVE `.agent-actions`
+[ ] PRESERVE `.agent-transcript`
+[ ] PRESERVE `.agent-empty`
+[ ] PRESERVE `.agent-entry` and role variants
+[ ] PRESERVE `.agent-entry-head`
+[ ] PRESERVE `.agent-entry-role`
+[ ] PRESERVE `.agent-entry-time`
+[ ] PRESERVE `.agent-entry-message`
+[ ] PRESERVE `.agent-entry-tools`
+[ ] PRESERVE `.agent-tool-badge`
+[ ] PRESERVE `.agent-entry-note`
+[ ] PRESERVE the responsive `.agent-config` rule
+
+Related shared UI hooks:
+
+[ ] PRESERVE the Agent section toggle initialization in `graphengine_ui.js`
+[ ] REPLACE the old Agent prompt/send enablement in
+    `graphengine_backend.js::syncBackendRuntimeUiState` with the new UI client's
+    availability rule
+
+
+8. Old Browser Client-Log Payload Dumping
+-----------------------------------------
+
+Remove old Agent calls that place complete JSON payloads in the visible client
+log:
+
+[ ] REMOVE full provider request payload detail from each iteration
+[ ] REMOVE full normalized provider response detail from each iteration
+[ ] REMOVE full tool argument detail from old tool execution entries
+[ ] REMOVE canonical shadow success/failure log messages
+[ ] REMOVE browser console dumps for `[Unicorn Agent Context]`
+[ ] REMOVE browser console dumps for `[Unicorn Agent Provider Response]`
+[ ] REMOVE the old `Captured agent context in the browser runtime` event
+
+[ ] PRESERVE the general client-log component for non-Agent graphengine events.
+[ ] The replacement Agent UI may log concise turn IDs, statuses, and trace
+    locations, but not full provider payloads.
+
+
+9. Backend Provider Constants and Log Destinations
+--------------------------------------------------
+
+Current constants in `server_app.py`:
+
+[ ] REMOVE `OPENAI_RESPONSES_ENDPOINT`
+[ ] REMOVE `GOOGLE_INTERACTIONS_ENDPOINT`
+[ ] REMOVE `LOCAL_OPENAI_COMPAT_DEFAULT_ENDPOINT`
+[ ] REMOVE `AGENT_PROVIDER_LOG_PATH`
+[ ] REMOVE `AGENT_PROVIDER_RAW_LOG_DIR`
+[ ] REMOVE `AGENT_CLIENT_PAYLOAD_LOG_DIR`
+[ ] REMOVE `AGENT_PROVIDER_RESPONSE_LOG_DIR`
+[ ] REMOVE `AGENT_PROVIDER_REQUEST_MAPPING_LOG_DIR`
+[ ] REMOVE `AGENT_PROVIDER_NATIVE_REQUEST_LOG_DIR`
+[ ] REMOVE `AGENT_PROVIDER_NATIVE_RESPONSE_RAW_LOG_DIR`
+[ ] REMOVE `AGENT_PROVIDER_RESPONSE_MAPPING_LOG_DIR`
+
+Old environment variables retired with these constants:
+
+[ ] REMOVE `UNICORN_GRAPHENGINE_AGENT_LOG`
+[ ] REMOVE `UNICORN_GRAPHENGINE_AGENT_RAW_LOG_DIR`
+[ ] REMOVE `UNICORN_GRAPHENGINE_AGENT_CLIENT_PAYLOAD_LOG_DIR`
+[ ] REMOVE `UNICORN_GRAPHENGINE_AGENT_PROVIDER_RESPONSE_LOG_DIR`
+[ ] REMOVE `UNICORN_GRAPHENGINE_AGENT_PROVIDER_REQUEST_MAPPING_LOG_DIR`
+[ ] REMOVE `UNICORN_GRAPHENGINE_AGENT_PROVIDER_NATIVE_REQUEST_LOG_DIR`
+[ ] REMOVE `UNICORN_GRAPHENGINE_AGENT_PROVIDER_NATIVE_RESPONSE_RAW_LOG_DIR`
+[ ] REMOVE `UNICORN_GRAPHENGINE_AGENT_PROVIDER_RESPONSE_MAPPING_LOG_DIR`
+
+[ ] REPLACE all old log destinations with one ordered V1 trace destination.
+[ ] PRESERVE the general graphengine `LOGGER`.
+
+
+10. Backend Old Logging Helpers
+-------------------------------
+
+Remove from `server_app.py`:
+
+[ ] REMOVE `_redact_provider_runtime_config`
+[ ] REMOVE `_append_agent_provider_log`
+[ ] REMOVE `_dump_agent_provider_raw_response`
+[ ] REMOVE `_append_agent_client_payload_log`
+[ ] REMOVE `_append_agent_provider_response_log`
+[ ] REMOVE `_extract_turn_identity`
+[ ] REMOVE `_redact_headers`
+[ ] REMOVE `_append_agent_stage_log`
+[ ] REMOVE `_append_provider_request_mapping_log`
+[ ] REMOVE `_append_provider_native_request_log`
+[ ] REMOVE `_append_provider_native_response_raw_log`
+[ ] REMOVE `_append_provider_response_mapping_log`
+
+The new trace package must implement new redaction and ordered-event handling
+from the frozen trace contract. These helpers should not be copied unchanged.
+
+
+11. Backend Old Request Builders and Schemas
+--------------------------------------------
+
+Remove from `server_app.py`:
+
+[ ] REMOVE `_resolve_openai_responses_endpoint`
+[ ] REMOVE `_normalize_openai_input_role`
+[ ] REMOVE `_to_openai_input_message`
+[ ] REMOVE `_build_openai_internal_response_format`
+[ ] REMOVE `_build_unicorn_internal_response_schema`
+[ ] REMOVE `_build_provider_contract_instruction_text`
+[ ] REMOVE `_build_openai_developer_context_message`
+[ ] REMOVE `_build_openai_responses_request`
+[ ] REMOVE `_resolve_google_interactions_endpoint`
+[ ] REMOVE `_resolve_local_openai_compat_chat_endpoint`
+[ ] REMOVE `_build_google_interactions_input`
+[ ] REMOVE `_build_google_interactions_request`
+[ ] REMOVE `_build_local_openai_compat_chat_request`
+
+Provider request construction will be recreated inside dedicated provider
+adapters after the new contracts are frozen.
+
+
+12. Backend Old Response Parsing and Compatibility
+--------------------------------------------------
+
+Remove from `server_app.py`:
+
+[ ] REMOVE `_extract_google_output_text`
+[ ] REMOVE `_extract_openai_output_text`
+[ ] REMOVE `_extract_local_openai_compat_output_text`
+[ ] REMOVE `_strip_json_code_fences`
+[ ] REMOVE `_strip_think_blocks`
+[ ] REMOVE `_extract_last_fenced_json_block`
+[ ] REMOVE `_extract_first_top_level_json_object`
+[ ] REMOVE `_extract_best_json_candidate`
+[ ] REMOVE `_normalize_internal_provider_response`
+[ ] REMOVE `_normalize_local_openai_compat_provider_response`
+
+Before deletion:
+
+[ ] REVIEW these functions while creating Phase 2 fixtures
+[ ] Preserve their learned behavior in fixture expectations, not copied source
+[ ] Ensure a fixture covers `<think>` preservation plus sanitized parsing
+[ ] Ensure fixtures cover fenced JSON and compatibility `tool`/`input` output
+
+
+13. Backend Old Provider Transport
+----------------------------------
+
+Remove from `server_app.py`:
+
+[ ] REMOVE `_call_openai_provider_turn`
+[ ] REMOVE `_call_google_provider_turn`
+[ ] REMOVE `_call_local_openai_compat_provider_turn`
+
+After these functions are removed, verify whether these imports are unused:
+
+[ ] REVIEW and remove `json` if no non-Agent use remains
+[ ] REVIEW and remove `re` if no non-Agent use remains
+[ ] REVIEW and remove `urllib.error as urllib_error` if unused
+[ ] REVIEW and remove `urllib.request as urllib_request` if unused
+
+Current inspection indicates these four imports are used only by the old Agent
+implementation, but usage must be checked again during the actual deletion.
+
+
+14. Backend Old Routes
+----------------------
+
+Remove from `server_app.py`:
+
+[ ] REMOVE `POST /agent/provider-turn`
+[ ] REMOVE route function `agent_provider_turn`
+[ ] REMOVE `POST /agent/client-payload`
+[ ] REMOVE route function `agent_client_payload`
+
+[ ] Confirm no old Agent route remains in FastAPI's generated route list.
+[ ] Later replace both routes with the single V1 `POST /agent/turn` route and
+    trace-access route defined by the new contracts.
+
+
+15. Generated Old Runtime Artifacts
+-----------------------------------
+
+Do not delete these until Phase 2 fixture capture is complete.
+
+[ ] REVIEW `uploads/graphengine_agent_provider.jsonl` for fixture material
+[ ] REVIEW any `logs/agent_provider/` files for local raw responses
+[ ] REVIEW any `logs/agent_client_payload/` files
+[ ] REVIEW any `logs/agent_provider_response/` files
+[ ] REVIEW any `logs/agent_provider_request_mapping/` files
+[ ] REVIEW any `logs/agent_provider_native_request/` files
+[ ] REVIEW any `logs/agent_provider_native_response_raw/` files
+[ ] REVIEW any `logs/agent_provider_response_mapping/` files
+
+After fixtures are captured and sanitized:
+
+[ ] REMOVE obsolete generated old-runtime logs from the working tree
+[ ] Do not commit credentials, private prompts, or unsanitized model responses
+
+
+16. Tests Coupled to the Old Runtime
+------------------------------------
+
+Current E2E test:
+
+[ ] REMOVE or completely rewrite
+    `tests/e2e/test_agent_panel.py::test_agent_panel_mock_transcript_and_logs`
+
+Old assumptions to remove from that test:
+
+[ ] REMOVE the requirement that the default runtime reports `mock mode`
+[ ] REMOVE deterministic browser-local mock-provider behavior
+[ ] REMOVE expectations for browser-local tool badges produced by the old loop
+[ ] REMOVE expectations for `Captured agent context`
+[ ] REMOVE expectations for old provider/tool client-log messages
+
+Related test documentation:
+
+[ ] REPLACE the Agent Safety Smoke Test in `tests/regression_checklist.md`
+[ ] REPLACE old Agent guidance in `tests/dev_main.md` where architecture-specific
+[ ] UPDATE `tests/run_tests.sh` help text after the new Agent test path exists
+
+[ ] PRESERVE the general graphengine fixtures and backend/frontend service setup.
+[ ] Ignore generated historical `tests/logs/*.log` entries during source
+    removal; they are not runtime dependencies.
+
+
+17. Old Agent Documentation
+---------------------------
+
+These documents describe the old or transitional runtime and must not be
+treated as the new contract:
+
+[ ] REVIEW `unicorn_agent/canonical_turn_request.schema.txt` for Phase 3 input
+[ ] REVIEW `unicorn_agent/compact_provider_context.schema.txt` for useful intent
+[ ] REVIEW `unicorn_agent/graphengine_agent_registry.txt` for tool semantics
+[ ] REVIEW `unicorn_agent/provider_turn_contract.txt` for provider lessons
+
+After Phase 3:
+
+[ ] REPLACE or remove these documents so only the new frozen contracts remain
+[ ] UPDATE the Agent section in `server_README.md`
+[ ] UPDATE Agent roadmap language in `TODO.txt`
+[ ] UPDATE or retire `point2_agentic_graphengine.txt`
+
+Reference utility:
+
+[ ] PRESERVE `vLLM/desktop_chat.py` temporarily as a manual connectivity
+    reference and possible fixture source
+[ ] REVIEW its final location after the new local provider adapter is working
+
+
+18. Explicitly Preserved Graphengine Infrastructure
+---------------------------------------------------
+
+The following are outside the deletion boundary:
+
+[ ] PRESERVE backend dataset loading and selection
+[ ] PRESERVE backend taxonomy loading
+[ ] PRESERVE `GraphEngineStore`
+[ ] PRESERVE graph data models and tree construction
+[ ] PRESERVE visible-tree endpoints and semantics
+[ ] PRESERVE node tooltip and table endpoints
+[ ] PRESERVE count matrix and rank report endpoints
+[ ] PRESERVE metadata loading and `graphengine_metadata.js`
+[ ] PRESERVE selection behavior and `graphengine_selection.js`
+[ ] PRESERVE tree rendering and `graphengine_tree_render.js`
+[ ] PRESERVE report rendering and `graphengine_reports.js`
+[ ] PRESERVE `unicorn_compute`
+[ ] PRESERVE general client logging for non-Agent events
+[ ] PRESERVE Agent panel markup and useful styling as listed above
+[ ] PRESERVE Git history as the sole archive of deleted implementation code
+
+
+19. Deletion-Pass Completion Checks
+-----------------------------------
+
+The deletion boundary is complete when:
+
+[ ] `graphengine_agent.js` no longer exists
+[ ] `graphengine_provider_adapter.js` no longer exists
+[ ] neither old script is referenced by `index.html`
+[ ] no old Agent browser global is created
+[ ] no browser-local Agent tool registry or provider loop remains
+[ ] no canonical shadow request path remains
+[ ] no old provider builder, parser, transport, or logger remains in
+    `server_app.py`
+[ ] `/agent/provider-turn` no longer exists
+[ ] `/agent/client-payload` no longer exists
+[ ] no old Agent log environment variable remains active
+[ ] graphengine still boots without requiring the removed Agent modules
+[ ] backend connection, tree rendering, selection, metadata, reports, barplot,
+    and PCoA remain operational
+[ ] the preserved Agent panel clearly reports that the replacement runtime is
+    not yet available
+[x] Phase 2 fixtures and Phase 3 contracts exist before deletion is committed

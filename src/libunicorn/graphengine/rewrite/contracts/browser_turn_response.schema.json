@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn.local/schemas/unicorn-agent-result-v1.json",
+  "title": "Unicorn Agent Browser Turn Response V1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/completed"
+    },
+    {
+      "$ref": "#/$defs/failed"
+    },
+    {
+      "$ref": "#/$defs/iteration_limit"
+    }
+  ],
+  "$defs": {
+    "base_properties": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "turn_id",
+        "status",
+        "answer",
+        "tools_used",
+        "error",
+        "trace_id"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "unicorn_agent_result_v1"
+        },
+        "turn_id": {
+          "type": "string",
+          "pattern": "^turn_[A-Za-z0-9._-]+$"
+        },
+        "status": {
+          "type": "string"
+        },
+        "answer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tools_used": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tool_use"
+          }
+        },
+        "error": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/error_detail"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trace_id": {
+          "type": "string",
+          "pattern": "^trace_[A-Za-z0-9._-]+$"
+        }
+      }
+    },
+    "completed": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base_properties"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "completed"
+            },
+            "answer": {
+              "type": "string",
+              "minLength": 1
+            },
+            "error": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "failed": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base_properties"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "failed"
+            },
+            "answer": {
+              "type": "null"
+            },
+            "error": {
+              "$ref": "#/$defs/error_detail"
+            }
+          }
+        }
+      ]
+    },
+    "iteration_limit": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/base_properties"
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "iteration_limit"
+            },
+            "answer": {
+              "type": "null"
+            },
+            "error": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/error_detail"
+                },
+                {
+                  "properties": {
+                    "code": {
+                      "const": "iteration_limit"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "tool_use": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_id",
+        "ok"
+      ],
+      "properties": {
+        "tool_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      }
+    },
+    "error_detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "unicorn_agent_result_v1",
+      "turn_id": "turn_example_001",
+      "status": "completed",
+      "answer": "Viridiplantae is a kingdom with 57,344,348 subtree reads.",
+      "tools_used": [
+        {
+          "tool_id": "node.details",
+          "ok": true
+        }
+      ],
+      "error": null,
+      "trace_id": "trace_example_001"
+    }
+  ]
+}
+
