@@ -27,3 +27,5 @@ src/libunicorn/graphengine/tests/e2e/__pycache__
 src/libunicorn/graphengine/tests/logs/*.log
 resources/
 doc/*.pdf
+__pycache__/
+*.py[cod]

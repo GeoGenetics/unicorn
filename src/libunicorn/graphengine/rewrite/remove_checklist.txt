@@ -16,7 +16,8 @@ Phase 5 status:
 
 - old runtime deletion complete
 - static source, syntax, and route checks complete
-- user-run functional regression gate pending
+- user-run functional regression gate complete
+- Phase 5 complete
 
 Checklist labels:
 
@@ -526,7 +527,7 @@ The deletion boundary is complete when:
 [x] `/agent/client-payload` no longer exists
 [x] no old Agent log environment variable remains active
 [x] graphengine boot no longer requires the removed Agent modules
-[ ] backend connection, tree rendering, selection, metadata, reports, barplot,
+[x] backend connection, tree rendering, selection, metadata, reports, barplot,
     and PCoA remain operational
 [x] the preserved Agent panel clearly reports that the replacement runtime is
     not yet available

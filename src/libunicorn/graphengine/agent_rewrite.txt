@@ -181,7 +181,7 @@ The default `tests/run_tests.sh` path now includes both `tests/unit` and
 
 ## Phase 5: Remove the Old Agent Framework
 
-Status: CODE DELETION COMPLETE; USER REGRESSION GATE PENDING
+Status: COMPLETE
 
 Removed:
 
@@ -198,9 +198,11 @@ Removed:
 The existing Agent panel and useful styling remain, but all controls are
 disabled and the panel reports `Agent framework rebuilding`.
 
-The detailed execution record is `rewrite/remove_checklist.txt`. The
-non-Agent functional regression item remains open until the user runs the E2E
-and manual browser checks.
+The detailed execution record is `rewrite/remove_checklist.txt`. The user
+confirmed the non-Agent functional regression gate by exercising tree
+rendering, expansion and collapse, data export, plotting, and metadata
+integration. The E2E suite also passed; only the intentionally failing Phase 4
+unit tests remain red until the replacement package is implemented.
 
 After deletion:
 
@@ -213,6 +215,8 @@ After deletion:
 Git history remains the archive. We should not move the old source into a `legacy/` directory.
 
 ## Phase 6: Create the Backend Agent Package
+
+Status: IN PROGRESS
 
 Suggested structure:
 
