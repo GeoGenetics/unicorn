@@ -1,0 +1,42 @@
+{
+  "description": "Google Interactions API returns a JSON-only final answer.",
+  "provenance": {
+    "provider": "google",
+    "capture_kind": "contract_derived",
+    "source": "server_app.py Google parser contract, using sanitized answer content from uploads/graphengine_agent_provider.jsonl",
+    "sanitized": true,
+    "notes": "The historical answer was recorded as assistant_message. This fixture deliberately adapts that content to preserve the separate final_answer normalization branch and is not claimed as the original provider response."
+  },
+  "provider_request": {
+    "model": "gemini-2.5-flash",
+    "system_instruction": "Answer only from Unicorn context and return one JSON object.",
+    "input": "LATEST_USER_PROMPT\nTell me about taxid 1648030.",
+    "response_format": {
+      "type": "text",
+      "mime_type": "application/json",
+      "schema": {
+        "type": "object"
+      }
+    }
+  },
+  "raw_provider_response": {
+    "id": "interaction_fixture_google_final",
+    "object": "interaction",
+    "status": "completed",
+    "model": "gemini-2.5-flash",
+    "output_text": "{\"type\":\"final_answer\",\"content\":\"Triticinae (1648030) has 37,800,491 direct reads and 68,768,540 subtree reads. It is ranked as a subtribe.\",\"tool_summary\":[\"get_node_details\"],\"notes\":\"\"}",
+    "steps": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  "expected_extracted_text": "{\"type\":\"final_answer\",\"content\":\"Triticinae (1648030) has 37,800,491 direct reads and 68,768,540 subtree reads. It is ranked as a subtribe.\",\"tool_summary\":[\"get_node_details\"],\"notes\":\"\"}",
+  "expected_normalized_response": {
+    "schema_version": "unicorn_provider_response_v1",
+    "type": "final_answer",
+    "content": "Triticinae (1648030) has 37,800,491 direct reads and 68,768,540 subtree reads. It is ranked as a subtribe."
+  },
+  "expected_error": null
+}

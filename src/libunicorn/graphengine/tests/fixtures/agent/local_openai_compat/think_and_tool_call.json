@@ -1,0 +1,55 @@
+{
+  "description": "Local reasoning model returns a think block followed by a Unicorn tool call.",
+  "provenance": {
+    "provider": "local_openai_compat",
+    "capture_kind": "conversation_capture_reconstructed_envelope",
+    "source": "Interactive DeepSeek-R1-Distill-Qwen-14B debugging transcript supplied in the development session",
+    "sanitized": true,
+    "notes": "The reasoning and final JSON were captured; the chat-completion envelope was reconstructed from the live vLLM parser contract. The opening think marker was restored to pair with the captured closing marker and explicitly exercise complete-block stripping."
+  },
+  "provider_request": {
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Return one Unicorn JSON object and use only advertised tools."
+      },
+      {
+        "role": "user",
+        "content": "Tell me about node Viridiplantae."
+      }
+    ],
+    "temperature": 0.0
+  },
+  "raw_provider_response": {
+    "id": "chatcmpl_fixture_local_think_tool",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "<think>\nAlright, the user is asking about Viridiplantae. I should use the available get_node_details tool rather than inventing details. The grounded taxid in the current context is 33090, so I will request that node.\n</think>\n\n{\"type\":\"tool_call\",\"tool_name\":\"get_node_details\",\"args\":{\"taxid\":33090}}"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  "expected_extracted_text": "{\"type\":\"tool_call\",\"tool_name\":\"get_node_details\",\"args\":{\"taxid\":33090}}",
+  "expected_normalized_response": {
+    "schema_version": "unicorn_provider_response_v1",
+    "type": "tool_call",
+    "tool_id": "node.details",
+    "arguments": {
+      "taxid": 33090
+    }
+  },
+  "expected_error": null
+}

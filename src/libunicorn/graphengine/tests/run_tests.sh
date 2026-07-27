@@ -25,8 +25,8 @@ Usage:
   $(basename "$0") --manual [--no-wait]
 
 Modes:
-  default      Run graphengine E2E pytest targets. Extra arguments are passed
-               through to pytest.
+  default      Run graphengine unit and E2E pytest targets. When arguments are
+               provided, they are passed directly to pytest.
   --manual     Start backend/frontend services and print the manual regression
                checklist workflow.
 
@@ -36,6 +36,7 @@ Manual options:
 
 Examples:
   ./tests/run_tests.sh
+  ./tests/run_tests.sh -s tests/unit/test_agent_contracts.py
   ./tests/run_tests.sh -s tests/e2e/test_agent_panel.py
   ./tests/run_tests.sh --manual
   ./tests/run_tests.sh --manual --no-wait
@@ -151,7 +152,10 @@ EOF
 run_pytest() {
   require_file "${VENV_PYTHON}"
   cd "${GRAPHENGINE_DIR}"
-  exec "${VENV_PYTHON}" -m pytest tests/e2e "$@"
+  if (($#)); then
+    exec "${VENV_PYTHON}" -m pytest "$@"
+  fi
+  exec "${VENV_PYTHON}" -m pytest tests/unit tests/e2e
 }
 
 run_manual() {

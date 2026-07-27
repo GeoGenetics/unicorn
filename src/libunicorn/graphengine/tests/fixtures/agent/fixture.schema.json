@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unicorn.local/schemas/agent-provider-fixture-v1.json",
+  "title": "Unicorn Agent Provider Fixture V1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "description",
+    "provenance",
+    "provider_request",
+    "raw_provider_response",
+    "expected_extracted_text",
+    "expected_normalized_response",
+    "expected_error"
+  ],
+  "properties": {
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "capture_kind",
+        "source",
+        "sanitized",
+        "notes"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "google",
+            "local_openai_compat"
+          ]
+        },
+        "capture_kind": {
+          "type": "string",
+          "enum": [
+            "historical_log_reconstructed_envelope",
+            "conversation_capture_reconstructed_envelope",
+            "contract_derived"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sanitized": {
+          "const": true
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "provider_request": {
+      "type": "object"
+    },
+    "raw_provider_response": {
+      "type": "object"
+    },
+    "expected_extracted_text": {
+      "type": "string"
+    },
+    "expected_normalized_response": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "expected_error": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message_contains": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "code",
+        "message_contains"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "expected_normalized_response": {
+          "type": "object"
+        },
+        "expected_error": {
+          "type": "null"
+        }
+      }
+    },
+    {
+      "properties": {
+        "expected_normalized_response": {
+          "type": "null"
+        },
+        "expected_error": {
+          "type": "object"
+        }
+      }
+    }
+  ]
+}
+

@@ -1,0 +1,59 @@
+{
+  "description": "Local model wraps a valid Unicorn response in a fenced JSON block.",
+  "provenance": {
+    "provider": "local_openai_compat",
+    "capture_kind": "conversation_capture_reconstructed_envelope",
+    "source": "Interactive local-model debugging transcript showing fenced JSON output",
+    "sanitized": true,
+    "notes": "The fenced-output behavior was observed; identifiers and surrounding envelope are sanitized."
+  },
+  "provider_request": {
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Return one Unicorn JSON object."
+      },
+      {
+        "role": "user",
+        "content": "Tell me about the selected nodes."
+      }
+    ],
+    "temperature": 0.0
+  },
+  "raw_provider_response": {
+    "id": "chatcmpl_fixture_local_fenced",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "```json\n{\n  \"type\": \"tool_call\",\n  \"tool_name\": \"get_node_details\",\n  \"args\": {\n    \"taxid\": null,\n    \"taxids\": [33090, 33154]\n  }\n}\n```"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  "expected_extracted_text": "{\n  \"type\": \"tool_call\",\n  \"tool_name\": \"get_node_details\",\n  \"args\": {\n    \"taxid\": null,\n    \"taxids\": [33090, 33154]\n  }\n}",
+  "expected_normalized_response": {
+    "schema_version": "unicorn_provider_response_v1",
+    "type": "tool_call",
+    "tool_id": "node.details",
+    "arguments": {
+      "taxid": null,
+      "taxids": [
+        33090,
+        33154
+      ]
+    }
+  },
+  "expected_error": null
+}

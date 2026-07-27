@@ -1,0 +1,52 @@
+{
+  "description": "Local OpenAI-compatible chat completion returns a JSON final answer.",
+  "provenance": {
+    "provider": "local_openai_compat",
+    "capture_kind": "contract_derived",
+    "source": "server_app.py local chat-completion request builder and parser",
+    "sanitized": true,
+    "notes": "This is the direct JSON success baseline for the local compatibility parser."
+  },
+  "provider_request": {
+    "model": "example-reasoning-model",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Return exactly one Unicorn JSON object."
+      },
+      {
+        "role": "user",
+        "content": "What min_reads threshold am I using?"
+      }
+    ],
+    "temperature": 0.0
+  },
+  "raw_provider_response": {
+    "id": "chatcmpl_fixture_local_final",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "example-reasoning-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"type\":\"final_answer\",\"content\":\"The current min_reads threshold is 1000.\",\"tool_summary\":[],\"notes\":\"\"}"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  "expected_extracted_text": "{\"type\":\"final_answer\",\"content\":\"The current min_reads threshold is 1000.\",\"tool_summary\":[],\"notes\":\"\"}",
+  "expected_normalized_response": {
+    "schema_version": "unicorn_provider_response_v1",
+    "type": "final_answer",
+    "content": "The current min_reads threshold is 1000."
+  },
+  "expected_error": null
+}

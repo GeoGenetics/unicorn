@@ -1,0 +1,55 @@
+{
+  "description": "Local model returns the legacy tool/input shape accepted by the compatibility shim.",
+  "provenance": {
+    "provider": "local_openai_compat",
+    "capture_kind": "contract_derived",
+    "source": "server_app.py _normalize_local_openai_compat_provider_response compatibility path",
+    "sanitized": true,
+    "notes": "This fixture preserves an explicit compatibility branch of the old parser."
+  },
+  "provider_request": {
+    "model": "example-reasoning-model",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Use a Unicorn tool when details are required."
+      },
+      {
+        "role": "user",
+        "content": "Tell me about taxid 33090."
+      }
+    ],
+    "temperature": 0.0
+  },
+  "raw_provider_response": {
+    "id": "chatcmpl_fixture_local_compat",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "example-reasoning-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"tool\":\"get_node_details\",\"input\":{\"taxid\":33090}}"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  "expected_extracted_text": "{\"tool\":\"get_node_details\",\"input\":{\"taxid\":33090}}",
+  "expected_normalized_response": {
+    "schema_version": "unicorn_provider_response_v1",
+    "type": "tool_call",
+    "tool_id": "node.details",
+    "arguments": {
+      "taxid": 33090
+    }
+  },
+  "expected_error": null
+}

@@ -1,0 +1,48 @@
+{
+  "description": "Google Interactions API returns a Unicorn get_node_details tool call.",
+  "provenance": {
+    "provider": "google",
+    "capture_kind": "historical_log_reconstructed_envelope",
+    "source": "uploads/graphengine_agent_provider.jsonl provider_turn_response entry",
+    "sanitized": true,
+    "notes": "The logged normalized call used taxid 1648030; the native output_text envelope was reconstructed for the accepted parser shape."
+  },
+  "provider_request": {
+    "model": "gemini-2.5-flash",
+    "system_instruction": "Use only advertised Unicorn tools and return one JSON object.",
+    "input": "LATEST_USER_PROMPT\nTell me about taxid 1648030.",
+    "response_format": {
+      "type": "text",
+      "mime_type": "application/json",
+      "schema": {
+        "type": "object"
+      }
+    }
+  },
+  "raw_provider_response": {
+    "id": "interaction_fixture_google_tool",
+    "object": "interaction",
+    "status": "completed",
+    "model": "gemini-2.5-flash",
+    "output_text": "{\"type\":\"tool_call\",\"tool_name\":\"get_node_details\",\"args\":{\"taxid\":1648030,\"scope\":null,\"sort\":null,\"limit\":null}}",
+    "steps": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  "expected_extracted_text": "{\"type\":\"tool_call\",\"tool_name\":\"get_node_details\",\"args\":{\"taxid\":1648030,\"scope\":null,\"sort\":null,\"limit\":null}}",
+  "expected_normalized_response": {
+    "schema_version": "unicorn_provider_response_v1",
+    "type": "tool_call",
+    "tool_id": "node.details",
+    "arguments": {
+      "taxid": 1648030,
+      "scope": null,
+      "sort": null,
+      "limit": null
+    }
+  },
+  "expected_error": null
+}

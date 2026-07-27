@@ -1,0 +1,51 @@
+{
+  "description": "Local model returns prose with no recoverable JSON object.",
+  "provenance": {
+    "provider": "local_openai_compat",
+    "capture_kind": "conversation_capture_reconstructed_envelope",
+    "source": "Interactive local-model debugging session that produced non-JSON output",
+    "sanitized": true,
+    "notes": "This preserves the failure that motivated think stripping and JSON-candidate extraction."
+  },
+  "provider_request": {
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Return one Unicorn JSON object."
+      },
+      {
+        "role": "user",
+        "content": "Tell me about node Viridiplantae."
+      }
+    ],
+    "temperature": 0.0
+  },
+  "raw_provider_response": {
+    "id": "chatcmpl_fixture_local_malformed",
+    "object": "chat.completion",
+    "created": 0,
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "I would need to inspect the Viridiplantae node with the available graph tools before answering."
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  "expected_extracted_text": "I would need to inspect the Viridiplantae node with the available graph tools before answering.",
+  "expected_normalized_response": null,
+  "expected_error": {
+    "code": "local_openai_compat_invalid_json",
+    "message_contains": "non-JSON output"
+  }
+}

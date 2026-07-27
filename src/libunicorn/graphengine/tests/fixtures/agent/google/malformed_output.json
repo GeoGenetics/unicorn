@@ -1,0 +1,42 @@
+{
+  "description": "Google Interactions API returns generated text that is not JSON.",
+  "provenance": {
+    "provider": "google",
+    "capture_kind": "contract_derived",
+    "source": "server_app.py google_invalid_json error path",
+    "sanitized": true,
+    "notes": "The fixture represents valid transport with contract-invalid generated output."
+  },
+  "provider_request": {
+    "model": "gemini-2.5-flash",
+    "system_instruction": "Return one JSON object.",
+    "input": "LATEST_USER_PROMPT\nSummarize the current tree.",
+    "response_format": {
+      "type": "text",
+      "mime_type": "application/json",
+      "schema": {
+        "type": "object"
+      }
+    }
+  },
+  "raw_provider_response": {
+    "id": "interaction_fixture_google_malformed",
+    "object": "interaction",
+    "status": "completed",
+    "model": "gemini-2.5-flash",
+    "output_text": "I can summarize the tree, but this response is not JSON.",
+    "steps": [],
+    "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "total_tokens": 0
+    }
+  },
+  "expected_extracted_text": "I can summarize the tree, but this response is not JSON.",
+  "expected_normalized_response": null,
+  "expected_error": {
+    "code": "google_invalid_json",
+    "message_contains": "non-JSON output"
+  }
+}
+

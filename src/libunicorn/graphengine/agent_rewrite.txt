@@ -145,9 +145,18 @@ removed, but they do not override the frozen schemas.
 
 ## Phase 4: Add Contract and Fixture Tests
 
-Before deleting the runtime, prepare tests for the new system.
+Status: DONE
 
-Test categories:
+The pre-implementation test boundary lives in `tests/unit/`:
+
+- `test_agent_contracts.py`
+- `test_agent_provider_fixtures.py`
+- `test_agent_orchestrator.py`
+- `test_agent_trace.py`
+
+The shared deterministic harness lives in `tests/unit/helpers.py`.
+
+Coverage includes:
 
 - request validation
 - provider request mapping
@@ -162,7 +171,13 @@ Test categories:
 - max-iteration handling
 - trace completeness
 
-These tests initially fail because the new implementation does not exist yet. That is expected.
+Contract and fixture-structure tests are immediately executable. Runtime-facing
+tests deliberately fail with a clear missing-module message until the new
+`unicorn_agent` Python package is implemented. They must never import or fall
+back to the old Agent runtime.
+
+The default `tests/run_tests.sh` path now includes both `tests/unit` and
+`tests/e2e`. Supplying explicit pytest arguments runs only the requested targets.
 
 ## Phase 5: Remove the Old Agent Framework
 
