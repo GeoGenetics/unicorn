@@ -109,7 +109,7 @@ class BackendContextBuilder:
                 message="Backend could not build the requested graph scope.",
             ) from error
 
-        visible_nodes = _threshold_visible_nodes(
+        visible_nodes = threshold_visible_nodes(
             tree.root,
             min_reads=scope["min_reads"],
         )
@@ -263,7 +263,7 @@ def _fileinfo_name(fileinfo: Any) -> str | None:
     return name if isinstance(name, str) and name else None
 
 
-def _threshold_visible_nodes(root: Any, *, min_reads: int) -> list[Any]:
+def threshold_visible_nodes(root: Any, *, min_reads: int) -> list[Any]:
     visible: list[Any] = []
     stack = [root]
     while stack:
