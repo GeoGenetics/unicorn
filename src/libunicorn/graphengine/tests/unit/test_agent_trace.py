@@ -67,3 +67,53 @@ def test_trace_reconstructs_complete_two_iteration_turn_without_secrets() -> Non
         ],
     )
 
+    raw_event = next(
+        event
+        for event in events
+        if event["event"] == "provider_response_received"
+    )
+    assert raw_event["data"]["raw_response"] == normalized_tool_call(33090)
+
+    second_input = [
+        event
+        for event in events
+        if event["event"] == "provider_input_built"
+    ][1]
+    assert second_input["data"]["provider_input"]["tool_results"][0]["ok"] is True
+
+
+def test_trace_store_redacts_credentials_and_returns_isolated_copies() -> None:
+    tracing = __import__(
+        "unicorn_agent.tracing",
+        fromlist=["InMemoryTraceStore"],
+    )
+    secret = "fixture-provider-secret"
+    trace_store = tracing.InMemoryTraceStore()
+    trace_id = trace_store.start_trace(
+        "turn_redaction_001",
+        secrets=(secret,),
+    )
+    source = {
+        "Authorization": f"Bearer {secret}",
+        "nested": {
+            "api_key": secret,
+            "text": f"response accidentally echoed {secret}",
+        },
+    }
+
+    trace_store.record(
+        trace_id,
+        iteration=0,
+        event="provider_response_received",
+        data=source,
+    )
+    first_read = trace_store.events_for(trace_id)
+
+    assert_contains_no_secret(first_read, secret)
+    assert "Authorization" not in first_read[0]["data"]
+    assert "api_key" not in first_read[0]["data"]["nested"]
+    assert first_read[0]["data"]["nested"]["text"].endswith("[REDACTED]")
+
+    first_read[0]["data"]["nested"]["text"] = "mutated"
+    second_read = trace_store.events_for(trace_id)
+    assert second_read[0]["data"]["nested"]["text"].endswith("[REDACTED]")

@@ -53,7 +53,21 @@ class ProviderBoundary(Protocol):
 
 
 class TraceBoundary(Protocol):
-    def start_trace(self, turn_id: str) -> str: ...
+    def start_trace(
+        self,
+        turn_id: str,
+        *,
+        secrets: tuple[str | None, ...] = (),
+    ) -> str: ...
+
+    def record(
+        self,
+        trace_id: str,
+        *,
+        iteration: int,
+        event: str,
+        data: Mapping[str, Any],
+    ) -> dict[str, Any]: ...
 
 
 class AgentOrchestrator:
@@ -88,26 +102,47 @@ class AgentOrchestrator:
     ) -> dict[str, Any]:
         validate_browser_turn_request(request)
         turn_id = request["turn_id"]
-        trace_id = self._trace_store.start_trace(turn_id)
+        trace_id = self._trace_store.start_trace(
+            turn_id,
+            secrets=(api_key,),
+        )
+        self._record(
+            trace_id,
+            iteration=0,
+            event="browser_turn_received",
+            data={
+                "request": request,
+            },
+        )
 
         try:
             graph_context = self._context_builder(request)
         except ContextBuildError as error:
-            return self._failed_result(
+            return self._failed_turn(
                 turn_id=turn_id,
                 trace_id=trace_id,
+                iteration=0,
                 tools_used=[],
                 code=error.code,
                 message=str(error),
             )
         except ContractValidationError as error:
-            return self._failed_result(
+            return self._failed_turn(
                 turn_id=turn_id,
                 trace_id=trace_id,
+                iteration=0,
                 tools_used=[],
                 code=error.code,
                 message=str(error),
             )
+        self._record(
+            trace_id,
+            iteration=0,
+            event="graph_context_built",
+            data={
+                "graph_context": graph_context,
+            },
+        )
 
         tool_results: list[dict[str, Any]] = []
         tools_used: list[dict[str, Any]] = []
@@ -121,22 +156,35 @@ class AgentOrchestrator:
                     tool_results=tool_results,
                     iteration=iteration,
                 )
+                self._record(
+                    trace_id,
+                    iteration=iteration,
+                    event="provider_input_built",
+                    data={
+                        "provider_input": provider_input,
+                    },
+                )
                 normalized = self._execute_provider(
                     provider_input,
+                    provider_config=request["provider"],
                     api_key=api_key,
+                    trace_id=trace_id,
+                    iteration=iteration,
                 )
             except (ContractValidationError, ProviderAdapterError) as error:
-                return self._failed_result(
+                return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
+                    iteration=iteration,
                     tools_used=tools_used,
                     code=getattr(error, "code", "provider_response_invalid"),
                     message=str(error),
                 )
             except Exception:
-                return self._failed_result(
+                return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
+                    iteration=iteration,
                     tools_used=tools_used,
                     code="provider_request_failed",
                     message="Provider request failed.",
@@ -144,35 +192,40 @@ class AgentOrchestrator:
 
             response_type = normalized["type"]
             if response_type in {"assistant_message", "final_answer"}:
-                return self._completed_result(
+                return self._completed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
+                    iteration=iteration,
                     tools_used=tools_used,
                     answer=normalized["content"],
                 )
             if response_type == "error":
-                return self._failed_result(
+                return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
+                    iteration=iteration,
                     tools_used=tools_used,
                     code=normalized["code"],
                     message=normalized["message"],
                 )
 
             if iteration >= self._max_tool_calls:
-                return self._iteration_limit_result(
+                return self._iteration_limit_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
+                    iteration=iteration,
                     tools_used=tools_used,
+                    tool_id=normalized["tool_id"],
                 )
 
             tool_id = normalized["tool_id"]
             arguments = normalized["arguments"]
             call_signature = _tool_call_signature(tool_id, arguments)
             if call_signature in completed_calls:
-                return self._failed_result(
+                return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
+                    iteration=iteration,
                     tools_used=tools_used,
                     code="repeated_tool_call",
                     message=(
@@ -182,12 +235,35 @@ class AgentOrchestrator:
                 )
 
             try:
+                self._registry.validate_arguments(tool_id, arguments)
+            except ToolRegistryError as error:
+                return self._failed_turn(
+                    turn_id=turn_id,
+                    trace_id=trace_id,
+                    iteration=iteration,
+                    tools_used=tools_used,
+                    code=error.code,
+                    message=str(error),
+                )
+
+            self._record(
+                trace_id,
+                iteration=iteration,
+                event="tool_execution_started",
+                data={
+                    "tool_id": tool_id,
+                    "arguments": arguments,
+                },
+            )
+
+            try:
                 result = self._registry.dispatch(tool_id, arguments)
             except ToolRegistryError as error:
                 if error.code in _TERMINAL_TOOL_ERRORS:
-                    return self._failed_result(
+                    return self._failed_turn(
                         turn_id=turn_id,
                         trace_id=trace_id,
+                        iteration=iteration,
                         tools_used=tools_used,
                         code=error.code,
                         message=str(error),
@@ -206,6 +282,14 @@ class AgentOrchestrator:
                 )
 
             validate_tool_result(tool_result)
+            self._record(
+                trace_id,
+                iteration=iteration,
+                event="tool_execution_completed",
+                data={
+                    "tool_result": tool_result,
+                },
+            )
             completed_calls.add(call_signature)
             tool_results.append(tool_result)
             tools_used.append(
@@ -244,16 +328,155 @@ class AgentOrchestrator:
         self,
         provider_input: dict[str, Any],
         *,
+        provider_config: Mapping[str, Any],
         api_key: str | None,
+        trace_id: str,
+        iteration: int,
     ) -> dict[str, Any]:
         native_request = self._provider.map_request(provider_input)
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="provider_request_mapped",
+            data={
+                "provider": provider_config["name"],
+                "native_request": native_request,
+            },
+        )
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="provider_request_sent",
+            data={
+                "provider": provider_config["name"],
+                "model": provider_config["model"],
+                "base_url": provider_config["base_url"],
+            },
+        )
         raw_response = self._provider.send_request(
             native_request,
             api_key=api_key,
         )
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="provider_response_received",
+            data={
+                "provider": provider_config["name"],
+                "raw_response": raw_response,
+            },
+        )
         normalized = self._provider.parse_response(raw_response)
         validate_normalized_provider_response(normalized)
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="provider_response_normalized",
+            data={
+                "normalized_response": normalized,
+            },
+        )
         return normalized
+
+    def _record(
+        self,
+        trace_id: str,
+        *,
+        iteration: int,
+        event: str,
+        data: Mapping[str, Any],
+    ) -> None:
+        self._trace_store.record(
+            trace_id,
+            iteration=iteration,
+            event=event,
+            data=data,
+        )
+
+    def _completed_turn(
+        self,
+        *,
+        turn_id: str,
+        trace_id: str,
+        iteration: int,
+        tools_used: list[dict[str, Any]],
+        answer: str,
+    ) -> dict[str, Any]:
+        result = self._completed_result(
+            turn_id=turn_id,
+            trace_id=trace_id,
+            tools_used=tools_used,
+            answer=answer,
+        )
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="browser_turn_completed",
+            data={
+                "result": result,
+            },
+        )
+        return result
+
+    def _failed_turn(
+        self,
+        *,
+        turn_id: str,
+        trace_id: str,
+        iteration: int,
+        tools_used: list[dict[str, Any]],
+        code: str,
+        message: str,
+    ) -> dict[str, Any]:
+        result = self._failed_result(
+            turn_id=turn_id,
+            trace_id=trace_id,
+            tools_used=tools_used,
+            code=code,
+            message=message,
+        )
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="browser_turn_failed",
+            data={
+                "result": result,
+            },
+        )
+        return result
+
+    def _iteration_limit_turn(
+        self,
+        *,
+        turn_id: str,
+        trace_id: str,
+        iteration: int,
+        tools_used: list[dict[str, Any]],
+        tool_id: str,
+    ) -> dict[str, Any]:
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="iteration_limit_reached",
+            data={
+                "max_tool_calls": self._max_tool_calls,
+                "rejected_tool_id": tool_id,
+            },
+        )
+        result = self._iteration_limit_result(
+            turn_id=turn_id,
+            trace_id=trace_id,
+            tools_used=tools_used,
+        )
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="browser_turn_failed",
+            data={
+                "result": result,
+            },
+        )
+        return result
 
     @staticmethod
     def _completed_result(
