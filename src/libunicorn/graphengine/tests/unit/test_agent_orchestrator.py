@@ -95,3 +95,38 @@ def test_tool_result_is_reinjected_before_final_answer() -> None:
     assert adapter.inputs[1]["tool_results"][0]["tool_id"] == "node.details"
     assert adapter.inputs[1]["tool_results"][0]["ok"] is True
 
+
+def test_assistant_message_is_a_terminal_completed_answer() -> None:
+    response = {
+        "schema_version": "unicorn_provider_response_v1",
+        "type": "assistant_message",
+        "content": "The current graph is ready.",
+    }
+    orchestrator, adapter, _, executed = build_orchestrator_harness([response])
+
+    result = orchestrator.run(valid_browser_turn_request())
+
+    assert result["status"] == "completed"
+    assert result["answer"] == "The current graph is ready."
+    assert result["tools_used"] == []
+    assert executed == []
+    assert len(adapter.inputs) == 1
+
+
+def test_provider_error_is_a_terminal_failed_answer() -> None:
+    response = {
+        "schema_version": "unicorn_provider_response_v1",
+        "type": "error",
+        "code": "provider_refused",
+        "message": "Provider refused this request.",
+    }
+    orchestrator, _, _, executed = build_orchestrator_harness([response])
+
+    result = orchestrator.run(valid_browser_turn_request())
+
+    assert result["status"] == "failed"
+    assert result["error"] == {
+        "code": "provider_refused",
+        "message": "Provider refused this request.",
+    }
+    assert executed == []

@@ -50,7 +50,7 @@ class ProviderAdapter(ABC):
         self,
         native_request: Mapping[str, Any],
         *,
-        credentials: ProviderCredentials,
+        api_key: str | None = None,
     ) -> dict[str, Any]:
         """Perform provider transport using only transient credentials."""
 
@@ -69,7 +69,7 @@ class ProviderAdapter(ABC):
         native_request = self.map_request(provider_input)
         raw_response = self.send_request(
             native_request,
-            credentials=credentials,
+            api_key=credentials.api_key,
         )
         return self.parse_response(raw_response)
 
