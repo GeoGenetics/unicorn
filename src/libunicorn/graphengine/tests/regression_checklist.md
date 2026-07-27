@@ -86,11 +86,12 @@ Run this checklist after any non-trivial graphengine change.
 3. If a report is open, confirm it rerenders or stays valid.
 
 
-## Agent Safety Smoke Test
+## Agent Rebuild Boundary
 
 1. Open the agent panel.
-2. Confirm it remains usable after a tree render.
-3. If provider functionality is in scope, confirm the request payload still builds.
+2. Confirm it reports `Agent framework rebuilding`.
+3. Confirm provider, credential, prompt, send, and clear controls are disabled.
+4. Confirm rendering a tree does not reactivate the removed Agent runtime.
 
 
 ## Failure Signals
@@ -105,7 +106,7 @@ If any item fails, capture:
    selection
    reports
    backend context
-   agent state
+   agent rebuild boundary
 
 
 ## Minimum Standard

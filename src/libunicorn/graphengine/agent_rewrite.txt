@@ -181,7 +181,26 @@ The default `tests/run_tests.sh` path now includes both `tests/unit` and
 
 ## Phase 5: Remove the Old Agent Framework
 
-Perform the deletion as one isolated change.
+Status: CODE DELETION COMPLETE; USER REGRESSION GATE PENDING
+
+Removed:
+
+- `graphengine_agent.js`
+- `graphengine_provider_adapter.js`
+- old Agent boot wiring, state, constants, and tree helper
+- browser-local provider loop, tool registry, canonical shadow, and payload logs
+- backend provider builders, transports, parsers, compatibility handling, and
+  logging helpers
+- `/agent/provider-turn`
+- `/agent/client-payload`
+- the tracked old provider log artifact
+
+The existing Agent panel and useful styling remain, but all controls are
+disabled and the panel reports `Agent framework rebuilding`.
+
+The detailed execution record is `rewrite/remove_checklist.txt`. The
+non-Agent functional regression item remains open until the user runs the E2E
+and manual browser checks.
 
 After deletion:
 

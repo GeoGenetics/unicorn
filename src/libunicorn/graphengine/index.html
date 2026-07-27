@@ -238,13 +238,13 @@
             <div id="agentSectionBody" class="panel-section-body">
               <div class="agent-shell">
                 <div class="agent-shell-head">
-                  <div id="agentMeta" class="agent-meta">Backend-backed agent panel. Render a tree to begin.</div>
-                  <button id="agentClearBtn" class="secondary compact-btn" type="button">Clear</button>
+                  <div id="agentMeta" class="agent-meta">Agent framework rebuilding.</div>
+                  <button id="agentClearBtn" class="secondary compact-btn" type="button" disabled>Clear</button>
                 </div>
                 <div class="agent-config">
                   <label>
                     <span>Provider</span>
-                    <select id="agentProviderSelect">
+                    <select id="agentProviderSelect" disabled>
                       <option value="openai">OpenAI</option>
                       <option value="google">Google</option>
                       <option value="local_openai_compat">Local (OpenAI-compatible)</option>
@@ -252,27 +252,27 @@
                   </label>
                   <label>
                     <span>Model</span>
-                    <select id="agentModelSelect"></select>
+                    <select id="agentModelSelect" disabled></select>
                   </label>
                   <label class="agent-api-key-label">
                     <span>API Key</span>
-                    <input id="agentApiKey" type="password" placeholder="Provider API key" autocomplete="off" spellcheck="false">
+                    <input id="agentApiKey" type="password" placeholder="Provider API key" autocomplete="off" spellcheck="false" disabled>
                   </label>
                   <label>
                     <span>Base URL</span>
-                    <input id="agentBaseUrl" type="url" placeholder="Optional. Defaults to the selected provider endpoint" autocomplete="off" spellcheck="false">
+                    <input id="agentBaseUrl" type="url" placeholder="Optional. Defaults to the selected provider endpoint" autocomplete="off" spellcheck="false" disabled>
                   </label>
                 </div>
-                <div id="agentProviderState" class="agent-provider-state">Configured target and active runtime adapter are tracked separately. Provider transport runs through the graphengine backend.</div>
+                <div id="agentProviderState" class="agent-provider-state">The previous Agent runtime has been removed. Provider configuration will return with the backend-first replacement.</div>
                 <label for="agentPrompt">
                   <span>Prompt</span>
                 </label>
-                <textarea id="agentPrompt" class="agent-prompt" rows="4" placeholder="Ask Unicorn about the current graph state..."></textarea>
+                <textarea id="agentPrompt" class="agent-prompt" rows="4" placeholder="Agent framework rebuilding" disabled></textarea>
                 <div class="agent-actions">
-                  <button id="agentSendBtn" class="primary" type="button">Send</button>
+                  <button id="agentSendBtn" class="primary" type="button" disabled>Send</button>
                 </div>
                 <div id="agentTranscript" class="agent-transcript" aria-live="polite">
-                  <div class="agent-empty">Render a backend-backed tree, then agent replies will appear here.</div>
+                  <div class="agent-empty">The new traceable Agent runtime is not available yet.</div>
                 </div>
               </div>
             </div>
@@ -348,14 +348,12 @@
     <script src="graphengine_state.js?v=20260701a"></script>
     <script src="graphengine_dom.js?v=20260701a"></script>
     <script src="graphengine_metadata.js?v=20260701a"></script>
-    <script src="graphengine_provider_adapter.js?v=20260701a"></script>
     <script src="graphengine_tree_model.js?v=20260701a"></script>
     <script src="graphengine_backend.js?v=20260701a"></script>
     <script src="graphengine_tree_render.js?v=20260701a"></script>
     <script src="graphengine_ui.js?v=20260701a"></script>
     <script src="graphengine_selection.js?v=20260701a"></script>
     <script src="graphengine_reports.js?v=20260701a"></script>
-    <script src="graphengine_agent.js?v=20260701a"></script>
     <script src="graphengine_boot.js?v=20260701a"></script>
   </body>
 </html>

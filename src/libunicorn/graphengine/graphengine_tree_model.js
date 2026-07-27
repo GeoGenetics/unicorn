@@ -107,18 +107,6 @@
     return children.filter((child) => Number(child.total || 0) > 0).length;
   }
 
-  function summarizeNodeForAgent(node) {
-    if (!node) return null;
-    return {
-      taxid: Number(node.taxid),
-      name: String(node.name || ""),
-      rank: String(node.rank || ""),
-      direct: Number(node.direct || 0),
-      subtree: Number(node.total || 0),
-      child_count: nodeHasChildren(node) ? getVisibleChildCount(node) : 0,
-    };
-  }
-
   namespace.treeModel = {
     buildRemoteTree,
     collectVisible,
@@ -128,7 +116,6 @@
     collectExpandableTaxids,
     nodeHasChildren,
     getVisibleChildCount,
-    summarizeNodeForAgent,
   };
 
   Object.assign(globalObject, namespace.treeModel);

@@ -61,39 +61,6 @@
     "no rank",
   ];
 
-  const AGENT_PROVIDER_MODELS = {
-    openai: [
-      { value: "gpt-5", label: "GPT-5" },
-      { value: "gpt-5-mini", label: "GPT-5 mini" },
-      { value: "gpt-4.1", label: "GPT-4.1" },
-    ],
-    google: [
-      { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
-      { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
-      { value: "gemini-3-flash", label: "Gemini 3 Flash" },
-      { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-      { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
-    ],
-    local_openai_compat: [
-      { value: "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B", label: "DeepSeek-R1-Distill-Qwen-14B" },
-      { value: "Qwen/Qwen2.5-14B-Instruct", label: "Qwen2.5-14B-Instruct" },
-      { value: "Qwen/QwQ-32B", label: "QwQ-32B" },
-    ],
-  };
-
-  const AGENT_SUPPORTED_PROVIDER_TARGETS = ["openai", "google", "local_openai_compat"];
-  const AGENT_V1_READ_ONLY_TOOL_NAMES = [
-    "get_graph_context",
-    "list_selected_datasets",
-    "get_selected_nodes",
-    "find_visible_nodes",
-    "get_node_details",
-    "get_table_view",
-  ];
-
-  const AGENT_MAX_TOOL_ITERATIONS = 4;
-
   function formatBytes(bytes) {
     if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -143,10 +110,6 @@
   namespace.core = {
     SOURCE_COLORS,
     RANK_DISPLAY_ORDER,
-    AGENT_PROVIDER_MODELS,
-    AGENT_SUPPORTED_PROVIDER_TARGETS,
-    AGENT_V1_READ_ONLY_TOOL_NAMES,
-    AGENT_MAX_TOOL_ITERATIONS,
     formatBytes,
     svgEl,
     formatLogTime,

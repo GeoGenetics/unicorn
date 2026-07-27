@@ -999,12 +999,6 @@
     els.clearSelectionBtn.disabled = !backendTreeReady || !hasSelection;
     els.uncollapseBtn.disabled = !backendTreeReady || !hasSelection;
     els.uncollapseTipsBtn.disabled = !backendTreeReady || !hasSelection;
-    if (els.agentPrompt) {
-      els.agentPrompt.disabled = !backendTreeReady;
-    }
-    if (els.agentSendBtn) {
-      els.agentSendBtn.disabled = !backendTreeReady;
-    }
   }
 
   function updateRenderAvailability() {

@@ -4,7 +4,8 @@ This file is the single live contract for the graph engine backend as it exists
 today.
 
 The goal is not to preserve prototype history. The goal is to define the
-current backend-owned semantics that the UI and the agentic workflow depend on.
+current backend-owned semantics that the UI and future agentic workflow depend
+on.
 
 
 ## Operating invariant
@@ -107,7 +108,7 @@ These semantics are the current contract for backend-served tree mode:
   - returns the full induced tree model for the current selection
 
 These endpoints still exist, but they are not the main contract for the current
-backend-driven tree flow or the agent-facing workflow.
+backend-driven tree flow.
 
 ### Remote graph endpoints
 
@@ -328,20 +329,15 @@ The frontend should treat these as the current backend-required rules:
 - treat `expanded_taxids` from `/root-view` and `/expand-node` as authoritative
 - carry the same dataset/taxonomy/filter context across tree, tooltip, table,
   subtree report, and rank report requests
-- use the backend payloads directly for agent grounding
 
 
-## Agentic workflow implications
+## Agent rebuild status
 
-Today, the agent registry is still browser-local, but several tools already
-ground themselves in backend data:
+The previous Agent routes, provider transports, browser-local registry, and tool
+loop have been removed. The preserved Agent panel is intentionally disabled
+while the backend-first replacement is built.
 
-- `get_node_details` -> `/node-tooltip`
-- `get_table_view` -> `/table-view`
-
-The next read-only tool additions should follow the same pattern:
-
-- `get_subtree_report` -> `/subtree-report`
-- selected-node rank summaries -> `/rank-report`
-
-That keeps the agent grounded in the same backend-owned context as the graph UI.
+There is currently no live Agent endpoint. In particular,
+`/agent/provider-turn` and `/agent/client-payload` are not part of this backend
+contract. The replacement will use the frozen V1 contracts under
+`rewrite/contracts/` and expose a new backend-owned route in a later phase.

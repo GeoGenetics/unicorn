@@ -12,16 +12,6 @@
   namespace.state = {
     series: [],
     clientLog: [],
-    agent: {
-      history: [],
-      sessionId: "",
-      runtimeProvider: "mock",
-      transportMode: "backend",
-      configuredProvider: "openai",
-      configuredModel: "gpt-5",
-      apiKey: "",
-      baseUrl: "",
-    },
     remote: {
       connected: false,
       datasets: [],

@@ -13,26 +13,10 @@
     const ui = namespace.ui;
     const selection = namespace.selection;
     const reports = namespace.reports;
-    const agent = namespace.agent;
 
-    if (!state || !els || !backend || !metadata || !treeRender || !ui || !selection || !reports || !agent) {
-      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree render, UI, selection, reports, and agent modules to load before boot.");
+    if (!state || !els || !backend || !metadata || !treeRender || !ui || !selection || !reports) {
+      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree render, UI, selection, and reports modules to load before boot.");
     }
-    if (!globalObject.UnicornAgentProviderModule || typeof globalObject.UnicornAgentProviderModule.createProviderAdapter !== "function") {
-      throw new Error("Unicorn agent provider module failed to load before graphengine boot.");
-    }
-
-    const unicornAgentRegistry = agent.createUnicornAgentRegistry();
-    globalObject.unicornAgentRegistry = unicornAgentRegistry;
-
-    const unicornAgentProviderAdapter = globalObject.UnicornAgentProviderModule.createProviderAdapter({
-      runtimeProviderName: agent.getAgentRuntimeConfig().runtime_provider,
-      getRuntimeConfig: agent.getAgentRuntimeConfig,
-      extractTaxidFromPrompt: agent.extractTaxidFromPrompt,
-      executeTurn: agent.executeAgentProviderTurn,
-    });
-    globalObject.unicornAgentProviderAdapter = unicornAgentProviderAdapter;
-    globalObject.handleAgentSend = agent.handleAgentSend;
 
     els.renderBtn.onclick = async (event) => {
       event.preventDefault();
@@ -115,11 +99,9 @@
     ui.initRemotePanel();
     ui.initFileInputs();
     ui.initMinReadsControls();
-    agent.initAgentControls();
     if (typeof globalObject.renderClientLog === "function") {
       globalObject.renderClientLog();
     }
-    agent.renderAgentTranscript();
     backend.updateTunnelHint();
     backend.syncBackendRuntimeUiState();
     backend.updateRenderAvailability();
