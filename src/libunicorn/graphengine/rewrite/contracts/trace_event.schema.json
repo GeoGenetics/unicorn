@@ -48,18 +48,24 @@
     "event": {
       "type": "string",
       "enum": [
-        "browser_turn_received",
-        "graph_context_built",
-        "provider_input_built",
+        "turn_received",
+        "turn_validated",
+        "context_built",
+        "iteration_started",
+        "provider_input_created",
         "provider_request_mapped",
-        "provider_request_sent",
-        "provider_response_received",
+        "provider_http_started",
+        "provider_http_completed",
+        "provider_output_extracted",
         "provider_response_normalized",
+        "tool_call_validated",
         "tool_execution_started",
         "tool_execution_completed",
+        "tool_result_reinjected",
+        "iteration_completed",
         "iteration_limit_reached",
-        "browser_turn_completed",
-        "browser_turn_failed"
+        "turn_completed",
+        "turn_failed"
       ]
     },
     "data": {
@@ -83,4 +89,3 @@
     }
   ]
 }
-

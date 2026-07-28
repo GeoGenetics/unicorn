@@ -229,7 +229,10 @@
       "required": [
         "tool_id",
         "description",
-        "arguments_schema"
+        "when_to_use",
+        "output_summary",
+        "arguments_schema",
+        "mutation"
       ],
       "properties": {
         "tool_id": {
@@ -240,8 +243,19 @@
           "type": "string",
           "minLength": 1
         },
+        "when_to_use": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_summary": {
+          "type": "string",
+          "minLength": 1
+        },
         "arguments_schema": {
           "type": "object"
+        },
+        "mutation": {
+          "const": false
         }
       }
     },
@@ -305,9 +319,11 @@
       },
       "tools": [
         {
-          "tool_id": "node.details",
-          "description": "Return backend-authoritative details for one taxid.",
-          "arguments_schema": {
+        "tool_id": "node.details",
+        "description": "Return backend-authoritative details for one taxid.",
+        "when_to_use": "Use after a taxid has been grounded.",
+        "output_summary": "Node identity, lineage, and backend count details.",
+        "arguments_schema": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -319,7 +335,8 @@
                 "minimum": 1
               }
             }
-          }
+          },
+          "mutation": false
         }
       ],
       "tool_results": [],
@@ -363,9 +380,11 @@
       },
       "tools": [
         {
-          "tool_id": "node.details",
-          "description": "Return backend-authoritative details for one taxid.",
-          "arguments_schema": {
+        "tool_id": "node.details",
+        "description": "Return backend-authoritative details for one taxid.",
+        "when_to_use": "Use after a taxid has been grounded.",
+        "output_summary": "Node identity, lineage, and backend count details.",
+        "arguments_schema": {
             "type": "object",
             "additionalProperties": false,
             "required": [
@@ -377,7 +396,8 @@
                 "minimum": 1
               }
             }
-          }
+          },
+          "mutation": false
         }
       ],
       "tool_results": [

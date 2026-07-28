@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from collections.abc import Callable, Mapping
+from time import monotonic
 from typing import Any, Protocol
 
 from unicorn_agent.context import ContextBuildError
@@ -16,8 +17,13 @@ from unicorn_agent.contracts import (
     validate_provider_adapter_input,
     validate_tool_result,
 )
-from unicorn_agent.providers.base import ProviderAdapterError
+from unicorn_agent.providers.base import (
+    ProviderAdapterError,
+    ProviderOutputInspection,
+    ProviderTransportResponse,
+)
 from unicorn_agent.registry import ToolRegistry, ToolRegistryError
+from unicorn_agent.tracing import payload_size_bytes
 
 
 DEFAULT_INSTRUCTIONS = (
@@ -44,12 +50,14 @@ class ProviderBoundary(Protocol):
         native_request: Mapping[str, Any],
         *,
         api_key: str | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> ProviderTransportResponse: ...
 
-    def parse_response(
+    def inspect_response(
         self,
         raw_response: Mapping[str, Any],
-    ) -> dict[str, Any]: ...
+    ) -> ProviderOutputInspection: ...
+
+    def parse_response(self, sanitized_text: str) -> dict[str, Any]: ...
 
 
 class TraceBoundary(Protocol):
@@ -68,6 +76,8 @@ class TraceBoundary(Protocol):
         event: str,
         data: Mapping[str, Any],
     ) -> dict[str, Any]: ...
+
+    def finish_trace(self, trace_id: str) -> None: ...
 
 
 class AgentOrchestrator:
@@ -109,9 +119,18 @@ class AgentOrchestrator:
         self._record(
             trace_id,
             iteration=0,
-            event="browser_turn_received",
+            event="turn_received",
             data={
                 "request": request,
+                "payload_bytes": payload_size_bytes(request),
+            },
+        )
+        self._record(
+            trace_id,
+            iteration=0,
+            event="turn_validated",
+            data={
+                "schema_version": request["schema_version"],
             },
         )
 
@@ -135,12 +154,22 @@ class AgentOrchestrator:
                 code=error.code,
                 message=str(error),
             )
+        except Exception:
+            return self._failed_turn(
+                turn_id=turn_id,
+                trace_id=trace_id,
+                iteration=0,
+                tools_used=[],
+                code="context_build_failed",
+                message="Backend graph context construction failed.",
+            )
         self._record(
             trace_id,
             iteration=0,
-            event="graph_context_built",
+            event="context_built",
             data={
                 "graph_context": graph_context,
+                "payload_bytes": payload_size_bytes(graph_context),
             },
         )
 
@@ -149,6 +178,25 @@ class AgentOrchestrator:
         completed_calls: set[str] = set()
 
         for iteration in range(self._max_tool_calls + 1):
+            self._record(
+                trace_id,
+                iteration=iteration,
+                event="iteration_started",
+                data={
+                    "available_tool_results": len(tool_results),
+                },
+            )
+            if tool_results:
+                reinjected = tool_results[-1]
+                self._record(
+                    trace_id,
+                    iteration=iteration,
+                    event="tool_result_reinjected",
+                    data={
+                        "tool_result": reinjected,
+                        "payload_bytes": payload_size_bytes(reinjected),
+                    },
+                )
             try:
                 provider_input = self._provider_input(
                     request=request,
@@ -159,9 +207,10 @@ class AgentOrchestrator:
                 self._record(
                     trace_id,
                     iteration=iteration,
-                    event="provider_input_built",
+                    event="provider_input_created",
                     data={
                         "provider_input": provider_input,
+                        "payload_bytes": payload_size_bytes(provider_input),
                     },
                 )
                 normalized = self._execute_provider(
@@ -172,6 +221,16 @@ class AgentOrchestrator:
                     iteration=iteration,
                 )
             except (ContractValidationError, ProviderAdapterError) as error:
+                self._iteration_completed(
+                    trace_id,
+                    iteration=iteration,
+                    status="failed",
+                    error_code=getattr(
+                        error,
+                        "code",
+                        "provider_response_invalid",
+                    ),
+                )
                 return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
@@ -181,6 +240,12 @@ class AgentOrchestrator:
                     message=str(error),
                 )
             except Exception:
+                self._iteration_completed(
+                    trace_id,
+                    iteration=iteration,
+                    status="failed",
+                    error_code="provider_request_failed",
+                )
                 return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
@@ -192,6 +257,12 @@ class AgentOrchestrator:
 
             response_type = normalized["type"]
             if response_type in {"assistant_message", "final_answer"}:
+                self._iteration_completed(
+                    trace_id,
+                    iteration=iteration,
+                    status="completed",
+                    response_type=response_type,
+                )
                 return self._completed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
@@ -200,6 +271,13 @@ class AgentOrchestrator:
                     answer=normalized["content"],
                 )
             if response_type == "error":
+                self._iteration_completed(
+                    trace_id,
+                    iteration=iteration,
+                    status="failed",
+                    response_type=response_type,
+                    error_code=normalized["code"],
+                )
                 return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
@@ -222,6 +300,13 @@ class AgentOrchestrator:
             arguments = normalized["arguments"]
             call_signature = _tool_call_signature(tool_id, arguments)
             if call_signature in completed_calls:
+                self._iteration_completed(
+                    trace_id,
+                    iteration=iteration,
+                    status="failed",
+                    response_type="tool_call",
+                    error_code="repeated_tool_call",
+                )
                 return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
@@ -237,6 +322,13 @@ class AgentOrchestrator:
             try:
                 self._registry.validate_arguments(tool_id, arguments)
             except ToolRegistryError as error:
+                self._iteration_completed(
+                    trace_id,
+                    iteration=iteration,
+                    status="failed",
+                    response_type="tool_call",
+                    error_code=error.code,
+                )
                 return self._failed_turn(
                     turn_id=turn_id,
                     trace_id=trace_id,
@@ -246,6 +338,16 @@ class AgentOrchestrator:
                     message=str(error),
                 )
 
+            self._record(
+                trace_id,
+                iteration=iteration,
+                event="tool_call_validated",
+                data={
+                    "tool_id": tool_id,
+                    "arguments": arguments,
+                    "payload_bytes": payload_size_bytes(arguments),
+                },
+            )
             self._record(
                 trace_id,
                 iteration=iteration,
@@ -260,6 +362,13 @@ class AgentOrchestrator:
                 result = self._registry.dispatch(tool_id, arguments)
             except ToolRegistryError as error:
                 if error.code in _TERMINAL_TOOL_ERRORS:
+                    self._iteration_completed(
+                        trace_id,
+                        iteration=iteration,
+                        status="failed",
+                        response_type="tool_call",
+                        error_code=error.code,
+                    )
                     return self._failed_turn(
                         turn_id=turn_id,
                         trace_id=trace_id,
@@ -297,6 +406,12 @@ class AgentOrchestrator:
                     "tool_id": tool_id,
                     "ok": tool_result["ok"],
                 }
+            )
+            self._iteration_completed(
+                trace_id,
+                iteration=iteration,
+                status="completed",
+                response_type="tool_call",
             )
 
         raise RuntimeError("Unreachable Agent iteration state.")
@@ -341,32 +456,63 @@ class AgentOrchestrator:
             data={
                 "provider": provider_config["name"],
                 "native_request": native_request,
+                "payload_bytes": payload_size_bytes(native_request),
             },
         )
         self._record(
             trace_id,
             iteration=iteration,
-            event="provider_request_sent",
+            event="provider_http_started",
             data={
                 "provider": provider_config["name"],
                 "model": provider_config["model"],
                 "base_url": provider_config["base_url"],
+                "request_bytes": payload_size_bytes(native_request),
             },
         )
-        raw_response = self._provider.send_request(
+        started_at = monotonic()
+        transport = self._provider.send_request(
             native_request,
             api_key=api_key,
         )
+        duration_ms = max(0.0, (monotonic() - started_at) * 1000.0)
+        if not isinstance(transport, ProviderTransportResponse):
+            raise ProviderAdapterError(
+                code="provider_transport_invalid",
+                message="Provider returned an invalid transport response.",
+            )
         self._record(
             trace_id,
             iteration=iteration,
-            event="provider_response_received",
+            event="provider_http_completed",
             data={
                 "provider": provider_config["name"],
-                "raw_response": raw_response,
+                "status_code": transport.status_code,
+                "duration_ms": duration_ms,
+                "response_bytes": payload_size_bytes(transport.body),
+                "raw_response": transport.body,
             },
         )
-        normalized = self._provider.parse_response(raw_response)
+        output = self._provider.inspect_response(transport.body)
+        if not isinstance(output, ProviderOutputInspection):
+            raise ProviderAdapterError(
+                code="provider_output_invalid",
+                message="Provider returned invalid output inspection data.",
+            )
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="provider_output_extracted",
+            data={
+                "raw_output": output.raw_text,
+                "raw_output_bytes": len(output.raw_text.encode("utf-8")),
+                "sanitized_input": output.sanitized_text,
+                "sanitized_input_bytes": len(
+                    output.sanitized_text.encode("utf-8")
+                ),
+            },
+        )
+        normalized = self._provider.parse_response(output.sanitized_text)
         validate_normalized_provider_response(normalized)
         self._record(
             trace_id,
@@ -374,9 +520,33 @@ class AgentOrchestrator:
             event="provider_response_normalized",
             data={
                 "normalized_response": normalized,
+                "payload_bytes": payload_size_bytes(normalized),
             },
         )
         return normalized
+
+    def _iteration_completed(
+        self,
+        trace_id: str,
+        *,
+        iteration: int,
+        status: str,
+        response_type: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        data: dict[str, Any] = {
+            "status": status,
+        }
+        if response_type is not None:
+            data["response_type"] = response_type
+        if error_code is not None:
+            data["error_code"] = error_code
+        self._record(
+            trace_id,
+            iteration=iteration,
+            event="iteration_completed",
+            data=data,
+        )
 
     def _record(
         self,
@@ -411,11 +581,13 @@ class AgentOrchestrator:
         self._record(
             trace_id,
             iteration=iteration,
-            event="browser_turn_completed",
+            event="turn_completed",
             data={
                 "result": result,
+                "payload_bytes": payload_size_bytes(result),
             },
         )
+        self._trace_store.finish_trace(trace_id)
         return result
 
     def _failed_turn(
@@ -438,11 +610,13 @@ class AgentOrchestrator:
         self._record(
             trace_id,
             iteration=iteration,
-            event="browser_turn_failed",
+            event="turn_failed",
             data={
                 "result": result,
+                "payload_bytes": payload_size_bytes(result),
             },
         )
+        self._trace_store.finish_trace(trace_id)
         return result
 
     def _iteration_limit_turn(
@@ -454,6 +628,13 @@ class AgentOrchestrator:
         tools_used: list[dict[str, Any]],
         tool_id: str,
     ) -> dict[str, Any]:
+        self._iteration_completed(
+            trace_id,
+            iteration=iteration,
+            status="iteration_limit",
+            response_type="tool_call",
+            error_code="iteration_limit",
+        )
         self._record(
             trace_id,
             iteration=iteration,
@@ -471,11 +652,13 @@ class AgentOrchestrator:
         self._record(
             trace_id,
             iteration=iteration,
-            event="browser_turn_failed",
+            event="turn_failed",
             data={
                 "result": result,
+                "payload_bytes": payload_size_bytes(result),
             },
         )
+        self._trace_store.finish_trace(trace_id)
         return result
 
     @staticmethod

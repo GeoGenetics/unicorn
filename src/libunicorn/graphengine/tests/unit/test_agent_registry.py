@@ -18,6 +18,8 @@ NODE_DETAILS_SCHEMA = {
         }
     },
 }
+NODE_DETAILS_USAGE = "Use after resolving a taxid."
+NODE_DETAILS_OUTPUT = "One node identity and count summary."
 
 
 def build_registry() -> tuple[Any, list[dict[str, Any]]]:
@@ -35,6 +37,8 @@ def build_registry() -> tuple[Any, list[dict[str, Any]]]:
     registry.register(
         tool_id="node.details",
         description="Return details for one taxid.",
+        when_to_use=NODE_DETAILS_USAGE,
+        output_summary=NODE_DETAILS_OUTPUT,
         arguments_schema=NODE_DETAILS_SCHEMA,
         handler=node_details,
         mutation=False,
@@ -44,14 +48,22 @@ def build_registry() -> tuple[Any, list[dict[str, Any]]]:
 
 def test_registry_advertises_stable_read_only_tool_definition() -> None:
     registry, _ = build_registry()
+    definition = registry.get("node.details")
 
     assert registry.provider_tools() == [
         {
             "tool_id": "node.details",
             "description": "Return details for one taxid.",
+            "when_to_use": NODE_DETAILS_USAGE,
+            "output_summary": NODE_DETAILS_OUTPUT,
             "arguments_schema": NODE_DETAILS_SCHEMA,
+            "mutation": False,
         }
     ]
+    assert definition.when_to_use == NODE_DETAILS_USAGE
+    assert definition.output_summary == NODE_DETAILS_OUTPUT
+    assert callable(definition.handler)
+    assert definition.mutation is False
 
 
 def test_registry_validates_and_dispatches_tool_call() -> None:
@@ -97,11 +109,41 @@ def test_registry_rejects_duplicate_tool_id() -> None:
         registry.register(
             tool_id="node.details",
             description="Duplicate.",
+            when_to_use=NODE_DETAILS_USAGE,
+            output_summary=NODE_DETAILS_OUTPUT,
             arguments_schema=NODE_DETAILS_SCHEMA,
             handler=lambda arguments: arguments,
         )
 
     assert caught.value.code == "duplicate_tool"
+
+
+@pytest.mark.parametrize(
+    ("field", "code"),
+    [
+        ("when_to_use", "invalid_tool_usage"),
+        ("output_summary", "invalid_tool_output_summary"),
+    ],
+)
+def test_registry_rejects_missing_tool_guidance(
+    field: str,
+    code: str,
+) -> None:
+    registry_module = require_agent_module("unicorn_agent.registry")
+    arguments = {
+        "tool_id": "node.details",
+        "description": "Return details for one taxid.",
+        "when_to_use": NODE_DETAILS_USAGE,
+        "output_summary": NODE_DETAILS_OUTPUT,
+        "arguments_schema": NODE_DETAILS_SCHEMA,
+        "handler": lambda values: values,
+    }
+    arguments[field] = " "
+
+    with pytest.raises(registry_module.ToolRegistryError) as caught:
+        registry_module.ToolRegistry().register(**arguments)
+
+    assert caught.value.code == code
 
 
 def test_registry_hides_and_blocks_mutation_tools_by_default() -> None:
@@ -110,6 +152,8 @@ def test_registry_hides_and_blocks_mutation_tools_by_default() -> None:
     registry.register(
         tool_id="node.select",
         description="Select one taxid.",
+        when_to_use="Use to mutate selection.",
+        output_summary="Updated selection.",
         arguments_schema=NODE_DETAILS_SCHEMA,
         handler=lambda arguments: arguments,
         mutation=True,
@@ -133,6 +177,8 @@ def test_registry_rejects_unstable_tool_ids(tool_id: str) -> None:
         registry.register(
             tool_id=tool_id,
             description="Invalid ID.",
+            when_to_use=NODE_DETAILS_USAGE,
+            output_summary=NODE_DETAILS_OUTPUT,
             arguments_schema=NODE_DETAILS_SCHEMA,
             handler=lambda arguments: arguments,
         )

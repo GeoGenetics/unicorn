@@ -21,6 +21,8 @@ _TOOL_ID = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 class ToolDefinition:
     tool_id: str
     description: str
+    when_to_use: str
+    output_summary: str
     arguments_schema: dict[str, Any]
     handler: ToolHandler = field(repr=False, compare=False)
     mutation: bool = False
@@ -29,7 +31,10 @@ class ToolDefinition:
         return {
             "tool_id": self.tool_id,
             "description": self.description,
+            "when_to_use": self.when_to_use,
+            "output_summary": self.output_summary,
             "arguments_schema": copy.deepcopy(self.arguments_schema),
+            "mutation": self.mutation,
         }
 
 
@@ -93,6 +98,8 @@ class ToolRegistry:
         *,
         tool_id: str,
         description: str,
+        when_to_use: str,
+        output_summary: str,
         arguments_schema: Mapping[str, Any],
         handler: ToolHandler,
         mutation: bool = False,
@@ -100,6 +107,8 @@ class ToolRegistry:
         _validate_registration(
             tool_id=tool_id,
             description=description,
+            when_to_use=when_to_use,
+            output_summary=output_summary,
             arguments_schema=arguments_schema,
             handler=handler,
         )
@@ -117,6 +126,8 @@ class ToolRegistry:
         definition = ToolDefinition(
             tool_id=tool_id,
             description=description.strip(),
+            when_to_use=when_to_use.strip(),
+            output_summary=output_summary.strip(),
             arguments_schema=schema,
             handler=handler,
             mutation=mutation,
@@ -228,6 +239,8 @@ def _validate_registration(
     *,
     tool_id: str,
     description: str,
+    when_to_use: str,
+    output_summary: str,
     arguments_schema: Mapping[str, Any],
     handler: ToolHandler,
 ) -> None:
@@ -241,6 +254,18 @@ def _validate_registration(
         raise ToolRegistryError(
             code="invalid_tool_description",
             message=f"Tool {tool_id} requires a description.",
+            tool_id=tool_id,
+        )
+    if not isinstance(when_to_use, str) or not when_to_use.strip():
+        raise ToolRegistryError(
+            code="invalid_tool_usage",
+            message=f"Tool {tool_id} requires usage guidance.",
+            tool_id=tool_id,
+        )
+    if not isinstance(output_summary, str) or not output_summary.strip():
+        raise ToolRegistryError(
+            code="invalid_tool_output_summary",
+            message=f"Tool {tool_id} requires an output summary.",
             tool_id=tool_id,
         )
     if not isinstance(arguments_schema, Mapping):

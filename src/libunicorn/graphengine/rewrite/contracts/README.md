@@ -86,6 +86,21 @@ V1 permits at most four tool executions:
 
 The iteration limit is backend policy. It is not accepted from the browser.
 
+## Tool Definition Semantics
+
+Every provider-visible tool definition contains:
+
+- a stable dotted `tool_id`
+- a concise `description`
+- explicit `when_to_use` guidance
+- an `output_summary` describing the result without executing the tool
+- a strict JSON `arguments_schema`
+- `mutation: false`
+
+The Python registry additionally owns the implementation handler and the
+authoritative mutation flag. Mutation tools are never included in provider
+input and are rejected by default during dispatch.
+
 ## Normalized Provider Response Semantics
 
 The response type determines whether the loop continues:
@@ -158,24 +173,33 @@ Trace events are append-only and ordered by `sequence`.
 - `iteration` follows the provider iteration semantics above.
 - `elapsed_ms` is measured from receipt of the browser turn.
 - `data` contains only data relevant to the named event.
-- Raw provider responses may be stored in `provider_response_received`.
-- Sanitized parser input belongs in `provider_response_normalized`.
+- Raw provider responses are stored in `provider_http_completed`.
+- Raw extracted output and sanitized parser input are stored separately in
+  `provider_output_extracted`.
+- Normalized provider-neutral output belongs in
+  `provider_response_normalized`.
 - Trace data must not contain API keys or authorization headers.
 
 The expected V1 event order is:
 
-1. `browser_turn_received`
-2. `graph_context_built`
-3. `provider_input_built`
-4. `provider_request_mapped`
-5. `provider_request_sent`
-6. `provider_response_received`
-7. `provider_response_normalized`
-8. `tool_execution_started`, when requested
-9. `tool_execution_completed`, when requested
-10. Repeat provider events at the next iteration, when requested
-11. `iteration_limit_reached`, when applicable
-12. `browser_turn_completed` or `browser_turn_failed`
+1. `turn_received`
+2. `turn_validated`
+3. `context_built`
+4. `iteration_started`
+5. `tool_result_reinjected`, when a previous tool result exists
+6. `provider_input_created`
+7. `provider_request_mapped`
+8. `provider_http_started`
+9. `provider_http_completed`
+10. `provider_output_extracted`
+11. `provider_response_normalized`
+12. `tool_call_validated`, when requested
+13. `tool_execution_started`, when requested
+14. `tool_execution_completed`, when requested
+15. `iteration_completed`
+16. Repeat iteration events when a tool result is reinjected
+17. `iteration_limit_reached`, when applicable
+18. `turn_completed` or `turn_failed`
 
 Events may be omitted only when their stage was never reached. Sequence values
 must remain contiguous across iterations.
@@ -188,4 +212,3 @@ must remain contiguous across iterations.
 - A breaking field or semantic change requires a new schema version.
 - Provider-native request and response envelopes are adapter internals and do
   not change these provider-neutral schema versions.
-

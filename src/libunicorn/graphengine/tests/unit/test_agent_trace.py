@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from .helpers import (
     assert_contains_no_secret,
     build_orchestrator_harness,
@@ -49,35 +51,55 @@ def test_trace_reconstructs_complete_two_iteration_turn_without_secrets() -> Non
     assert_ordered_subsequence(
         [event["event"] for event in events],
         [
-            "browser_turn_received",
-            "graph_context_built",
-            "provider_input_built",
+            "turn_received",
+            "turn_validated",
+            "context_built",
+            "iteration_started",
+            "provider_input_created",
             "provider_request_mapped",
-            "provider_request_sent",
-            "provider_response_received",
+            "provider_http_started",
+            "provider_http_completed",
+            "provider_output_extracted",
             "provider_response_normalized",
+            "tool_call_validated",
             "tool_execution_started",
             "tool_execution_completed",
-            "provider_input_built",
+            "iteration_completed",
+            "iteration_started",
+            "tool_result_reinjected",
+            "provider_input_created",
             "provider_request_mapped",
-            "provider_request_sent",
-            "provider_response_received",
+            "provider_http_started",
+            "provider_http_completed",
+            "provider_output_extracted",
             "provider_response_normalized",
-            "browser_turn_completed",
+            "iteration_completed",
+            "turn_completed",
         ],
     )
 
     raw_event = next(
         event
         for event in events
-        if event["event"] == "provider_response_received"
+        if event["event"] == "provider_http_completed"
     )
     assert raw_event["data"]["raw_response"] == normalized_tool_call(33090)
+    assert raw_event["data"]["status_code"] == 200
+    assert raw_event["data"]["response_bytes"] > 0
+    assert raw_event["data"]["duration_ms"] >= 0
+
+    extracted_event = next(
+        event
+        for event in events
+        if event["event"] == "provider_output_extracted"
+    )
+    assert extracted_event["data"]["raw_output"]
+    assert extracted_event["data"]["sanitized_input"]
 
     second_input = [
         event
         for event in events
-        if event["event"] == "provider_input_built"
+        if event["event"] == "provider_input_created"
     ][1]
     assert second_input["data"]["provider_input"]["tool_results"][0]["ok"] is True
 
@@ -104,7 +126,7 @@ def test_trace_store_redacts_credentials_and_returns_isolated_copies() -> None:
     trace_store.record(
         trace_id,
         iteration=0,
-        event="provider_response_received",
+        event="provider_http_completed",
         data=source,
     )
     first_read = trace_store.events_for(trace_id)
@@ -117,3 +139,78 @@ def test_trace_store_redacts_credentials_and_returns_isolated_copies() -> None:
     first_read[0]["data"]["nested"]["text"] = "mutated"
     second_read = trace_store.events_for(trace_id)
     assert second_read[0]["data"]["nested"]["text"].endswith("[REDACTED]")
+
+
+def test_jsonl_trace_store_persists_complete_secret_free_events(tmp_path) -> None:
+    tracing = __import__(
+        "unicorn_agent.tracing",
+        fromlist=["JsonlTraceStore"],
+    )
+    secret = "fixture-provider-secret"
+    trace_store = tracing.JsonlTraceStore(root_dir=tmp_path)
+    trace_id = trace_store.start_trace(
+        "turn_jsonl_001",
+        secrets=(secret,),
+    )
+    trace_store.record(
+        trace_id,
+        iteration=0,
+        event="turn_received",
+        data={
+            "prompt": "Trace this turn.",
+            "authorization": f"Bearer {secret}",
+        },
+    )
+    trace_store.record(
+        trace_id,
+        iteration=0,
+        event="turn_failed",
+        data={
+            "message": f"Provider echoed {secret}",
+        },
+    )
+    trace_store.finish_trace(trace_id)
+
+    path = trace_store.trace_path(trace_id)
+    persisted = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert path.parent.parent == tmp_path.resolve()
+    assert path.name == "turn_jsonl_001.jsonl"
+    assert persisted == trace_store.events_for(trace_id)
+    assert [event["sequence"] for event in persisted] == [1, 2]
+    assert_contains_no_secret(persisted, secret)
+
+
+def test_complete_two_iteration_turn_is_persisted_as_jsonl(tmp_path) -> None:
+    tracing = __import__(
+        "unicorn_agent.tracing",
+        fromlist=["JsonlTraceStore"],
+    )
+    trace_store = tracing.JsonlTraceStore(root_dir=tmp_path)
+    orchestrator, _, _, _ = build_orchestrator_harness(
+        [
+            normalized_tool_call(33090),
+            normalized_final_answer("Persistent Viridiplantae details."),
+        ],
+        trace_store=trace_store,
+    )
+
+    result = orchestrator.run(valid_browser_turn_request())
+    path = trace_store.trace_path(result["trace_id"])
+    persisted = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert result["status"] == "completed"
+    assert persisted == trace_store.events_for(result["trace_id"])
+    assert persisted[-1]["event"] == "turn_completed"
+    assert any(event["event"] == "tool_result_reinjected" for event in persisted)
+    assert any(
+        event["event"] == "provider_http_completed"
+        and event["data"]["status_code"] == 200
+        for event in persisted
+    )

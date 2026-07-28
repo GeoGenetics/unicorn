@@ -1,166 +1,110 @@
 Unicorn Graph Engine Agent Registry
 ===================================
 
-This file documents the current live Unicorn-native tool registry exposed to
-the graph engine Agent panel.
-
-It is intentionally runtime-first: if this file disagrees with
-`graphengine.js`, `graphengine.js` wins and this file should be updated.
-
-New invariant:
-
-- graphengine is intended to run with a backend connection at all times
-- if a user is on one machine, they should run the backend locally and connect
-  to `localhost`
-- backend data is the intended authoritative grounding source for the agent
-- any remaining local-vs-remote shape differences are transition debt, not
-  desired long-term architecture
-
-Frozen V1 provider scope:
-
-- OpenAI, Google, and an experimental local OpenAI-compatible target now exist
-- provider behavior still varies by model quality, but the internal Unicorn
-  tool registry and turn contract remain shared
-- the live internal Unicorn registry still contains both read-only and
-  state-mutating tools
-- the provider-advertised V1 tool surface is intentionally narrower and includes
-  read-only inspection tools only
-- `select_taxon`, `focus_taxon`, and `center_root` remain available to internal
-  Unicorn code paths, but are outside the first real provider surface
-
-Frozen compact-turn consequence:
-
-- `get_graph_context` remains a valid read-only Unicorn tool
-- however, full `get_graph_context` payloads should not be proactively injected
-  into every provider turn in the normal compact execution path
-- detailed graph inspection should move behind explicit tool requests rather
-  than the initial provider payload
-
-
-Format
+Status
 ------
 
-Column 1: explicit tool call
-Column 2: current runtime behavior
+This document describes the backend-owned read-only V1 registry.
+
+Runtime authority:
+
+- `unicorn_agent/registry.py`
+- `unicorn_agent/tools.py`
+
+Contract authority:
+
+- `rewrite/contracts/provider_adapter_input.schema.json`
+
+The browser does not define, execute, or dispatch Agent tools.
 
 
-Tool Call                                      Current Runtime Behavior
----------------------------------------------  --------------------------------------------------------------
-invokeTool("get_graph_context", {})            Returns `buildAgentContext()` exactly. This is the canonical graph snapshot
-                                               and currently includes `captured_at`, `context_version`, `session`,
-                                               `datasets`, `filters`, `tree`, `metadata`, and `report_state`.
+Registry Contract
+-----------------
 
-invokeTool("list_selected_datasets", {})       Requires a backend connection. Returns a provider-facing normalized payload:
-                                               `{ ok, mode: "backend", tool: "list_selected_datasets", request, datasets,
-																							 context }`. `datasets` contains `selected`, `selected_summaries`, `count`,
-																							 `total_reads`, and `direct_taxa`.
+Every definition contains:
 
-invokeTool("get_selected_nodes", {})           Requires a backend-backed rendered tree. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_selected_nodes", request, count, selected, context }`. `selected` is the current selected-node list with `taxid`, `name`, `rank`, `direct`, `subtree`, and `child_count`.
+- stable dotted tool ID
+- description
+- when-to-use guidance
+- output summary
+- JSON argument schema
+- implementation handler
+- mutation flag
 
-invokeTool("find_visible_nodes", { query, limit })  Requires a backend-backed rendered tree and a non-empty query string. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "find_visible_nodes", request, count, matches, context }`. `matches` contains grounded visible-node rows with `taxid`, `name`, `rank`, `direct`, `subtree`, `child_count`, and `match_type`.
-
-invokeTool("get_node_details", { taxid })      Requires a backend-backed rendered tree and either a numeric `taxid` or a non-empty numeric `taxids` array. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_node_details", request, node, count, nodes, context }`. For one taxon, `node` contains normalized backend `/node-tooltip` data. For several taxa, `nodes` contains the normalized per-node list and `count` reports how many node payloads were returned.
-
-invokeTool("get_table_view", { scope, taxid, sort, limit })  Requires a backend-backed rendered tree. Returns a provider-facing normalized payload: `{ ok, mode: "backend", tool: "get_table_view", request, target, row_count, rows, context }`. Data is normalized from backend `/table-view`. Supported inputs are `scope=root|node`, `sort=direct|subtree`, and numeric `limit`.
-
-invokeTool("select_taxon", { taxid, additive })  Requires a backend-backed rendered tree and a numeric `taxid` present in the active tree. Selects the node in Unicorn state, redraws the graph, and returns `{ ok, mode, additive, selected }`, where `mode` is currently `"backend"`.
-
-invokeTool("focus_taxon", { taxid })           Requires a backend-backed rendered tree and a numeric `taxid` present in the active tree. Sets the focus taxon, centers the chart on it, redraws, and returns `{ ok, mode, focused }`, where `mode` is currently `"backend"`.
-
-invokeTool("center_root", {})                  Requires a backend-backed rendered tree. Clears focus, recenters the graph on the root, redraws, and returns `{ ok, mode, focused: null }`, where `mode` is currently `"backend"`.
+Only definitions with `mutation: false` are advertised. Registry dispatch
+validates arguments before invoking a handler and rejects mutation tools unless
+an explicit internal caller enables mutation.
 
 
-Canonical context shape
------------------------
+Read-Only Tools
+---------------
 
-`get_graph_context` currently returns:
+`graph.context`
 
-- `captured_at`
-- `context_version`
-- `session`
-  - `backend_connected`
-  - `runtime_provider`
-  - `transport_mode`
-- `datasets`
-  - `count`
-  - `names`
-- `filters`
-  - `min_reads`
-  - `count_mode`
-  - `scale_mode`
-- `tree`
-  - `visible_root`
-  - `visible_node_count`
-  - `selected_node_count`
-  - `focused_node`
-- `metadata`
-  - `active_field`
-- `report_state`
-  - `type`
-  - `selected_node_count`
+- Use for current dataset count, visible-tree scope, selected-node count,
+  minimum-read threshold, and count mode.
+- Returns compact session, dataset, tree, filter, metadata, and report-state
+  summaries.
+- Arguments: `{}`.
 
-Compact-turn note:
+`datasets.selected`
 
-- this canonical context shape remains useful as a read-only inspection tool
-- but it should be treated as richer detail, not as the default always-sent
-  provider grounding payload once compact mode becomes authoritative
+- Use when selected dataset filenames or backend count summaries are needed.
+- Returns dataset count, total reads, direct taxa, and one summary per active
+  dataset.
+- Arguments: `{}`.
 
+`nodes.selected`
 
-Known current transition debt
------------------------------
+- Use when a prompt refers to the current node selection.
+- Returns selected taxids with names, ranks, direct and subtree counts, and
+  visible child counts.
+- Arguments: `{}`.
+- Selected taxids originate in the validated browser `graph_scope`.
 
-These are the main remaining mismatches worth tracking before broader provider
-integration work.
+`nodes.find_visible`
 
-1. Backend preconditions are now explicit runtime behavior
-- several agent tools now throw if there is no backend connection or no
-  backend-backed rendered tree
-- this is intended behavior, but provider-side error handling should be shaped
-  deliberately once a real provider is added
+- Use to resolve a name or unverified taxid before requesting node details.
+- Returns threshold-visible matches with taxids, counts, and match type.
+- Arguments:
+  - required string `query`
+  - optional integer `limit`, from 1 through 100
 
-2. Read-only tools now share a provider-normalized top-level envelope, but
-state-mutating tools still use lighter ad hoc shapes
-- `select_taxon`, `focus_taxon`, and `center_root` still return direct action
-  results rather than the same read-only schema
-- this is acceptable for now, but it is still worth deciding later whether the
-  full registry should converge on one shared response pattern
+`node.details`
+
+- Use after one or more taxids have been grounded.
+- Returns identity, lineage, direct and subtree counts, visible child count,
+  and per-dataset counts.
+- Arguments:
+  - integer `taxid`, or
+  - unique integer `taxids` array with at most 100 entries
+
+`table.view`
+
+- Use for ranked direct or subtree rows under the root or one visible node.
+- Returns the target summary and ordered table rows.
+- Arguments:
+  - optional `scope`: `root` or `node`
+  - required integer `taxid` when scope is `node`
+  - optional `sort`: `direct` or `subtree`
+  - optional integer `limit`, from 1 through 1000
 
 
-What is live vs not live
-------------------------
+Backend Ownership
+-----------------
 
-Live today:
+Each browser turn creates a request-scoped `ReadOnlyToolService`.
 
-- `window.unicornAgentRegistry.listTools()`
-- `window.unicornAgentRegistry.invokeTool(name, args)`
-- browser-local tool execution
-- backend-required agent grounding
-- provider-normalized read-only tool envelopes for:
-  `list_selected_datasets`, `get_selected_nodes`, `find_visible_nodes`,
-  `get_node_details`, and `get_table_view`
-- `get_node_details` now supports:
-  - one taxon via `taxid`
-  - several taxa via `taxids`
-- `find_visible_nodes` now supports:
-  - visible-name lookup via `query`
-  - optional result capping via `limit`
-- V1 provider-facing tool exposure is frozen to the read-only subset
+The service:
 
-Not live yet:
+- validates the complete browser request
+- rebuilds context from `GraphEngineStore`
+- resolves datasets and taxonomy through backend models
+- applies the active `min_reads` threshold
+- treats browser-selected and focused taxids only as requested scope
+- verifies those taxids against the backend-visible tree
+- never calls browser callbacks
+- never mutates graph state
 
-- `get_subtree_report`
-- `expand_taxon`
-- broader normalization of state-mutating tools if we decide the full registry
-  should use one response family
-
-
-Why this matters for the next agentic step
-------------------------------------------
-
-The current tool set is now in much better shape for a first real provider
-adapter because the read-only inspection tools share a stable top-level
-contract. The next step is less about wrapper cleanup and more about making the
-provider loop consume that contract deliberately. The next validation target is
-confirming that named-node prompts route through `find_visible_nodes` before
-`get_node_details`, rather than trying to stuff node names directly into a
-taxid-only detail request.
+Provider adapters receive definitions and normalized results only. They never
+execute Unicorn tools themselves.

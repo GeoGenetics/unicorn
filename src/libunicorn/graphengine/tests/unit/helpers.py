@@ -11,6 +11,11 @@ import pytest
 from jsonschema import Draft202012Validator, FormatChecker
 from referencing import Registry, Resource
 
+from unicorn_agent.providers.base import (
+    ProviderOutputInspection,
+    ProviderTransportResponse,
+)
+
 
 GRAPHENGINE_DIR = Path(__file__).resolve().parents[2]
 CONTRACT_DIR = GRAPHENGINE_DIR / "rewrite" / "contracts"
@@ -154,20 +159,34 @@ class SequenceProviderAdapter:
         native_request: dict[str, Any],
         *,
         api_key: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> ProviderTransportResponse:
         self.api_keys.append(api_key)
         if not self._responses:
             raise AssertionError("Fake provider received more requests than expected.")
-        return self._responses.pop(0)
+        return ProviderTransportResponse(
+            status_code=200,
+            body=self._responses.pop(0),
+        )
 
-    def parse_response(self, raw_response: dict[str, Any]) -> dict[str, Any]:
-        return copy.deepcopy(raw_response)
+    def inspect_response(
+        self,
+        raw_response: dict[str, Any],
+    ) -> ProviderOutputInspection:
+        text = json.dumps(raw_response, separators=(",", ":"), ensure_ascii=True)
+        return ProviderOutputInspection(
+            raw_text=text,
+            sanitized_text=text,
+        )
+
+    def parse_response(self, sanitized_text: str) -> dict[str, Any]:
+        return json.loads(sanitized_text)
 
 
 def build_orchestrator_harness(
     responses: list[dict[str, Any]],
     *,
     max_tool_calls: int = 4,
+    trace_store: Any = None,
 ) -> tuple[Any, SequenceProviderAdapter, Any, list[dict[str, Any]]]:
     orchestrator_module = require_agent_module("unicorn_agent.orchestrator")
     registry_module = require_agent_module("unicorn_agent.registry")
@@ -186,6 +205,8 @@ def build_orchestrator_harness(
     registry.register(
         tool_id="node.details",
         description="Return details for one taxid.",
+        when_to_use="Use after resolving a taxid.",
+        output_summary="One fixture node summary.",
         arguments_schema={
             "type": "object",
             "additionalProperties": False,
@@ -202,13 +223,12 @@ def build_orchestrator_harness(
     )
 
     adapter = SequenceProviderAdapter(responses)
-    trace_store = tracing_module.InMemoryTraceStore()
+    active_trace_store = trace_store or tracing_module.InMemoryTraceStore()
     orchestrator = orchestrator_module.AgentOrchestrator(
         provider=adapter,
         registry=registry,
         context_builder=lambda request: authoritative_graph_context(),
-        trace_store=trace_store,
+        trace_store=active_trace_store,
         max_tool_calls=max_tool_calls,
     )
-    return orchestrator, adapter, trace_store, executed_arguments
-
+    return orchestrator, adapter, active_trace_store, executed_arguments

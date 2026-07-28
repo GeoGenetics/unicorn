@@ -116,20 +116,23 @@ def test_read_only_registry_advertises_expected_tools() -> None:
     registry = build_registry()
 
     assert [tool["tool_id"] for tool in registry.provider_tools()] == [
-        "dataset.list_selected",
+        "datasets.selected",
         "graph.context",
         "node.details",
-        "node.find_visible",
-        "node.list_selected",
+        "nodes.find_visible",
+        "nodes.selected",
         "table.view",
     ]
+    assert all(tool["when_to_use"] for tool in registry.provider_tools())
+    assert all(tool["output_summary"] for tool in registry.provider_tools())
+    assert all(tool["mutation"] is False for tool in registry.provider_tools())
 
 
 def test_graph_context_and_dataset_tools_use_backend_state() -> None:
     registry = build_registry()
 
     context = registry.dispatch("graph.context", {})
-    datasets = registry.dispatch("dataset.list_selected", {})
+    datasets = registry.dispatch("datasets.selected", {})
 
     assert context["datasets"]["selected_count"] == 2
     assert context["tree"]["visible_node_count"] == 4
@@ -155,9 +158,9 @@ def test_graph_context_and_dataset_tools_use_backend_state() -> None:
 def test_selected_and_visible_lookup_tools_are_grounded() -> None:
     registry = build_registry()
 
-    selected = registry.dispatch("node.list_selected", {})
+    selected = registry.dispatch("nodes.selected", {})
     matches = registry.dispatch(
-        "node.find_visible",
+        "nodes.find_visible",
         {
             "query": "Virid",
             "limit": 5,

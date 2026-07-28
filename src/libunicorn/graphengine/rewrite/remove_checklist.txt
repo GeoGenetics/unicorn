@@ -172,7 +172,7 @@ Current `state.agent` object in `graphengine_state.js`:
 [x] REMOVE the enclosing old `state.agent` object
 
 [ ] REPLACE it later with minimal UI-only state.
-[ ] Ensure the replacement never treats API credentials as persistent graph
+[x] Ensure the replacement never treats API credentials as persistent graph
     state or trace data.
 [x] PRESERVE all tree, selection, metadata, report, and backend state.
 
@@ -190,7 +190,7 @@ Current declarations and exports in `graphengine_core.js`:
 
 [ ] REPLACE provider/model UI choices in the new Agent UI client or a dedicated
     configuration module.
-[ ] Move tool identities and iteration policy to the backend rewrite.
+[x] Move tool identities and iteration policy to the backend rewrite.
 [x] PRESERVE shared utilities such as `formatLogTime`, `errorToDetail`, and
     `escapeHtml`.
 
@@ -308,7 +308,7 @@ Old environment variables retired with these constants:
 [x] REMOVE `UNICORN_GRAPHENGINE_AGENT_PROVIDER_NATIVE_RESPONSE_RAW_LOG_DIR`
 [x] REMOVE `UNICORN_GRAPHENGINE_AGENT_PROVIDER_RESPONSE_MAPPING_LOG_DIR`
 
-[ ] REPLACE all old log destinations with one ordered V1 trace destination.
+[x] REPLACE all old log destinations with one ordered V1 trace destination.
 [x] PRESERVE the general graphengine `LOGGER`.
 
 
@@ -412,8 +412,8 @@ Remove from `server_app.py`:
 [x] REMOVE route function `agent_client_payload`
 
 [x] Confirm no old Agent route remains in FastAPI's generated route list.
-[ ] Later replace both routes with the single V1 `POST /agent/turn` route and
-    trace-access route defined by the new contracts.
+[x] Replace both old routes with the single V1 `POST /agent/turn` route.
+[ ] Add the trace-access route after persistent V1 tracing is implemented.
 
 
 15. Generated Old Runtime Artifacts

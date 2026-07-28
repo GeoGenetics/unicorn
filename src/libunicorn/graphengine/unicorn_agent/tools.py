@@ -16,9 +16,9 @@ from unicorn_agent.registry import ToolRegistry, ToolRegistryError
 
 
 GRAPH_CONTEXT = "graph.context"
-DATASET_LIST_SELECTED = "dataset.list_selected"
-NODE_LIST_SELECTED = "node.list_selected"
-NODE_FIND_VISIBLE = "node.find_visible"
+DATASETS_SELECTED = "datasets.selected"
+NODES_SELECTED = "nodes.selected"
+NODES_FIND_VISIBLE = "nodes.find_visible"
 NODE_DETAILS = "node.details"
 TABLE_VIEW = "table.view"
 
@@ -180,7 +180,7 @@ class ReadOnlyToolService:
                 self._resolve_visible_node(
                     tree,
                     taxid,
-                    tool_id=NODE_LIST_SELECTED,
+                    tool_id=NODES_SELECTED,
                 ),
                 min_reads=self._scope["min_reads"],
             )
@@ -357,38 +357,91 @@ def create_read_only_registry(
     registry.register(
         tool_id=GRAPH_CONTEXT,
         description="Return the compact backend-authoritative graph context.",
+        when_to_use=(
+            "Use for current dataset count, visible-tree scope, selection "
+            "count, count mode, and minimum-read threshold."
+        ),
+        output_summary=(
+            "Compact session, dataset, tree, filter, metadata, and report-state "
+            "summaries."
+        ),
         arguments_schema=_NO_ARGUMENTS,
         handler=service.graph_context,
+        mutation=False,
     )
     registry.register(
-        tool_id=DATASET_LIST_SELECTED,
+        tool_id=DATASETS_SELECTED,
         description="List active datasets and their backend count summaries.",
+        when_to_use=(
+            "Use when dataset filenames or per-dataset total summaries are "
+            "needed."
+        ),
+        output_summary=(
+            "Dataset count, total reads, direct taxa, and one summary per "
+            "selected dataset."
+        ),
         arguments_schema=_NO_ARGUMENTS,
         handler=service.list_selected_datasets,
+        mutation=False,
     )
     registry.register(
-        tool_id=NODE_LIST_SELECTED,
+        tool_id=NODES_SELECTED,
         description="List nodes selected in the active backend graph scope.",
+        when_to_use=(
+            "Use when the user refers to the current node selection without "
+            "providing taxids."
+        ),
+        output_summary=(
+            "Selected taxids with names, ranks, direct and subtree counts, and "
+            "visible child counts."
+        ),
         arguments_schema=_NO_ARGUMENTS,
         handler=service.list_selected_nodes,
+        mutation=False,
     )
     registry.register(
-        tool_id=NODE_FIND_VISIBLE,
+        tool_id=NODES_FIND_VISIBLE,
         description="Find threshold-visible nodes by taxid or name.",
+        when_to_use=(
+            "Use before node.details when a prompt identifies a node by name "
+            "or an unverified taxid."
+        ),
+        output_summary=(
+            "Ordered visible-node matches with grounded taxids, counts, and "
+            "match types."
+        ),
         arguments_schema=_FIND_VISIBLE_ARGUMENTS,
         handler=service.find_visible_nodes,
+        mutation=False,
     )
     registry.register(
         tool_id=NODE_DETAILS,
         description="Return backend-authoritative details for one or more taxids.",
+        when_to_use=(
+            "Use after taxids are known or resolved through nodes.find_visible."
+        ),
+        output_summary=(
+            "Node identity, lineage, direct and subtree counts, child count, "
+            "and per-dataset counts for one or more taxids."
+        ),
         arguments_schema=_NODE_DETAILS_ARGUMENTS,
         handler=service.node_details,
+        mutation=False,
     )
     registry.register(
         tool_id=TABLE_VIEW,
         description="Return a ranked table for the root or one visible node.",
+        when_to_use=(
+            "Use for ranked direct or subtree count rows within the root or a "
+            "known visible-node scope."
+        ),
+        output_summary=(
+            "Target-node summary and ordered table rows capped by the requested "
+            "limit."
+        ),
         arguments_schema=_TABLE_VIEW_ARGUMENTS,
         handler=service.table_view,
+        mutation=False,
     )
     return registry
 

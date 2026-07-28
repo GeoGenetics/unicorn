@@ -216,7 +216,7 @@ Git history remains the archive. We should not move the old source into a `legac
 
 ## Phase 6: Create the Backend Agent Package
 
-Status: IN PROGRESS
+Status: COMPLETE
 
 Suggested structure:
 
@@ -251,7 +251,24 @@ Responsibilities:
 
 `server_app.py` should only include the Agent router.
 
+Completed:
+
+- created the backend-owned `unicorn_agent` Python package
+- implemented runtime validation against the frozen V1 contracts
+- implemented provider-neutral mapping and parsing boundaries
+- rebuilt compact context from backend-authoritative graph scope
+- added stable read-only tool identities, validation, and dispatch
+- implemented the Unicorn-owned provider/tool iteration state machine
+- added ordered, secret-free in-memory tracing
+- exposed `POST /agent/turn` through an injected router factory
+- kept `server_app.py` limited to Agent runtime composition and router
+  registration
+- retained disabled Agent panel behavior and deferred all live provider
+  transport
+
 ## Phase 7: Implement Tracing First
+
+STATE - COMPLETE
 
 Before real provider calls, implement the full event stream with a fake provider.
 
@@ -295,7 +312,35 @@ Trace requirements:
 - exact tool arguments and results;
 - redacted credentials.
 
+Implemented:
+
+- promoted the complete Phase 7 lifecycle into the authoritative V1 trace
+  schema
+- added ordered events for validation, context, every provider iteration,
+  provider transport, output extraction, normalization, tool validation and
+  execution, result reinjection, and terminal turn state
+- added deterministic UTF-8 JSON payload-size measurements
+- added provider transport envelopes carrying HTTP status and native response
+  bodies
+- added provider output inspection carrying both raw model text and the exact
+  sanitized parser input
+- retained exact tool arguments and complete validated tool results
+- added `JsonlTraceStore` with immediate append-only persistence
+- default trace storage to
+  `logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl` relative to graphengine
+- allow an explicit trace root through
+  `UNICORN_GRAPHENGINE_AGENT_TRACE_DIR`
+- recursively remove credential-bearing keys and redact transient secret
+  values before validation or persistence
+- discard transient redaction secrets after the terminal event
+- keep the in-memory trace sink available for deterministic unit tests
+- switch the server runtime to persistent JSONL tracing while retaining the
+  deferred no-network provider boundary
+- add fixture-driven coverage for complete multi-iteration JSONL traces
+
 ## Phase 8: Implement the Read-Only Tool Registry
+
+STATE - COMPLETE
 
 Start with stable IDs:
 
@@ -321,6 +366,33 @@ Each definition should contain:
 The backend should execute these tools directly against existing graph models and helpers. Browser callbacks should not be needed for read-only execution.
 
 Browser-owned state such as selected taxids must arrive explicitly in `graph_scope`.
+
+Implemented:
+
+- froze the six canonical IDs:
+  - `graph.context`
+  - `datasets.selected`
+  - `nodes.selected`
+  - `nodes.find_visible`
+  - `node.details`
+  - `table.view`
+- expanded every definition with description, when-to-use guidance, output
+  summary, strict argument schema, backend implementation handler, and
+  mutation flag
+- made the richer definition shape part of the authoritative V1 provider-input
+  contract
+- advertise only definitions with `mutation: false`
+- reject mutation dispatch unless an explicit internal caller enables it
+- construct a fresh read-only service and registry for each browser turn
+- execute all handlers directly against injected backend graph models
+- verify datasets, taxonomy, threshold-visible taxids, selection, and focus
+  through backend-authoritative state
+- consume selected and focused taxids only from validated `graph_scope`
+- retain multi-taxid node details and name-to-taxid visible-node lookup
+- replace the historical browser registry document with the backend V1
+  registry reference
+- extend registry and tool tests for canonical IDs and complete definition
+  metadata
 
 ## Phase 9: Implement the Orchestrator with a Fake Provider
 
@@ -350,8 +422,9 @@ Each adapter must expose only:
 
 ```text
 map_request(canonical_input) -> provider-native request
-send_request(provider-native request) -> raw provider response
-parse_response(raw provider response) -> normalized response
+send_request(provider-native request) -> transport response
+inspect_response(raw provider response) -> raw and sanitized output
+parse_response(sanitized output) -> normalized response
 ```
 
 Provider-specific compatibility handling remains inside its adapter.

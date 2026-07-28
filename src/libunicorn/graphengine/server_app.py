@@ -12,6 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from unicorn_agent.routes import create_agent_router
+from unicorn_agent.runtime import create_agent_runtime
 from unicorn_compute.barplot import build_count_matrix_barplot_spec
 from unicorn_compute.pcoa import build_count_matrix_pcoa_spec
 
@@ -840,6 +842,15 @@ class GraphEngineStore:
 
 
 STORE = GraphEngineStore()
+AGENT_RUNTIME = create_agent_runtime(store=STORE)
+
+app.include_router(
+    create_agent_router(
+        store=STORE,
+        registry=AGENT_RUNTIME.registry_factory,
+        orchestrator=AGENT_RUNTIME,
+    )
+)
 
 
 app.add_middleware(

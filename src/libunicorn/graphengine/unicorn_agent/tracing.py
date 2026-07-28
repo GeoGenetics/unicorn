@@ -1,12 +1,15 @@
-"""Ordered, secret-free in-memory tracing for Unicorn Agent turns."""
+"""Ordered, secret-free memory and JSONL tracing for Unicorn Agent turns."""
 
 from __future__ import annotations
 
 import copy
+import json
+import os
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from threading import RLock
 from time import monotonic
 from typing import Any
@@ -21,6 +24,8 @@ _FORBIDDEN_KEYS = {
     "authorization",
     "x_unicorn_provider_api_key",
 }
+_DEFAULT_TRACE_ROOT = Path(__file__).resolve().parents[1] / "logs" / "agent_trace"
+TRACE_ROOT_ENV = "UNICORN_GRAPHENGINE_AGENT_TRACE_DIR"
 
 
 @dataclass(repr=False)
@@ -64,6 +69,11 @@ class InMemoryTraceStore:
                     if isinstance(value, str) and value
                 ),
             )
+            try:
+                self._trace_started(trace_id, self._traces[trace_id])
+            except Exception:
+                del self._traces[trace_id]
+                raise
         return trace_id
 
     def record(
@@ -94,17 +104,100 @@ class InMemoryTraceStore:
                 "data": _sanitize_trace_data(data, state.secrets),
             }
             validate_trace_event(trace_event)
+            self._event_recorded(trace_id, trace_event)
             state.events.append(copy.deepcopy(trace_event))
             return copy.deepcopy(trace_event)
+
+    def finish_trace(self, trace_id: str) -> None:
+        """Discard transient redaction secrets after the terminal event."""
+
+        with self._lock:
+            state = self._traces.get(trace_id)
+            if state is None:
+                raise KeyError(f"Unknown Agent trace: {trace_id}")
+            state.secrets = ()
 
     def events_for(self, trace_id: str) -> list[dict[str, Any]]:
         with self._lock:
             state = self._traces.get(trace_id)
             return copy.deepcopy(state.events) if state is not None else []
 
+    def _trace_started(self, trace_id: str, state: _TraceState) -> None:
+        del trace_id, state
+
+    def _event_recorded(
+        self,
+        trace_id: str,
+        event: Mapping[str, Any],
+    ) -> None:
+        del trace_id, event
+
+
+class JsonlTraceStore(InMemoryTraceStore):
+    """Persist each validated event as one JSON object per line."""
+
+    def __init__(self, root_dir: str | Path | None = None) -> None:
+        super().__init__()
+        configured = (
+            root_dir
+            or os.environ.get(TRACE_ROOT_ENV)
+            or _DEFAULT_TRACE_ROOT
+        )
+        self._root_dir = Path(configured).expanduser().resolve()
+        self._paths: dict[str, Path] = {}
+
+    @property
+    def root_dir(self) -> Path:
+        return self._root_dir
+
+    def trace_path(self, trace_id: str) -> Path:
+        with self._lock:
+            path = self._paths.get(trace_id)
+            if path is None:
+                raise KeyError(f"Unknown Agent trace: {trace_id}")
+            return path
+
+    def _trace_started(self, trace_id: str, state: _TraceState) -> None:
+        date_dir = self._root_dir / _utc_date()
+        date_dir.mkdir(parents=True, exist_ok=True)
+        path = date_dir / f"{state.turn_id}.jsonl"
+        path.touch(exist_ok=True)
+        self._paths[trace_id] = path
+
+    def _event_recorded(
+        self,
+        trace_id: str,
+        event: Mapping[str, Any],
+    ) -> None:
+        path = self._paths[trace_id]
+        line = json.dumps(
+            event,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.write("\n")
+
 
 def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _utc_date() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def payload_size_bytes(value: Any) -> int:
+    """Return the deterministic UTF-8 JSON size used by trace measurements."""
+
+    encoded = json.dumps(
+        value,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=str,
+    ).encode("utf-8")
+    return len(encoded)
 
 
 def _sanitize_trace_data(value: Any, secrets: tuple[str, ...]) -> Any:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from unicorn_agent.contracts import (
@@ -38,6 +39,28 @@ class ProviderAdapterError(ValueError):
         super().__init__(message)
 
 
+@dataclass(frozen=True)
+class ProviderTransportResponse:
+    """Provider-native response plus transport metadata needed for tracing."""
+
+    status_code: int
+    body: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        if not 100 <= self.status_code <= 599:
+            raise ValueError("Provider status_code must be between 100 and 599.")
+        if not isinstance(self.body, dict):
+            raise TypeError("Provider response body must be an object.")
+
+
+@dataclass(frozen=True)
+class ProviderOutputInspection:
+    """Raw model output and the exact sanitized input used for parsing."""
+
+    raw_text: str
+    sanitized_text: str
+
+
 class ProviderAdapter(ABC):
     """Common provider adapter interface owned by the backend orchestrator."""
 
@@ -51,13 +74,20 @@ class ProviderAdapter(ABC):
         native_request: Mapping[str, Any],
         *,
         api_key: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> ProviderTransportResponse:
         """Perform provider transport using only transient credentials."""
+
+    @abstractmethod
+    def inspect_response(
+        self,
+        raw_response: Mapping[str, Any],
+    ) -> ProviderOutputInspection:
+        """Extract raw model output and sanitized parser input."""
 
     @abstractmethod
     def parse_response(
         self,
-        raw_response: Mapping[str, Any],
+        sanitized_text: str,
     ) -> dict[str, Any]:
         """Normalize one provider-native response."""
 
@@ -67,11 +97,12 @@ class ProviderAdapter(ABC):
         credentials: ProviderCredentials,
     ) -> dict[str, Any]:
         native_request = self.map_request(provider_input)
-        raw_response = self.send_request(
+        transport = self.send_request(
             native_request,
             api_key=credentials.api_key,
         )
-        return self.parse_response(raw_response)
+        output = self.inspect_response(transport.body)
+        return self.parse_response(output.sanitized_text)
 
 
 _LEGACY_TOOL_IDS = {
