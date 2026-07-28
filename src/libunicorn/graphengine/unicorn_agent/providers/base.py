@@ -114,25 +114,69 @@ def serialize_provider_input(provider_input: Mapping[str, Any]) -> str:
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
 
 
-def provider_instructions(instructions: str) -> str:
-    """Append the provider-neutral JSON-only response rules."""
+def provider_instructions(
+    instructions: str,
+    *,
+    iteration: int,
+    has_tool_results: bool,
+) -> str:
+    """Append provider-neutral JSON and tool-loop decision rules."""
 
-    return "\n".join(
-        [
-            instructions.strip(),
-            "",
-            "Return exactly one JSON object and no markdown or prose outside it.",
-            "Allowed response forms:",
-            '{"type":"final_answer","content":"grounded answer"}',
-            (
-                '{"type":"tool_call","tool_id":"advertised.tool",'
-                '"arguments":{}}'
-            ),
-            '{"type":"error","code":"stable_code","message":"explanation"}',
-            "Use only tool IDs present in the supplied tools array.",
-            "Never claim a tool action occurred until its result is supplied.",
-        ]
-    )
+    rules = [
+        instructions.strip(),
+        "",
+        "Return exactly one JSON object and no markdown or prose outside it.",
+        "Allowed response forms:",
+        '{"type":"final_answer","content":"grounded answer"}',
+        (
+            '{"type":"tool_call","tool_id":"advertised.tool",'
+            '"arguments":{}}'
+        ),
+        '{"type":"error","code":"stable_code","message":"explanation"}',
+        "Use only tool IDs present in the supplied tools array.",
+        "Treat graph_context and successful tool_results as authoritative.",
+        "Inspect every supplied tool result before choosing the next response.",
+        (
+            "Never repeat a tool call when the same tool_id and arguments "
+            "already have a supplied result."
+        ),
+        (
+            "If supplied tool results answer the user prompt, return a concise "
+            "final_answer immediately."
+        ),
+        (
+            "For a named node, call nodes.find_visible once, then call "
+            "node.details with the grounded taxid when details are requested."
+        ),
+        (
+            "After a successful node.details result, answer from that result; "
+            "do not restart node lookup."
+        ),
+        (
+            "For selected-node details, call nodes.selected once, then call "
+            "node.details once with the returned taxids, then summarize."
+        ),
+        "Never claim a tool action occurred until its result is supplied.",
+        (
+            "Keep final answers concise, especially when summarizing many "
+            "datasets or nodes."
+        ),
+        f"The current provider iteration is {iteration}.",
+    ]
+    if has_tool_results:
+        rules.extend(
+            [
+                (
+                    "This is a post-tool iteration: authoritative tool results "
+                    "are already present in tool_results."
+                ),
+                (
+                    "Advance the workflow using those results instead of "
+                    "requesting an already completed step again."
+                ),
+            ]
+        )
+    return "\n".join(rules)
 
 
 def provider_response_schema() -> dict[str, Any]:

@@ -55,7 +55,7 @@
 
   function init() {
     if (agentState.initialized) return;
-    agentState.initialized = true;
+    resolveAgentDomAdditions();
 
     const storedProvider = localStorage.getItem("unicorn.agent.provider");
     els.agentProviderSelect.value = PROVIDERS[storedProvider]
@@ -72,14 +72,24 @@
     els.agentPrompt.addEventListener("keydown", handlePromptKeydown);
     els.agentSendBtn.addEventListener("click", sendPrompt);
     els.agentClearBtn.addEventListener("click", clearTranscript);
-    els.agentTraceOpenBtn.addEventListener("click", openLastTrace);
-    els.agentTraceDownloadBtn.addEventListener("click", downloadLastTrace);
+    els.agentTraceOpenBtn?.addEventListener("click", openLastTrace);
+    els.agentTraceDownloadBtn?.addEventListener("click", downloadLastTrace);
 
     els.agentPrompt.disabled = false;
     els.agentPrompt.placeholder = "Ask about the current backend-authoritative graph state";
     renderTranscript();
     syncProviderState();
+    agentState.initialized = true;
     syncAvailability();
+  }
+
+  function resolveAgentDomAdditions() {
+    els.agentModelOptions = els.agentModelOptions
+      || document.getElementById("agentModelOptions");
+    els.agentTraceOpenBtn = els.agentTraceOpenBtn
+      || document.getElementById("agentTraceOpenBtn");
+    els.agentTraceDownloadBtn = els.agentTraceDownloadBtn
+      || document.getElementById("agentTraceDownloadBtn");
   }
 
   function setConfigControlsDisabled(disabled) {
@@ -183,8 +193,12 @@
     els.agentPrompt.disabled = agentState.pending;
     setConfigControlsDisabled(agentState.pending);
     els.agentClearBtn.disabled = agentState.pending || !agentState.entries.length;
-    els.agentTraceOpenBtn.disabled = !agentState.lastTraceId;
-    els.agentTraceDownloadBtn.disabled = !agentState.lastTraceId;
+    if (els.agentTraceOpenBtn) {
+      els.agentTraceOpenBtn.disabled = !agentState.lastTraceId;
+    }
+    if (els.agentTraceDownloadBtn) {
+      els.agentTraceDownloadBtn.disabled = !agentState.lastTraceId;
+    }
 
     if (agentState.pending) {
       els.agentMeta.textContent = "Agent turn in progress";

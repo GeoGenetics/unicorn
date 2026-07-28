@@ -64,6 +64,45 @@ def test_provider_request_mapping_is_provider_native_and_secret_free(
     else:
         assert "messages" in native_request
         assert native_request["temperature"] == 0.0
+        assert native_request["max_tokens"] == 2048
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_post_tool_provider_mapping_requires_result_reuse(
+    provider: str,
+) -> None:
+    adapter = provider_adapter(provider)
+    provider_input = valid_provider_input()
+    provider_input["iteration"] = 1
+    provider_input["tool_results"] = [
+        {
+            "schema_version": "unicorn_tool_result_v1",
+            "tool_id": "node.details",
+            "arguments": {
+                "taxid": 33090,
+            },
+            "ok": True,
+            "result": {
+                "taxid": 33090,
+                "name": "Viridiplantae",
+                "rank": "kingdom",
+            },
+            "error": None,
+        }
+    ]
+
+    native_request = adapter.map_request(provider_input)
+    if provider == "openai":
+        instructions = native_request["instructions"]
+    elif provider == "google":
+        instructions = native_request["system_instruction"]
+    else:
+        instructions = native_request["messages"][0]["content"]
+
+    assert "post-tool iteration" in instructions
+    assert "Never repeat a tool call" in instructions
+    assert "return a concise final_answer immediately" in instructions
+    assert "do not restart node lookup" in instructions
 
 
 @pytest.mark.parametrize("provider,path,fixture", SUCCESS_FIXTURES)

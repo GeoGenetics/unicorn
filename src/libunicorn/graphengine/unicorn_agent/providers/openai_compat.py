@@ -48,6 +48,8 @@ class LocalOpenAICompatibleAdapter(ProviderAdapter):
                     "role": "system",
                     "content": provider_instructions(
                         provider_input["instructions"],
+                        iteration=provider_input["iteration"],
+                        has_tool_results=bool(provider_input["tool_results"]),
                     ),
                 },
                 {
@@ -56,6 +58,7 @@ class LocalOpenAICompatibleAdapter(ProviderAdapter):
                 },
             ],
             "temperature": 0.0,
+            "max_tokens": 2048,
             "response_format": {
                 "type": "json_object",
             },

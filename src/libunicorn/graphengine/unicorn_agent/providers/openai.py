@@ -39,6 +39,8 @@ class OpenAIAdapter(ProviderAdapter):
             "model": provider_input["model"],
             "instructions": provider_instructions(
                 provider_input["instructions"],
+                iteration=provider_input["iteration"],
+                has_tool_results=bool(provider_input["tool_results"]),
             ),
             "input": [
                 {

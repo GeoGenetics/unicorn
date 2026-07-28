@@ -54,6 +54,14 @@ def test_agent_panel_submits_one_backend_turn_and_renders_result(
     expect(rendered_page.locator("#agentPrompt")).to_be_enabled(
         timeout=STEP_TIMEOUT_MS,
     )
+    expect(rendered_page.locator("#agentProviderState")).not_to_contain_text(
+        "loading",
+        timeout=STEP_TIMEOUT_MS,
+    )
+    expect(rendered_page.locator("#agentMeta")).to_contain_text(
+        "Backend Agent ready",
+        timeout=STEP_TIMEOUT_MS,
+    )
 
     log_step("Configuring the local OpenAI-compatible provider")
     rendered_page.locator("#agentProviderSelect").select_option(

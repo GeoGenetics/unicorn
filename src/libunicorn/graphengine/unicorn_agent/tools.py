@@ -389,7 +389,9 @@ def create_read_only_registry(
         description="List nodes selected in the active backend graph scope.",
         when_to_use=(
             "Use when the user refers to the current node selection without "
-            "providing taxids."
+            "providing taxids. Call it once to obtain grounded taxids; if the "
+            "user requests details, pass those taxids to node.details in one "
+            "call."
         ),
         output_summary=(
             "Selected taxids with names, ranks, direct and subtree counts, and "
@@ -404,7 +406,8 @@ def create_read_only_registry(
         description="Find threshold-visible nodes by taxid or name.",
         when_to_use=(
             "Use before node.details when a prompt identifies a node by name "
-            "or an unverified taxid."
+            "or an unverified taxid. Call it once for a query and reuse the "
+            "grounded taxid from its result."
         ),
         output_summary=(
             "Ordered visible-node matches with grounded taxids, counts, and "
@@ -418,7 +421,9 @@ def create_read_only_registry(
         tool_id=NODE_DETAILS,
         description="Return backend-authoritative details for one or more taxids.",
         when_to_use=(
-            "Use after taxids are known or resolved through nodes.find_visible."
+            "Use after taxids are known or resolved through nodes.find_visible. "
+            "After a successful result, answer the user from that result rather "
+            "than restarting lookup."
         ),
         output_summary=(
             "Node identity, lineage, direct and subtree counts, child count, "

@@ -577,6 +577,32 @@ Required scenarios:
 
 For every scenario, one trace file must reconstruct the complete turn.
 
+Manual validation on 2026-07-28:
+
+- PASS: `What min_reads threshold am I using?`
+  - `graph.context` returned authoritative state
+  - provider returned the correct final answer
+- PASS: `How many datasets are loaded?`
+  - `datasets.selected` returned authoritative state
+  - provider returned the correct final answer
+- PARTIAL: `Tell me about Viridiplantae`
+  - `nodes.find_visible` resolved taxid `33090`
+  - `node.details` returned complete authoritative details
+  - provider then repeated the original lookup instead of consuming the detail
+    result
+  - provider-neutral post-tool instructions now explicitly require result reuse
+    and workflow advancement; manual rerun remains pending
+- PARTIAL: `Tell me about the selected nodes`
+  - `nodes.selected` returned 17 authoritative node summaries
+  - the next local-provider synthesis request reached the vLLM endpoint but
+    exhausted the 180-second transport timeout
+  - local OpenAI-compatible generation is now bounded to 2048 output tokens and
+    instructed to summarize large results concisely; manual rerun remains
+    pending
+
+The repetition guard remains unchanged. Repeating an identical completed tool
+call is still a controlled terminal failure and remains required by scenario 6.
+
 ## Phase 13: Remove Transition Documentation
 
 Once the new runtime works:
