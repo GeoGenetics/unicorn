@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import FileResponse
 
 from unicorn_agent.routes import (
     PROVIDER_API_KEY_HEADER,
@@ -35,9 +37,29 @@ class RecordingOrchestrator:
         }
 
 
+class RecordingTraceStore:
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path
+
+    def trace_path(self, trace_id: str) -> Path:
+        if self.path is None:
+            raise KeyError(trace_id)
+        return self.path
+
+
 def _turn_endpoint(router):
     route = next(route for route in router.routes if route.path == "/agent/turn")
     assert route.methods == {"POST"}
+    return route.endpoint
+
+
+def _trace_endpoint(router):
+    route = next(
+        route
+        for route in router.routes
+        if route.path == "/agent/traces/{trace_id}"
+    )
+    assert route.methods == {"GET"}
     return route.endpoint
 
 
@@ -47,6 +69,7 @@ def test_router_exposes_post_turn_and_forwards_ephemeral_api_key() -> None:
         store=object(),
         registry=object(),
         orchestrator=orchestrator,
+        trace_store=RecordingTraceStore(),
     )
     endpoint = _turn_endpoint(router)
     request = valid_browser_turn_request()
@@ -67,6 +90,7 @@ def test_router_maps_contract_failure_to_structured_422() -> None:
             store=object(),
             registry=object(),
             orchestrator=orchestrator,
+            trace_store=RecordingTraceStore(),
         )
     )
     request = valid_browser_turn_request()
@@ -91,6 +115,7 @@ def test_router_maps_unexpected_failure_without_exposing_credentials() -> None:
             store=object(),
             registry=object(),
             orchestrator=FailingOrchestrator(),
+            trace_store=RecordingTraceStore(),
         )
     )
     secret = "fixture-route-secret"
@@ -106,12 +131,65 @@ def test_router_maps_unexpected_failure_without_exposing_credentials() -> None:
     assert secret not in str(caught.value.detail)
 
 
-@pytest.mark.parametrize("dependency", ["store", "registry", "orchestrator"])
+def test_router_serves_trace_inline_or_as_download(tmp_path: Path) -> None:
+    trace_path = tmp_path / "turn_fixture.jsonl"
+    trace_path.write_text('{"event":"turn_completed"}\n', encoding="utf-8")
+    endpoint = _trace_endpoint(
+        create_agent_router(
+            store=object(),
+            registry=object(),
+            orchestrator=RecordingOrchestrator(),
+            trace_store=RecordingTraceStore(trace_path),
+        )
+    )
+
+    inline = endpoint("trace_fixture", False)
+    download = endpoint("trace_fixture", True)
+
+    assert isinstance(inline, FileResponse)
+    assert Path(inline.path) == trace_path
+    assert inline.headers["content-disposition"].startswith("inline;")
+    assert download.headers["content-disposition"].startswith("attachment;")
+
+
+@pytest.mark.parametrize(
+    ("trace_id", "status_code", "code"),
+    [
+        ("not-a-trace", 422, "invalid_trace_id"),
+        ("trace_missing", 404, "trace_not_found"),
+    ],
+)
+def test_router_rejects_invalid_or_unknown_trace(
+    trace_id: str,
+    status_code: int,
+    code: str,
+) -> None:
+    endpoint = _trace_endpoint(
+        create_agent_router(
+            store=object(),
+            registry=object(),
+            orchestrator=RecordingOrchestrator(),
+            trace_store=RecordingTraceStore(),
+        )
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        endpoint(trace_id, False)
+
+    assert caught.value.status_code == status_code
+    assert caught.value.detail["code"] == code
+
+
+@pytest.mark.parametrize(
+    "dependency",
+    ["store", "registry", "orchestrator", "trace_store"],
+)
 def test_router_rejects_missing_dependencies(dependency: str) -> None:
     arguments = {
         "store": object(),
         "registry": object(),
         "orchestrator": RecordingOrchestrator(),
+        "trace_store": RecordingTraceStore(),
     }
     arguments[dependency] = None
 

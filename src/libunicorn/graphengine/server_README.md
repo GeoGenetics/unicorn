@@ -359,7 +359,14 @@ Every turn writes an ordered, secret-free trace under:
 logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
 ```
 
-The preserved browser Agent panel remains disabled until the Phase 11 client is
-implemented. The backend route can be exercised directly in the meantime.
+The browser Agent panel sends exactly one request to `/agent/turn`. Provider
+transport, response parsing, tool execution, and iteration remain backend-owned.
+The latest trace can be viewed inline or downloaded through:
+
+```text
+GET /agent/traces/{trace_id}
+GET /agent/traces/{trace_id}?download=true
+```
+
 `/agent/provider-turn` and `/agent/client-payload` are not part of the current
 contract.

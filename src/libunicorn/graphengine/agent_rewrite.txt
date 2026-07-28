@@ -492,7 +492,7 @@ Implemented:
 
 ## Phase 11: Rebuild the Browser Agent Client
 
-STATE - IN PROGRESS
+STATE - COMPLETE
 
 Create a small `graphengine_agent_ui.js`.
 
@@ -514,7 +514,35 @@ POST /agent/turn
 
 No browser-side provider loop, tool registry, response parser, or provider adapter should remain.
 
+Implemented:
+
+- added `graphengine_agent_ui.js` as the only browser owner of Agent controls
+- retained provider, editable model, optional base URL, and transient API-key
+  inputs in the preserved Agent panel
+- collect only the frozen browser graph scope:
+  - selected backend dataset filenames
+  - active taxonomy filenames
+  - `min_reads` and direct/cumulative interpretation
+  - selected and focused taxids
+- preserve only a bounded recent user/assistant conversation in browser UI state
+- send exactly one `POST /agent/turn` request per prompt
+- render the final backend answer, terminal error, tool-use summary, turn ID, and
+  trace ID without interpreting provider-native output
+- log only concise Agent turn identity and status in the visible client log
+- keep API keys in the request header and out of persistent browser state
+- add `GET /agent/traces/{trace_id}` for inline JSONL viewing and attachment
+  download from the backend-owned persistent trace store
+- add Open Trace and Download Trace controls for the latest turn
+- add the Agent module to the explicit boot-last dependency order
+- replace the rebuilding-state E2E check with a mocked `/agent/turn` browser
+  contract test that contacts no external provider
+
+The browser contains no provider transport, tool registry, tool execution,
+response normalization, compatibility parser, or turn loop.
+
 ## Phase 12: Validate Representative Workflows
+
+STATE - IN PROGRESS
 
 Required scenarios:
 

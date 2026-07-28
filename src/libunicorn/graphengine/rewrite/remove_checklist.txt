@@ -131,7 +131,7 @@ Current includes in `index.html`:
 [x] REMOVE `<script src="graphengine_provider_adapter.js?v=20260701a"></script>`
 [x] REMOVE `<script src="graphengine_agent.js?v=20260701a"></script>`
 
-[ ] REPLACE these includes later with the new small browser Agent UI client.
+[x] REPLACE these includes with the new small `graphengine_agent_ui.js` client.
 [x] PRESERVE the explicit dependency-order comment and boot-last structure.
 
 
@@ -151,7 +151,7 @@ Current wiring in `graphengine_boot.js`:
 [x] REMOVE the call to `agent.initAgentControls()`
 [x] REMOVE the call to `agent.renderAgentTranscript()`
 
-[ ] REPLACE old boot wiring with one initializer for the future
+[x] REPLACE old boot wiring with one initializer for the
     `graphengine_agent_ui.js` client.
 [x] PRESERVE all non-Agent boot event wiring.
 
@@ -171,7 +171,8 @@ Current `state.agent` object in `graphengine_state.js`:
 [x] REMOVE `state.agent.baseUrl`
 [x] REMOVE the enclosing old `state.agent` object
 
-[ ] REPLACE it later with minimal UI-only state.
+[x] REPLACE it with private, minimal UI-only state in
+    `graphengine_agent_ui.js`.
 [x] Ensure the replacement never treats API credentials as persistent graph
     state or trace data.
 [x] PRESERVE all tree, selection, metadata, report, and backend state.
@@ -188,7 +189,7 @@ Current declarations and exports in `graphengine_core.js`:
 [x] REMOVE `AGENT_MAX_TOOL_ITERATIONS`
 [x] REMOVE their four `namespace.core` exports
 
-[ ] REPLACE provider/model UI choices in the new Agent UI client or a dedicated
+[x] REPLACE provider/model UI choices in the new Agent UI client or a dedicated
     configuration module.
 [x] Move tool identities and iteration policy to the backend rewrite.
 [x] PRESERVE shared utilities such as `formatLogTime`, `errorToDetail`, and
@@ -276,7 +277,7 @@ log:
 [x] REMOVE the old `Captured agent context in the browser runtime` event
 
 [x] PRESERVE the general client-log component for non-Agent graphengine events.
-[ ] The replacement Agent UI may log concise turn IDs, statuses, and trace
+[x] The replacement Agent UI logs concise turn IDs, statuses, and trace
     locations, but not full provider payloads.
 
 
@@ -413,7 +414,7 @@ Remove from `server_app.py`:
 
 [x] Confirm no old Agent route remains in FastAPI's generated route list.
 [x] Replace both old routes with the single V1 `POST /agent/turn` route.
-[ ] Add the trace-access route after persistent V1 tracing is implemented.
+[x] Add the trace-access route after persistent V1 tracing is implemented.
 
 
 15. Generated Old Runtime Artifacts

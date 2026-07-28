@@ -648,6 +648,14 @@ code {
   flex-wrap: wrap;
 }
 
+.agent-shell-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .agent-meta {
   color: var(--muted);
   font-size: 11px;
@@ -723,6 +731,11 @@ code {
   background: rgba(247, 252, 251, 0.92);
 }
 
+.agent-entry.role-error {
+  border-color: rgba(166, 67, 50, 0.36);
+  background: rgba(255, 242, 237, 0.96);
+}
+
 .agent-entry.role-provider {
   background: rgba(240, 247, 252, 0.96);
 }
@@ -779,6 +792,12 @@ code {
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.05em;
+}
+
+.agent-tool-badge.is-error {
+  border-color: rgba(166, 67, 50, 0.3);
+  background: rgba(166, 67, 50, 0.1);
+  color: #8d392c;
 }
 
 .agent-entry-note {

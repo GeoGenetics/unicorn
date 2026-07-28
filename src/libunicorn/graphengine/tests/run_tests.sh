@@ -138,7 +138,7 @@ Manual workflow to execute in the browser:
    - Table And Report Flow
    - Filter Flow
    - Count View Flow
-   - Agent Safety Smoke Test
+   - Backend Agent Flow
 
 When a failure happens, capture:
 - the exact UI action

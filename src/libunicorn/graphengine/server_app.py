@@ -849,6 +849,7 @@ app.include_router(
         store=STORE,
         registry=AGENT_RUNTIME.registry_factory,
         orchestrator=AGENT_RUNTIME,
+        trace_store=AGENT_RUNTIME.trace_store,
     )
 )
 

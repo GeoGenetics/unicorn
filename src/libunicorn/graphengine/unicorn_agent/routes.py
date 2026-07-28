@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
-from fastapi import APIRouter, Body, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from unicorn_agent.contracts import (
     ContractValidationError,
@@ -15,6 +18,7 @@ from unicorn_agent.contracts import (
 
 
 PROVIDER_API_KEY_HEADER = "X-Unicorn-Provider-API-Key"
+_TRACE_ID = re.compile(r"^trace_[A-Za-z0-9._-]+$")
 
 
 class AgentTurnRunner(Protocol):
@@ -28,6 +32,12 @@ class AgentTurnRunner(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class AgentTraceReader(Protocol):
+    """Narrow persistent-trace access required by the HTTP boundary."""
+
+    def trace_path(self, trace_id: str) -> Path: ...
+
+
 @dataclass(frozen=True)
 class AgentRouterDependencies:
     """Explicit references retained by the router composition boundary."""
@@ -35,6 +45,7 @@ class AgentRouterDependencies:
     store: Any
     registry: Any
     orchestrator: AgentTurnRunner
+    trace_store: AgentTraceReader
 
 
 def create_agent_router(
@@ -42,6 +53,7 @@ def create_agent_router(
     store: Any,
     registry: Any,
     orchestrator: AgentTurnRunner,
+    trace_store: AgentTraceReader,
 ) -> APIRouter:
     """Create the V1 Agent router from explicitly injected dependencies."""
 
@@ -49,6 +61,7 @@ def create_agent_router(
         store=store,
         registry=registry,
         orchestrator=orchestrator,
+        trace_store=trace_store,
     )
     router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -82,6 +95,48 @@ def create_agent_router(
                 },
             ) from None
 
+    @router.get("/traces/{trace_id}")
+    def read_agent_trace(
+        trace_id: str,
+        download: bool = Query(default=False),
+    ) -> FileResponse:
+        if not _TRACE_ID.fullmatch(trace_id):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "invalid_trace_id",
+                    "message": "Agent trace ID does not satisfy the V1 format.",
+                },
+            )
+        try:
+            path = dependencies.trace_store.trace_path(trace_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "trace_not_found",
+                    "message": f"Agent trace was not found: {trace_id}",
+                },
+            ) from None
+        if not path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "trace_not_found",
+                    "message": f"Agent trace file was not found: {trace_id}",
+                },
+            )
+        disposition = "attachment" if download else "inline"
+        return FileResponse(
+            path,
+            media_type="application/x-ndjson",
+            headers={
+                "Content-Disposition": (
+                    f'{disposition}; filename="{path.name}"'
+                ),
+            },
+        )
+
     return router
 
 
@@ -90,6 +145,7 @@ def _validated_dependencies(
     store: Any,
     registry: Any,
     orchestrator: AgentTurnRunner,
+    trace_store: AgentTraceReader,
 ) -> AgentRouterDependencies:
     missing = [
         name
@@ -97,6 +153,7 @@ def _validated_dependencies(
             ("store", store),
             ("registry", registry),
             ("orchestrator", orchestrator),
+            ("trace_store", trace_store),
         )
         if value is None
     ]
@@ -105,10 +162,13 @@ def _validated_dependencies(
         raise ValueError(f"Agent router dependencies must not be None: {names}.")
     if not callable(getattr(orchestrator, "run", None)):
         raise TypeError("Agent router orchestrator must provide run().")
+    if not callable(getattr(trace_store, "trace_path", None)):
+        raise TypeError("Agent router trace_store must provide trace_path().")
     return AgentRouterDependencies(
         store=store,
         registry=registry,
         orchestrator=orchestrator,
+        trace_store=trace_store,
     )
 
 

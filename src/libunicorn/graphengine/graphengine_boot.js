@@ -13,9 +13,10 @@
     const ui = namespace.ui;
     const selection = namespace.selection;
     const reports = namespace.reports;
+    const agentUi = namespace.agentUi;
 
-    if (!state || !els || !backend || !metadata || !treeRender || !ui || !selection || !reports) {
-      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree render, UI, selection, and reports modules to load before boot.");
+    if (!state || !els || !backend || !metadata || !treeRender || !ui || !selection || !reports || !agentUi) {
+      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree render, UI, selection, reports, and Agent UI modules to load before boot.");
     }
 
     els.renderBtn.onclick = async (event) => {
@@ -99,6 +100,7 @@
     ui.initRemotePanel();
     ui.initFileInputs();
     ui.initMinReadsControls();
+    agentUi.init();
     if (typeof globalObject.renderClientLog === "function") {
       globalObject.renderClientLog();
     }

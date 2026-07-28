@@ -14,7 +14,7 @@ Graphengine currently concentrates several concerns in one runtime:
 - tree rendering
 - selection semantics
 - table and report views
-- the temporary Agent rebuild boundary
+- the backend-owned Agent request and trace boundary
 
 Because these concerns are tightly coupled, one small change can affect several
 behaviors at once. The goal of this protocol is to keep changes narrow, easy to
@@ -51,7 +51,7 @@ Every graphengine change must be:
    - selection behavior
    - render behavior
    - report behavior
-   - provider or Agent rebuild behavior
+   - provider or backend Agent behavior
 
 4. Avoid mixing permanent fixes with temporary debugging.
    If debug instrumentation is needed:

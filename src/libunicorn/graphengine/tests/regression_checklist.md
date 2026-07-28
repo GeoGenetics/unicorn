@@ -86,12 +86,14 @@ Run this checklist after any non-trivial graphengine change.
 3. If a report is open, confirm it rerenders or stays valid.
 
 
-## Agent Rebuild Boundary
+## Backend Agent Flow
 
 1. Open the agent panel.
-2. Confirm it reports `Agent framework rebuilding`.
-3. Confirm provider, credential, prompt, send, and clear controls are disabled.
-4. Confirm rendering a tree does not reactivate the removed Agent runtime.
+2. Choose a provider, model, base URL, and API key when required.
+3. Send one prompt and confirm one user entry and one terminal Agent entry.
+4. Confirm the terminal entry shows its turn ID, trace ID, and tool summary.
+5. Open or download the trace and confirm it belongs to the displayed turn.
+6. Confirm the visible client log contains no API key or full provider payload.
 
 
 ## Failure Signals
@@ -106,7 +108,7 @@ If any item fails, capture:
    selection
    reports
    backend context
-   agent rebuild boundary
+   backend Agent flow
 
 
 ## Minimum Standard
