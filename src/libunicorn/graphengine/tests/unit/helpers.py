@@ -21,13 +21,6 @@ GRAPHENGINE_DIR = Path(__file__).resolve().parents[2]
 CONTRACT_DIR = GRAPHENGINE_DIR / "rewrite" / "contracts"
 AGENT_FIXTURE_DIR = GRAPHENGINE_DIR / "tests" / "fixtures" / "agent"
 
-PROVIDER_MODULES = {
-    "openai": "unicorn_agent.providers.openai",
-    "google": "unicorn_agent.providers.google",
-    "local_openai_compat": "unicorn_agent.providers.openai_compat",
-}
-
-
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 

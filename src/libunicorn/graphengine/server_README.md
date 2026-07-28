@@ -331,13 +331,35 @@ The frontend should treat these as the current backend-required rules:
   subtree report, and rank report requests
 
 
-## Agent rebuild status
+## Agent backend status
 
-The previous Agent routes, provider transports, browser-local registry, and tool
-loop have been removed. The preserved Agent panel is intentionally disabled
-while the backend-first replacement is built.
+The previous Agent routes, browser-local registry, and browser tool loop remain
+removed. The backend replacement now exposes:
 
-There is currently no live Agent endpoint. In particular,
-`/agent/provider-turn` and `/agent/client-payload` are not part of this backend
-contract. The replacement will use the frozen V1 contracts under
-`rewrite/contracts/` and expose a new backend-owned route in a later phase.
+```text
+POST /agent/turn
+```
+
+The route accepts `unicorn_agent_turn_v1` and returns
+`unicorn_agent_result_v1`. Provider credentials travel only in:
+
+```http
+X-Unicorn-Provider-API-Key: <secret>
+```
+
+Supported backend adapters are:
+
+- local OpenAI-compatible/vLLM
+- Google Gemini Interactions
+- OpenAI Responses
+
+Every turn writes an ordered, secret-free trace under:
+
+```text
+logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
+```
+
+The preserved browser Agent panel remains disabled until the Phase 11 client is
+implemented. The backend route can be exercised directly in the meantime.
+`/agent/provider-turn` and `/agent/client-payload` are not part of the current
+contract.

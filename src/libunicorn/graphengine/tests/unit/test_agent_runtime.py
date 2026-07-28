@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from unicorn_agent.providers.fake import DeterministicFakeProviderAdapter
 from unicorn_agent.runtime import BackendAgentRuntime
 from unicorn_agent.tracing import JsonlTraceStore
 
@@ -14,6 +15,9 @@ def test_backend_runtime_completes_deterministic_fake_tool_loop(tmp_path) -> Non
     runtime = BackendAgentRuntime(
         store=FixtureStore(),
         trace_store=trace_store,
+        provider_factory=lambda provider_config: (
+            DeterministicFakeProviderAdapter()
+        ),
     )
     request = valid_browser_turn_request()
 

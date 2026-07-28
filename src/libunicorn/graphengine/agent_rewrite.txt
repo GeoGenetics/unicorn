@@ -434,6 +434,8 @@ Implemented:
 
 ## Phase 10: Add Provider Adapters
 
+STATE - COMPLETE
+
 Recommended order:
 
 1. local OpenAI-compatible/vLLM
@@ -459,7 +461,38 @@ The orchestrator must never know about:
 - `<think>` blocks;
 - fenced JSON extraction.
 
+Implemented:
+
+- added one request-scoped adapter factory keyed by the validated provider name
+- implemented local OpenAI-compatible/vLLM chat-completion transport first
+- retained local reasoning compatibility entirely inside that adapter:
+  - raw `<think>...</think>` content remains available to tracing
+  - think blocks are removed only from parser input
+  - the last fenced JSON block or first recoverable JSON object is extracted
+  - historical `tool`/`input` and legacy tool-name forms are normalized
+- implemented Google Gemini Interactions transport with JSON structured output,
+  `x-goog-api-key` authentication, and current `steps` response extraction
+- implemented OpenAI Responses transport with strict JSON structured output,
+  bearer authentication, output-message extraction, and refusal handling
+- construct provider endpoints from optional validated base URLs
+- keep API keys ephemeral in request headers and outside mapped requests,
+  provider input, normalized responses, and traces
+- preserve provider HTTP status and complete native JSON response envelopes for
+  the ordered trace
+- remove obvious prompt duplication by serializing conversation and current
+  turn state exactly once in the provider-native request
+- keep endpoint mapping, HTTP transport, native response extraction, output
+  sanitization, and compatibility normalization out of the orchestrator
+- switch the backend runtime from the Phase 9 fake adapter to request-scoped
+  live adapter selection
+- retain the deterministic fake adapter only as an injected unit-test boundary
+- update fixture tests to exercise the four-method adapter interface
+- add network-free transport coverage for adapter selection, endpoint mapping,
+  authentication headers, request bodies, API errors, and unsafe base URLs
+
 ## Phase 11: Rebuild the Browser Agent Client
+
+STATE - IN PROGRESS
 
 Create a small `graphengine_agent_ui.js`.
 

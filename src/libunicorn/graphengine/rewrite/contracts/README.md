@@ -162,8 +162,29 @@ The API key must never enter:
 The request handler passes the key directly to the selected adapter through a
 transient in-memory transport argument. Header logging must redact this header.
 
-The provider `base_url` is configuration, not a credential, but it must still
-be validated before provider transport is implemented.
+The provider `base_url` is configuration, not a credential. Each adapter
+validates it immediately before transport and accepts only HTTP(S) URLs without
+embedded credentials, query parameters, or fragments.
+
+## Provider Adapter Semantics
+
+The backend constructs one request-scoped adapter from the validated provider
+configuration. Supported V1 targets are:
+
+- `local_openai_compat`: OpenAI-compatible `/v1/chat/completions`
+- `google`: Gemini Interactions API
+- `openai`: OpenAI Responses API
+
+Every adapter exposes the same four-stage boundary:
+
+1. `map_request` converts canonical input into a provider-native request.
+2. `send_request` performs transport with ephemeral credentials.
+3. `inspect_response` preserves raw output and creates sanitized parser input.
+4. `parse_response` emits one validated normalized provider response.
+
+Provider-specific endpoint rules, HTTP envelopes, output extraction, reasoning
+cleanup, fenced JSON extraction, refusals, and compatibility shims remain
+inside provider modules. The orchestrator handles none of those formats.
 
 ## Trace Semantics
 

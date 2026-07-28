@@ -38,10 +38,7 @@
     "type": "tool_call",
     "tool_id": "node.details",
     "arguments": {
-      "taxid": 1648030,
-      "scope": null,
-      "sort": null,
-      "limit": null
+      "taxid": 1648030
     }
   },
   "expected_error": null

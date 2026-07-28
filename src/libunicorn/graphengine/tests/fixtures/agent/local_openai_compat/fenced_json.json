@@ -48,7 +48,6 @@
     "type": "tool_call",
     "tool_id": "node.details",
     "arguments": {
-      "taxid": null,
       "taxids": [
         33090,
         33154
