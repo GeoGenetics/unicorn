@@ -396,6 +396,8 @@ Implemented:
 
 ## Phase 9: Implement the Orchestrator with a Fake Provider
 
+STATE - COMPLETE
+
 The orchestrator should:
 
 1. validate the request;
@@ -409,6 +411,26 @@ The orchestrator should:
 9. return the final result with `trace_id`.
 
 Use a deterministic fake provider first so the entire loop is testable without external services.
+
+Implemented:
+
+- retained the backend-owned state machine as the only turn-loop owner
+- validate the browser request and rebuild compact backend-authoritative
+  context before iteration zero
+- map, execute, inspect, parse, and validate every provider response through
+  the frozen adapter boundary
+- validate and dispatch read-only tool calls through the backend registry
+- reinject complete validated tool results into the next provider iteration
+- stop deterministically on assistant/final answers, provider errors, invalid
+  tools or arguments, repeated calls, and the configured iteration limit
+- return one validated browser result containing the persistent `trace_id`
+- add a package-owned deterministic fake adapter that requests
+  `graph.context` on iteration zero and consumes its result on iteration one
+- switch the temporary backend runtime from a deferred terminal error to the
+  deterministic two-iteration fake flow
+- add runtime-level coverage proving tool execution, result reinjection,
+  successful completion, and a complete persistent JSONL trace without
+  contacting an external provider
 
 ## Phase 10: Add Provider Adapters
 
