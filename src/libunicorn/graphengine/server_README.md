@@ -331,42 +331,216 @@ The frontend should treat these as the current backend-required rules:
   subtree report, and rank report requests
 
 
-## Agent backend status
+## Agent backend
 
-The previous Agent routes, browser-local registry, and browser tool loop remain
-removed. The backend replacement now exposes:
+The Agent runtime is backend-owned and read-only.
+
+The browser Agent panel collects:
+
+- provider, model, optional base URL, and transient API key
+- the current prompt
+- a bounded conversation slice
+- selected datasets and taxonomy filenames
+- `min_reads`, count mode, selected taxids, and focused taxid
+
+It sends exactly one request:
 
 ```text
 POST /agent/turn
 ```
 
-The route accepts `unicorn_agent_turn_v1` and returns
-`unicorn_agent_result_v1`. Provider credentials travel only in:
+The backend validates scope, rebuilds compact graph context, selects a provider
+adapter, runs the tool loop, and returns one terminal response.
+
+### Turn request
+
+Minimal local-provider example:
+
+```bash
+curl -sS \
+  -H 'Content-Type: application/json' \
+  -X POST http://localhost:8000/agent/turn \
+  --data '{
+    "schema_version": "unicorn_agent_turn_v1",
+    "turn_id": "turn_manual_001",
+    "session_id": "session_manual_001",
+    "prompt": "What min_reads threshold am I using?",
+    "provider": {
+      "name": "local_openai_compat",
+      "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+      "base_url": "http://localhost:8542"
+    },
+    "graph_scope": {
+      "datasets": ["sample_a.bdamage.txt"],
+      "nodes_file": "nodes.dmp",
+      "names_file": "names.dmp",
+      "min_reads": 1000,
+      "count_mode": "subtree",
+      "selected_taxids": [],
+      "focused_taxid": null
+    },
+    "conversation": []
+  }' | jq .
+```
+
+The dataset and taxonomy filenames must exist in the backend upload scope.
+
+Hosted providers receive the key through the transport-only header:
 
 ```http
 X-Unicorn-Provider-API-Key: <secret>
 ```
 
-Supported backend adapters are:
+Example:
 
-- local OpenAI-compatible/vLLM
-- Google Gemini Interactions
-- OpenAI Responses
+```bash
+curl -sS \
+  -H 'Content-Type: application/json' \
+  -H "X-Unicorn-Provider-API-Key: ${PROVIDER_API_KEY}" \
+  -X POST http://localhost:8000/agent/turn \
+  --data @turn.json | jq .
+```
 
-Every turn writes an ordered, secret-free trace under:
+The API key is excluded from request JSON, graph context, provider-input
+traces, tool data, responses, and logs.
+
+### Provider targets
+
+Supported provider names:
+
+- `local_openai_compat`
+  - OpenAI-compatible `/v1/chat/completions`
+  - API key optional
+- `google`
+  - Gemini Interactions API
+  - API key required
+- `openai`
+  - OpenAI Responses API
+  - API key required
+
+`base_url` is interpreted by the backend machine. For example,
+`http://localhost:8542` means port 8542 on the machine running Graphengine's
+backend, not on the browser machine.
+
+### Turn response
+
+The route returns `unicorn_agent_result_v1`.
+
+Terminal statuses:
+
+- `completed`
+- `failed`
+- `iteration_limit`
+
+The response contains:
+
+- `turn_id`
+- user-visible `answer`, or structured `error`
+- concise `tools_used`
+- `trace_id`
+
+### Trace storage
+
+Every accepted turn writes ordered JSONL under:
 
 ```text
 logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
 ```
 
-The browser Agent panel sends exactly one request to `/agent/turn`. Provider
-transport, response parsing, tool execution, and iteration remain backend-owned.
-The latest trace can be viewed inline or downloaded through:
+The default trace root is relative to the Graphengine source, not the server's
+current working directory.
+
+Override it with:
+
+```bash
+export UNICORN_GRAPHENGINE_AGENT_TRACE_DIR=/path/to/agent_trace
+```
+
+Each line is one event. List the complete flow with:
+
+```bash
+jq -r '.event' logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
+```
+
+Inspect sequence, iteration, event, and elapsed time:
+
+```bash
+jq -c \
+  '{sequence, iteration, event, elapsed_ms}' \
+  logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
+```
+
+Inspect provider boundaries:
+
+```bash
+jq -c \
+  'select(.event | startswith("provider_")) | {sequence, event, data}' \
+  logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
+```
+
+Inspect tool calls and results:
+
+```bash
+jq -c \
+  'select(.event | startswith("tool_")) | {sequence, event, data}' \
+  logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
+```
+
+A connection failure should end with:
+
+```text
+provider_http_started
+provider_http_failed
+iteration_completed
+turn_failed
+```
+
+Provider responses preserve both:
+
+- raw provider output
+- sanitized parser input
+
+This makes reasoning-block removal, fenced JSON extraction, normalization, and
+tool-loop decisions reconstructable from one trace.
+
+### Trace retrieval
+
+View one trace inline:
 
 ```text
 GET /agent/traces/{trace_id}
+```
+
+Download it as an attachment:
+
+```text
 GET /agent/traces/{trace_id}?download=true
 ```
 
-`/agent/provider-turn` and `/agent/client-payload` are not part of the current
-contract.
+The Agent panel exposes both operations for the latest turn.
+
+### Contract and runtime references
+
+Machine-readable contracts:
+
+```text
+rewrite/contracts/
+```
+
+Human-readable flow:
+
+```text
+unicorn_agent/provider_turn_contract.txt
+```
+
+Compact context:
+
+```text
+unicorn_agent/compact_provider_context.schema.txt
+```
+
+Tool registry:
+
+```text
+unicorn_agent/graphengine_agent_registry.txt
+```

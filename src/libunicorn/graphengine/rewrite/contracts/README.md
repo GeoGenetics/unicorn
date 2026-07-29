@@ -1,10 +1,10 @@
 # Unicorn Agent V1 Contracts
 
-Status: frozen for the V1 rewrite
+Status: live V1 contract authority
 
-This directory defines every provider-neutral boundary in the rewritten
-Unicorn Agent workflow. Runtime code must validate or produce these shapes
-without adding undocumented fields.
+This directory defines every provider-neutral boundary in the Unicorn Agent
+workflow. Runtime code must validate or produce these shapes without adding
+undocumented fields.
 
 ## Contract Inventory
 
@@ -195,6 +195,8 @@ Trace events are append-only and ordered by `sequence`.
 - `elapsed_ms` is measured from receipt of the browser turn.
 - `data` contains only data relevant to the named event.
 - Raw provider responses are stored in `provider_http_completed`.
+- Transport failures before a provider response are stored in
+  `provider_http_failed` with duration and structured error details.
 - Raw extracted output and sanitized parser input are stored separately in
   `provider_output_extracted`.
 - Normalized provider-neutral output belongs in
@@ -211,9 +213,9 @@ The expected V1 event order is:
 6. `provider_input_created`
 7. `provider_request_mapped`
 8. `provider_http_started`
-9. `provider_http_completed`
-10. `provider_output_extracted`
-11. `provider_response_normalized`
+9. `provider_http_completed`, or `provider_http_failed` when transport fails
+10. `provider_output_extracted`, after a completed provider response
+11. `provider_response_normalized`, after successful extraction
 12. `tool_call_validated`, when requested
 13. `tool_execution_started`, when requested
 14. `tool_execution_completed`, when requested

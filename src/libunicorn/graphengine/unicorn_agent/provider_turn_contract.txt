@@ -1,738 +1,375 @@
-Unicorn Graph Engine Provider Turn Contract
-===========================================
+Unicorn Graph Engine Agent Turn Contract
+========================================
 
-Purpose
--------
+Status
+------
 
-This document defines the provider-facing turn contract for Unicorn's graph
-engine agent.
+This is the live V1 Agent flow.
 
-It answers three questions:
+Machine-readable contract authority:
 
-1. What Unicorn sends to a model provider
-2. What a provider may return to Unicorn
-3. How Unicorn processes that response in its internal turn loop
+- `rewrite/contracts/browser_turn_request.schema.json`
+- `rewrite/contracts/provider_adapter_input.schema.json`
+- `rewrite/contracts/normalized_provider_response.schema.json`
+- `rewrite/contracts/tool_result.schema.json`
+- `rewrite/contracts/browser_turn_response.schema.json`
+- `rewrite/contracts/trace_event.schema.json`
 
-This contract is intended to be implemented first in the current browser-side
-prototype loop and later reused by backend-proxied provider integrations.
+Runtime authority:
 
-Operating invariant:
+- `unicorn_agent/runtime.py`
+- `unicorn_agent/orchestrator.py`
+- `unicorn_agent/providers/`
+- `unicorn_agent/routes.py`
 
-- graphengine now assumes a backend connection is required
-- if a user is working on one machine, the backend should run locally and the
-  UI should connect to `localhost`
-- provider grounding should converge on backend-owned Unicorn state, not dual
-  local-vs-remote execution semantics
-
-Frozen compact-turn invariant:
-
-- provider turns should use a compact backend-authoritative context by default
-- full graph inspection belongs behind Unicorn-native tool calls
-- repeated unchanged large payload sections should not be resent in the normal
-  execution path
-- debug inspection may expose fuller payloads, but it must remain opt-in and
-  must not redefine the normal provider-turn contract
+If this guide and a JSON schema disagree, the JSON schema is authoritative.
 
 
-Frozen V1 scope
----------------
+Operating Invariants
+--------------------
 
-The first real provider-backed agent pass is intentionally narrow.
-
-- OpenAI is the only real provider target for V1
-- the first real provider path will target the OpenAI Responses API and expect
-  strict Unicorn-shaped JSON replies
-- Unicorn's existing tool loop remains the authority over tool execution
-- V1 provider work is limited to the current normalized read-only contract
-- state-mutating tools are not part of the first real provider surface even
-  though they still exist in the broader internal Unicorn registry
-- if a future provider requests a non-V1 tool such as `select_taxon`,
-  `focus_taxon`, or `center_root`, Unicorn should reject it at the provider
-  boundary rather than execute it
+- Graphengine requires a backend connection.
+- The backend rebuilds and verifies graph context from backend state.
+- The browser sends one request to `POST /agent/turn`.
+- The backend owns provider transport, tool execution, and the turn loop.
+- Provider adapters never execute Unicorn tools.
+- The Agent surface is read-only.
+- Providers return JSON that normalizes into one Unicorn response shape.
+- Provider credentials are transport-only and never enter contract payloads or
+  traces.
+- Every accepted turn receives one ordered persistent trace.
 
 
-Design Goals
-------------
-
-- keep the provider interaction grounded in Unicorn state
-- keep tool usage explicit and inspectable
-- avoid provider-specific assumptions leaking into the rest of the UI
-- let Unicorn, not the provider, remain the authority over tool execution
-- support a direct-answer path and a tool-calling path
-
-
-Core Principle
---------------
-
-The provider does not directly manipulate the Unicorn UI or backend.
-
-Instead:
-
-- Unicorn sends prompt + context + allowed tool definitions
-- provider returns either text or a tool-call request
-- Unicorn executes tools through its own registry
-- Unicorn sends tool results back into the provider loop
-- Unicorn renders the final answer and any resulting tool effects
-
-Under the current architecture direction, Unicorn should treat backend-grounded
-state as the authoritative source for graph context and analysis context.
-
-
-Adapter Module Boundary
+1. Browser Turn Request
 -----------------------
 
-The provider integration boundary is now intentionally split in two layers.
-
-`graphengine.js` remains responsible for:
-
-- building Unicorn graph context
-- advertising the allowed Unicorn tool list
-- executing Unicorn tools
-- maintaining transcript and client logging
-- owning the provider turn loop state
-- enforcing V1 read-only tool restrictions
-
-The dedicated provider adapter module is responsible only for:
-
-- request transport
-- provider-specific request mapping
-- provider-specific response parsing
-- returning one Unicorn-internal normalized response shape:
-  - `assistant_message`
-  - `tool_call`
-  - `final_answer`
-  - `error`
-
-Standard adapter entry point:
-
-- input: one Unicorn provider request payload from `buildProviderRequestPayload()`
-- output: exactly one normalized Unicorn-internal response object with type:
-  - `assistant_message`
-  - `tool_call`
-  - `final_answer`
-  - `error`
-
-This is the only response family that `executeAgentProviderTurn()` should
-consume. Any provider-native transport response must be normalized into this
-shape before Unicorn turn-loop handling continues.
-
-For V1 OpenAI work, this means:
-
-- the adapter talks to the OpenAI Responses API
-- the adapter asks for strict JSON-only replies
-- the adapter parses those replies into Unicorn's internal response contract
-- Unicorn itself still decides whether and how tools are executed
-- the adapter maps Unicorn turn payloads into:
-  - OpenAI `instructions`
-  - OpenAI `input` messages
-  - OpenAI `text.format = { type: "json_schema", ... }`
-
-
-Execution configuration state
------------------------------
-
-Provider execution config is now tracked explicitly alongside the provider turn
-payload, rather than being left implicit in UI text.
-
-For V1 backend-side OpenAI work, Unicorn tracks:
-
-- configured provider target
-- configured model
-- API key
-- optional base URL
-- active runtime adapter
-- transport mode
-
-Important distinction:
-
-- the configured provider target describes where Unicorn intends to send real
-  provider traffic
-- the active runtime adapter describes what provider implementation is actually
-  executing the turn right now
-
-During transition, these may differ intentionally. For example:
-
-- configured provider target: `openai`
-- active runtime adapter: `mock`
-- transport mode: `backend`
-
-This split is now explicit runtime state, not hidden ambiguity.
-
-
-Section 1. Unicorn -> Provider
-------------------------------
-
-Each provider turn should be built from a single structured payload.
-
-Top-level provider request payload:
+The browser sends `unicorn_agent_turn_v1`:
 
 ```json
 {
+  "schema_version": "unicorn_agent_turn_v1",
+  "turn_id": "turn_example_001",
+  "session_id": "session_example_001",
+  "prompt": "Tell me about Viridiplantae",
   "provider": {
-    "name": "openai",
-    "model": "gpt-5"
+    "name": "local_openai_compat",
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "base_url": "http://localhost:8542"
   },
-  "system_prompt": "You are the Unicorn Graph Engine agent...",
-  "user_prompt": "What taxa show the most damage?",
-  "graph_context": {
-    "...": "compact backend-authoritative context snapshot"
+  "graph_scope": {
+    "datasets": ["sample_a.bdamage.txt"],
+    "nodes_file": "nodes.dmp",
+    "names_file": "names.dmp",
+    "min_reads": 1000,
+    "count_mode": "subtree",
+    "selected_taxids": [],
+    "focused_taxid": null
   },
-  "tools": [
-    {
-      "name": "get_graph_context",
-      "description": "Returns the current Unicorn graph context.",
-      "input_schema": {}
-    }
-  ],
-  "conversation": [
-    {
-      "role": "user",
-      "content": "previous turn text"
-    }
-  ],
-  "tool_results": [
-    {
-      "tool_name": "get_table_view",
-      "args": {
-        "scope": "root",
-        "sort": "direct",
-        "limit": 5
-      },
-      "result": {
-        "...": "tool output"
-      }
-    }
-  ],
-  "turn_config": {
-    "max_tool_iterations": 4
-  }
+  "conversation": []
 }
 ```
 
+The browser describes requested scope; it does not provide trusted graph
+facts. The backend verifies:
 
-Required request fields
+- dataset filenames against the backend store
+- taxonomy filenames against backend-loaded taxonomy
+- selected and focused taxids against the threshold-visible tree
+- `min_reads` and count-mode interpretation
+
+Conversation is a bounded user/assistant dialogue slice. It is not graph
+evidence.
+
+
+2. Credential Transport
 -----------------------
 
-`provider`
-- selected provider identity
-- selected model identity
-- frozen V1 target: this should currently be `openai`
-- current transition caveat: the request payload reflects the configured
-  provider/model target, while the active runtime adapter may still be `mock`
-  until real transport is wired
+An API key is sent only in:
 
-`system_prompt`
-- defines the Unicorn agent behavior
-- must instruct the model to stay grounded in Unicorn context and tool outputs
-
-`user_prompt`
-- raw user input from the Agent panel
-
-`graph_context`
-- should converge on the compact backend-authoritative context schema
-- this is the model's current Unicorn world state for the normal execution path
-- detailed state should be requested later via Unicorn-native tools
-
-`tools`
-- the allowed Unicorn-native tool definitions for this turn
-- each tool definition should include:
-  - tool name
-  - short description
-  - input schema
-- frozen V1 scope: the provider-advertised tool list is the read-only subset
-  only:
-  - `get_graph_context`
-  - `list_selected_datasets`
-  - `get_selected_nodes`
-  - `get_node_details`
-  - `get_table_view`
-- current prototype caveat: `input_schema` is present but still an empty object
-  for every tool; argument validation currently happens at the tool boundary in
-  Unicorn runtime code rather than through a rich provider-facing schema
-
-`conversation`
-- optional prior turn history for multi-turn continuity
-- should remain minimal in the compact-turn path
-
-`tool_results`
-- empty on the first provider request of a new turn
-- populated on later loop iterations after Unicorn executes requested tools
-- for provider-facing stability, Unicorn may normalize some tool outputs before
-  appending them here
-- compact-turn invariant:
-  - tool results should be summarized before reinjection when raw outputs are
-    large
-  - exact raw detail should be preserved only when it is small or central to
-    the answer
-
-`turn_config`
-- runtime limits set by Unicorn
-- V1 should include `max_tool_iterations`
-
-
-What Unicorn should not send
-----------------------------
-
-- full raw tree payloads in the normal compact-turn path
-- full raw metadata tables in the normal compact-turn path
-- repeated copies of unchanged context blobs
-- verbose debug payloads in the normal execution path
-- raw DOM or page HTML
-- unrestricted file contents
-- arbitrary browser state
-- unsupported hidden application internals
-- tool functions themselves
-- unrestricted backend secrets
-
-
-Current normalized read-only tool shapes
-----------------------------------------
-
-For the first provider-facing normalization pass, Unicorn now guarantees stable
-top-level envelopes for these read-only tools:
-
-`list_selected_datasets`
-
-```json
-{
-  "ok": true,
-  "mode": "backend",
-  "tool": "list_selected_datasets",
-  "request": {},
-  "datasets": {
-    "selected": ["sample-a.bdamage.txt"],
-    "count": 1,
-    "total_reads": 123456,
-    "direct_taxa": 789
-  },
-  "context": {
-    "dataset_names": ["sample-a.bdamage.txt"],
-    "nodes_file": "nodes.dmp",
-    "names_file": "names.dmp",
-    "min_reads": 0,
-    "expanded_taxids": [1, 2, 3]
-  }
-}
+```http
+X-Unicorn-Provider-API-Key: <secret>
 ```
 
-`get_selected_nodes`
+The header is optional for an unauthenticated local OpenAI-compatible server.
+The key must not appear in:
 
-```json
-{
-  "ok": true,
-  "mode": "backend",
-  "tool": "get_selected_nodes",
-  "request": {},
-  "count": 2,
-  "selected": [
-    {
-      "taxid": 3702,
-      "name": "Arabidopsis thaliana",
-      "rank": "species",
-      "direct": 123,
-      "subtree": 456,
-      "child_count": 3
-    }
-  ],
-  "context": {
-    "dataset_names": ["sample-a.bdamage.txt"],
-    "nodes_file": "nodes.dmp",
-    "names_file": "names.dmp",
-    "min_reads": 0,
-    "expanded_taxids": [1, 2, 3]
-  }
-}
-```
+- browser request JSON
+- graph context
+- provider adapter input
+- provider-native payload traces
+- tool arguments or results
+- browser responses
+- persistent logs
 
-`get_node_details`
 
-```json
-{
-  "ok": true,
-  "mode": "backend",
-  "tool": "get_node_details",
-  "request": {
-    "taxid": 3702
-  },
-  "node": {
-    "taxid": 3702,
-    "name": "Arabidopsis thaliana",
-    "rank": "species",
-    "parent": 3701,
-    "depth": 12,
-    "direct": 123,
-    "subtree": 456,
-    "child_count": 3,
-    "lineage": [],
-    "datasets": []
-  },
-  "context": {
-    "dataset_names": ["sample-a.bdamage.txt"],
-    "nodes_file": "nodes.dmp",
-    "names_file": "names.dmp",
-    "min_reads": 0,
-    "expanded_taxids": [1, 2, 3]
-  }
-}
-```
+3. Backend Context Construction
+-------------------------------
 
-`get_table_view`
+`BackendContextBuilder` transforms verified graph scope into the compact
+provider context documented in `compact_provider_context.schema.txt`.
 
-```json
-{
-  "ok": true,
-  "mode": "backend",
-  "tool": "get_table_view",
-  "request": {
-    "scope": "root",
-    "taxid": null,
-    "sort": "direct",
-    "limit": 40
-  },
-  "target": {
-    "taxid": 1,
-    "name": "root",
-    "rank": "no rank",
-    "direct": 0,
-    "subtree": 999,
-    "child_count": 12
-  },
-  "row_count": 40,
-  "rows": [],
-  "context": {
-    "dataset_names": ["sample-a.bdamage.txt"],
-    "nodes_file": "nodes.dmp",
-    "names_file": "names.dmp",
-    "min_reads": 0,
-    "expanded_taxids": []
-  }
-}
-```
+The initial context is deliberately small. Detailed graph, dataset, metadata,
+node, or table data must be obtained through the read-only tool registry.
 
-Notes:
 
-- all normalized read-only tool results now share the same top-level pattern:
-  `ok`, `mode`, `tool`, `request`, payload body, and `context`
-- `context` is a normalized form of backend `request_context`
-- for tools that do not come straight from one backend endpoint payload,
-  `context` is normalized from Unicorn's current backend-grounded graph context
-- `request` is echoed in a stable schema even if the backend payload does not
-  return the same wrapper shape directly
-- this normalization is specifically for provider/tool-loop stability; it does
-  not change the backend endpoint contract itself
-
-
-Section 2. Provider -> Unicorn
-------------------------------
-
-The provider may respond in one of four allowed shapes:
-
-1. assistant response payload
-2. tool call payload
-3. final answer payload
-4. error payload
-
-
-2A. Assistant response payload
-------------------------------
-
-This is a generic non-final assistant message that does not yet request a tool
-or declare the turn complete.
-
-```json
-{
-  "type": "assistant_message",
-  "content": "I am checking the current graph scope before answering."
-}
-```
-
-Use case:
-- optional intermediate provider narration
-- V1 may choose to suppress rendering of these if they add noise
-
-
-2B. Tool call payload
----------------------
-
-This tells Unicorn to execute one allowed tool.
-
-```json
-{
-  "type": "tool_call",
-  "tool_name": "get_table_view",
-  "args": {
-    "scope": "root",
-    "sort": "direct",
-    "limit": 5
-  }
-}
-```
-
-Rules:
-
-- `tool_name` must match one tool in Unicorn's allowed registry
-- `args` must be JSON-serializable
-- provider does not execute the tool itself
-- Unicorn validates and executes the tool
-
-
-2C. Final answer payload
-------------------------
-
-This ends the current turn.
-
-```json
-{
-  "type": "final_answer",
-  "content": "From the current root scope, Viridiplantae has the strongest direct-read signal.",
-  "tool_summary": [
-    "get_graph_context",
-    "get_table_view"
-  ],
-  "notes": "Grounded in the current Unicorn table scope."
-}
-```
-
-Recommended fields:
-
-`content`
-- main assistant answer shown in the transcript
-
-`tool_summary`
-- optional list of tools used during the turn
-
-`notes`
-- optional caveats, grounding note, or scope reminder
-
-
-2D. Error payload
------------------
-
-This indicates the provider could not continue normally.
-
-```json
-{
-  "type": "error",
-  "code": "provider_request_failed",
-  "message": "The provider request could not be completed."
-}
-```
-
-Examples of provider-side error codes:
-
-- `provider_request_failed`
-- `provider_auth_failed`
-- `provider_rate_limited`
-- `provider_response_invalid`
-- `provider_tool_call_invalid`
-
-
-Section 3. Unicorn Internal Turn Loop
--------------------------------------
-
-Each user message in the Agent panel should trigger one Unicorn turn.
-
-High-level loop:
-
-1. User submits prompt
-2. Unicorn builds graph context
-3. Unicorn builds provider request payload
-4. Unicorn sends request to the active provider adapter
-5. Unicorn receives provider response
-6. Unicorn handles response according to its type
-7. If the provider requested a tool:
-   - Unicorn validates the tool call
-   - Unicorn executes the tool
-   - Unicorn appends the tool result to the turn state
-   - Unicorn sends a follow-up request back to the provider
-8. Repeat until:
-   - final answer received
-   - provider error received
-   - Unicorn reaches max tool iterations
-
-
-Max number of tool iterations
------------------------------
-
-V1 recommended default:
-
-- `max_tool_iterations = 4`
-
-Reason:
-
-- enough for simple two-step analysis
-- avoids runaway loops
-- easy to explain and debug
-
-If this limit is reached:
-
-- Unicorn ends the turn
-- transcript receives a clear failure or partial-completion message
-- client log records that the max tool iteration limit was reached
-
-
-How tool results are fed back
------------------------------
-
-When the provider returns a `tool_call` payload:
-
-1. Unicorn checks that the requested tool exists in the allowed registry
-2. Unicorn validates arguments at the tool boundary
-3. Unicorn executes the tool locally or through allowed backend wrappers
-4. Unicorn captures the result as structured JSON
-5. Unicorn appends that result to `tool_results`
-6. Unicorn sends a follow-up provider request with:
-   - the same system prompt
-   - the same user prompt
-   - the same graph context or a refreshed one if the tool changed state
-   - the updated tool result list
-
-Important rules:
-
-- In the broader Unicorn architecture, if a tool changes state, Unicorn should
-  rebuild the graph context before the next provider iteration.
-- In frozen V1 scope, state-mutating tools are not exposed to the real provider
-  path and should be rejected if requested anyway.
-
-
-Section 4. Logging and Transcript Responsibilities
---------------------------------------------------
-
-The transcript and the client log serve different purposes.
-
-
-What gets logged to the transcript
-----------------------------------
-
-Transcript is human-facing.
-
-It should show:
-
-- user prompt text
-- final assistant answer text
-- tool badges or tool summary for the visible answer
-- optional human-readable notes or caveats
-
-It may also show:
-
-- provider identity or mode label
-- optional high-level intermediate assistant text if that improves UX
-
-Transcript should not be overloaded with:
-
-- raw JSON payloads
-- low-level transport errors unless they need to be surfaced to the user
-- large raw tool result dumps
-
-
-What gets logged to the client log
-----------------------------------
-
-Client log is debugging-facing.
-
-It should record:
-
-- provider request started
-- provider request completed
-- provider request failed
-- tool call requested
-- tool call succeeded
-- tool call failed
-- max iteration limit reached
-- captured graph context when helpful
-- provider payload parsing failures
-
-The client log may include:
-
-- structured request and response summaries
-- JSON detail blocks
-- error details
-
-
-Recommended V1 transcript/client-log split
-------------------------------------------
-
-Transcript:
-
-- concise human-facing narrative
-- tools used
-- caveats
-
-Client log:
-
-- raw provider turn diagnostics
-- request/response summaries
-- tool-call traces
-- JSON detail blocks
-
-
-Current prototype vs target split
----------------------------------
-
-The current browser prototype is slightly noisier than the target split above.
-
-Today it still writes some debugging material into the transcript, including:
-
-- provider request payload entries
-- tool execution entries
-- JSON payloads in transcript notes
-
-This is acceptable while the provider loop is still being debugged, but it is a
-known cleanup item before or during the first real provider integration pass.
-
-
-Section 5. V1 Response Handling Rules
--------------------------------------
-
-For V1, Unicorn should apply these rules consistently:
-
-1. Only allow provider-requested tools that exist in the Unicorn registry.
-2. Reject unknown tool names immediately.
-3. Reject malformed tool arguments clearly.
-4. Stop the turn on provider errors.
-5. Stop the turn on max iteration overflow.
-6. Always preserve the final answer, tool usage summary, and note in the
-   transcript.
-7. Always preserve detailed turn diagnostics in the client log.
-
-
-Section 6. Recommended Standard Internal Response Shape
--------------------------------------------------------
-
-Regardless of provider, Unicorn should normalize provider results into one
-internal response shape before rendering.
-
-Recommended internal normalized response:
-
-```json
-{
-  "provider": "mock",
-  "provider_label": "Mock",
-  "provider_mode": "mock",
-  "client_side": true,
-  "answer": "From the current root table scope...",
-  "toolsUsed": [
-    "get_graph_context",
-    "get_table_view"
-  ],
-  "note": "Mock mode only."
-}
-```
-
-This is the same style already used by the current mock adapter and should
-remain the rendering target for future provider integrations.
-
-
-Section 7. V1 Scope Notes
+4. Provider Adapter Input
 -------------------------
 
-This document describes the provider turn contract only.
+For each iteration, the orchestrator creates
+`unicorn_provider_input_v1`:
 
-It does not require:
+```json
+{
+  "schema_version": "unicorn_provider_input_v1",
+  "turn_id": "turn_example_001",
+  "iteration": 0,
+  "model": "provider-model",
+  "instructions": "Unicorn-owned grounding instructions",
+  "graph_context": {},
+  "tools": [],
+  "tool_results": [],
+  "conversation": [],
+  "user_prompt": "Tell me about Viridiplantae"
+}
+```
 
-- a backend proxy yet
-- provider OAuth yet
-- persistent account/session storage yet
+`tools` contains the exact read-only definitions available for the turn.
+`tool_results` is empty on iteration zero and contains validated Unicorn tool
+results on later iterations.
 
-Those can be added later without changing the core Unicorn tool loop defined
-here.
+The adapter boundary is:
+
+```text
+map_request(canonical_input) -> provider-native request
+send_request(provider-native request) -> transport response
+inspect_response(raw provider response) -> raw and sanitized output
+parse_response(sanitized output) -> normalized response
+```
+
+Supported adapters:
+
+- `local_openai_compat`: OpenAI-compatible `/v1/chat/completions`
+- `google`: Gemini Interactions API
+- `openai`: OpenAI Responses API
+
+Provider-specific envelopes, endpoint rules, refusals, fenced JSON, reasoning
+blocks, and compatibility forms remain inside the selected adapter.
+
+
+5. Normalized Provider Response
+-------------------------------
+
+Every adapter returns exactly one `unicorn_provider_response_v1` object.
+
+Final answer:
+
+```json
+{
+  "schema_version": "unicorn_provider_response_v1",
+  "type": "final_answer",
+  "content": "Grounded answer."
+}
+```
+
+Assistant message:
+
+```json
+{
+  "schema_version": "unicorn_provider_response_v1",
+  "type": "assistant_message",
+  "content": "Grounded answer."
+}
+```
+
+Tool call:
+
+```json
+{
+  "schema_version": "unicorn_provider_response_v1",
+  "type": "tool_call",
+  "tool_id": "node.details",
+  "arguments": {
+    "taxid": 33090
+  }
+}
+```
+
+Provider error:
+
+```json
+{
+  "schema_version": "unicorn_provider_response_v1",
+  "type": "error",
+  "code": "provider_refused",
+  "message": "Provider refused this request."
+}
+```
+
+The orchestrator never interprets provider-native response objects directly.
+
+
+6. Tool Execution and Reinjection
+---------------------------------
+
+For a `tool_call`, the orchestrator:
+
+1. rejects an unknown tool ID
+2. rejects repeated tool ID and argument combinations
+3. validates arguments against the registry JSON schema
+4. executes the backend handler
+5. validates `unicorn_tool_result_v1`
+6. records the result in the trace
+7. reinjects the result into the next provider iteration
+
+Successful tool result:
+
+```json
+{
+  "schema_version": "unicorn_tool_result_v1",
+  "tool_id": "node.details",
+  "arguments": {
+    "taxid": 33090
+  },
+  "ok": true,
+  "result": {},
+  "error": null
+}
+```
+
+Failed tool result:
+
+```json
+{
+  "schema_version": "unicorn_tool_result_v1",
+  "tool_id": "node.details",
+  "arguments": {
+    "taxid": 999999999
+  },
+  "ok": false,
+  "result": null,
+  "error": {
+    "code": "node_not_found",
+    "message": "The requested taxid is not available."
+  }
+}
+```
+
+The loop permits at most four tool executions. It stops on:
+
+- `assistant_message`
+- `final_answer`
+- provider `error`
+- unknown or invalid tool call
+- repeated completed tool call
+- provider or transport failure
+- iteration limit
+
+
+7. Browser Turn Response
+------------------------
+
+The backend returns one `unicorn_agent_result_v1` object.
+
+Completed:
+
+```json
+{
+  "schema_version": "unicorn_agent_result_v1",
+  "turn_id": "turn_example_001",
+  "status": "completed",
+  "answer": "Viridiplantae is grounded by backend data.",
+  "tools_used": [
+    {
+      "tool_id": "node.details",
+      "ok": true
+    }
+  ],
+  "error": null,
+  "trace_id": "trace_example_001"
+}
+```
+
+Failed turns use `status: "failed"`, `answer: null`, and a structured
+`error`. Iteration exhaustion uses `status: "iteration_limit"`.
+
+`tools_used` is a concise execution summary. Full arguments and results belong
+in the trace.
+
+
+8. Trace Contract
+-----------------
+
+Each accepted turn writes:
+
+```text
+logs/agent_trace/YYYY-MM-DD/<turn_id>.jsonl
+```
+
+Every line is one `unicorn_agent_trace_v1` event with:
+
+- stable turn and trace IDs
+- iteration and contiguous sequence numbers
+- timestamp and elapsed milliseconds
+- event-specific data
+
+Important boundaries include:
+
+```text
+turn_received
+turn_validated
+context_built
+iteration_started
+provider_input_created
+provider_request_mapped
+provider_http_started
+provider_http_failed
+provider_http_completed
+provider_output_extracted
+provider_response_normalized
+tool_call_validated
+tool_execution_started
+tool_execution_completed
+tool_result_reinjected
+iteration_completed
+turn_completed
+turn_failed
+```
+
+`provider_http_completed` preserves the provider-native response.
+`provider_output_extracted` stores raw model output separately from the exact
+sanitized parser input. A transport failure uses `provider_http_failed`.
+
+Trace retrieval:
+
+```text
+GET /agent/traces/{trace_id}
+GET /agent/traces/{trace_id}?download=true
+```
+
+
+9. Ownership Summary
+--------------------
+
+Browser:
+
+- provider/model/base URL/API-key controls
+- prompt and bounded transcript
+- requested graph scope
+- one `POST /agent/turn`
+- rendering result and trace controls
+
+Backend:
+
+- request validation
+- authoritative context construction
+- registry and tools
+- provider selection and transport
+- response parsing and normalization
+- iteration state machine
+- trace persistence
+
+Provider:
+
+- chooses one normalized response
+- may request advertised tools
+- never executes tools or mutates Unicorn state

@@ -477,7 +477,7 @@ treated as the new contract:
 
 After Phase 3:
 
-[ ] REPLACE or remove these documents so only the new frozen contracts remain
+[x] REPLACE or remove these documents so only the new frozen contracts remain
 [x] UPDATE the Agent section in `server_README.md`
 [x] UPDATE Agent roadmap language in `TODO.txt`
 [x] UPDATE or retire `point2_agentic_graphengine.txt`
@@ -486,7 +486,9 @@ Reference utility:
 
 [x] PRESERVE `vLLM/desktop_chat.py` temporarily as a manual connectivity
     reference and possible fixture source
-[ ] REVIEW its final location after the new local provider adapter is working
+[x] REVIEW its final location after the new local provider adapter is working
+    - decision: preserve `vLLM/desktop_chat.py` in place as a manual local-model
+      connectivity reference; it is not imported by the Agent runtime
 
 
 18. Explicitly Preserved Graphengine Infrastructure

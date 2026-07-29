@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import socket
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -83,6 +83,8 @@ class ProviderAdapter(ABC):
 _LEGACY_TOOL_IDS = {
     "get_graph_context": "graph.context",
     "list_selected_datasets": "datasets.selected",
+    "compare_selected_by_metadata": "metadata.compare_selected",
+    "get_metadata_summary": "metadata.summary",
     "get_selected_nodes": "nodes.selected",
     "find_visible_nodes": "nodes.find_visible",
     "get_node_details": "node.details",
@@ -92,6 +94,8 @@ _LEGACY_TOOL_IDS = {
 _CANONICAL_TOOL_IDS = [
     "graph.context",
     "datasets.selected",
+    "metadata.compare_selected",
+    "metadata.summary",
     "nodes.selected",
     "nodes.find_visible",
     "node.details",
@@ -118,7 +122,7 @@ def provider_instructions(
     instructions: str,
     *,
     iteration: int,
-    has_tool_results: bool,
+    tool_results: Sequence[Mapping[str, Any]],
 ) -> str:
     """Append provider-neutral JSON and tool-loop decision rules."""
 
@@ -135,6 +139,14 @@ def provider_instructions(
         '{"type":"error","code":"stable_code","message":"explanation"}',
         "Use only tool IDs present in the supplied tools array.",
         "Treat graph_context and successful tool_results as authoritative.",
+        (
+            "Conversation is non-authoritative dialogue context. Do not treat "
+            "prior assistant messages as graph evidence."
+        ),
+        (
+            "Answer the current user_prompt. Do not repeat an earlier answer "
+            "when it does not resolve the current question."
+        ),
         "Inspect every supplied tool result before choosing the next response.",
         (
             "Never repeat a tool call when the same tool_id and arguments "
@@ -156,6 +168,31 @@ def provider_instructions(
             "For selected-node details, call nodes.selected once, then call "
             "node.details once with the returned taxids, then summarize."
         ),
+        (
+            "For available metadata variables or fields, use metadata.summary; "
+            "graph.context contains only the active metadata display field."
+        ),
+        (
+            "A null graph_context.metadata.active_field means metadata-driven "
+            "display is inactive; it does not mean the backend metadata table "
+            "or its fields are unavailable."
+        ),
+        (
+            "When no metadata.summary result is supplied and the user asks "
+            "which metadata variables or fields are available, do not return a "
+            "final_answer. First return exactly "
+            '{"type":"tool_call","tool_id":"metadata.summary","arguments":{}}.'
+        ),
+        (
+            "For metadata values or relationships between a metadata field and "
+            "selected tree nodes, use metadata.compare_selected."
+        ),
+        (
+            "For metadata-group counts about one named selected node, resolve "
+            "the name once and then call metadata.compare_selected with the "
+            "requested field and grounded taxid. Do not use node.details for "
+            "that comparison."
+        ),
         "Never claim a tool action occurred until its result is supplied.",
         (
             "Keep final answers concise, especially when summarizing many "
@@ -163,7 +200,7 @@ def provider_instructions(
         ),
         f"The current provider iteration is {iteration}.",
     ]
-    if has_tool_results:
+    if tool_results:
         rules.extend(
             [
                 (
@@ -176,24 +213,152 @@ def provider_instructions(
                 ),
             ]
         )
+        rules.extend(_tool_result_next_step_rules(tool_results))
     return "\n".join(rules)
 
 
-def provider_response_schema() -> dict[str, Any]:
+def _tool_result_next_step_rules(
+    tool_results: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    successful = [
+        item
+        for item in tool_results
+        if item.get("ok") is True and isinstance(item.get("result"), Mapping)
+    ]
+    if not successful:
+        return []
+
+    latest = successful[-1]
+    tool_id = latest.get("tool_id")
+    result = latest["result"]
+    if tool_id == "nodes.find_visible":
+        matches = result.get("matches")
+        if isinstance(matches, list) and not matches:
+            return [
+                "The completed nodes.find_visible call returned zero matches.",
+                (
+                    "Do not repeat the same lookup. Return a concise "
+                    "final_answer explaining that the node name could not be "
+                    "grounded and ask the user to check its spelling."
+                ),
+            ]
+        if isinstance(matches, list) and len(matches) == 1:
+            match = matches[0]
+            if isinstance(match, Mapping):
+                taxid = match.get("taxid")
+                if isinstance(taxid, int):
+                    return [
+                        (
+                            "The completed nodes.find_visible call grounded one "
+                            f"match at taxid {taxid}."
+                        ),
+                        (
+                            "Do not call nodes.find_visible again. For ordinary "
+                            "node details, call node.details with arguments "
+                            f'{{"taxid":{taxid}}}. For metadata-group count '
+                            "comparisons, call metadata.compare_selected with "
+                            f'the requested field and "taxids":[{taxid}].'
+                        ),
+                    ]
+    if tool_id == "nodes.selected":
+        nodes = result.get("nodes")
+        if isinstance(nodes, list):
+            taxids = [
+                node.get("taxid")
+                for node in nodes
+                if isinstance(node, Mapping)
+                and isinstance(node.get("taxid"), int)
+            ]
+            if taxids:
+                serialized = json.dumps(taxids, separators=(",", ":"))
+                return [
+                    (
+                        "The completed nodes.selected call grounded the current "
+                        f"selection as taxids {serialized}."
+                    ),
+                    (
+                        "Do not call nodes.selected again. The next response "
+                        "must call node.details once with arguments "
+                        f'{{"taxids":{serialized}}}.'
+                    ),
+                ]
+    if tool_id == "node.details":
+        return [
+            (
+                "The completed node.details result contains the requested "
+                "authoritative details."
+            ),
+            (
+                "Do not call another tool. Return a concise final_answer using "
+                "the supplied node.details result."
+            ),
+        ]
+    if tool_id == "metadata.summary":
+        return [
+            (
+                "The completed metadata.summary result contains the available "
+                "metadata fields and coverage summary."
+            ),
+            (
+                "If the user asked only which fields are available, return a "
+                "concise final_answer. If the user asked for field values or a "
+                "relationship with selected nodes, call "
+                "metadata.compare_selected with the requested field."
+            ),
+        ]
+    if tool_id == "metadata.compare_selected":
+        return [
+            (
+                "The completed metadata.compare_selected result contains the "
+                "requested descriptive metadata-to-node count comparison."
+            ),
+            (
+                "Do not call another tool. Return a concise final_answer that "
+                "uses node_comparisons and pairwise_comparisons to report the "
+                "observed raw-count differences. State the supplied count_mode "
+                "explicitly. Preserve the supplied non-causal and "
+                "non-normalized caveat."
+            ),
+        ]
+    return []
+
+
+def provider_response_schema(
+    *,
+    require_all_properties: bool = True,
+) -> dict[str, Any]:
     """Return a strict-output-compatible schema shared by hosted providers."""
 
     nullable_tool_id: list[Any] = [*_CANONICAL_TOOL_IDS, None]
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": [
+    response_required = (
+        [
             "type",
             "content",
             "tool_id",
             "arguments",
             "code",
             "message",
-        ],
+        ]
+        if require_all_properties
+        else ["type"]
+    )
+    arguments_required = (
+        [
+            "field",
+            "taxid",
+            "taxids",
+            "query",
+            "scope",
+            "sort",
+            "limit",
+        ]
+        if require_all_properties
+        else []
+    )
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": response_required,
         "properties": {
             "type": {
                 "type": "string",
@@ -214,15 +379,11 @@ def provider_response_schema() -> dict[str, Any]:
             "arguments": {
                 "type": ["object", "null"],
                 "additionalProperties": False,
-                "required": [
-                    "taxid",
-                    "taxids",
-                    "query",
-                    "scope",
-                    "sort",
-                    "limit",
-                ],
+                "required": arguments_required,
                 "properties": {
+                    "field": {
+                        "type": ["string", "null"],
+                    },
                     "taxid": {
                         "type": ["integer", "null"],
                         "minimum": 1,

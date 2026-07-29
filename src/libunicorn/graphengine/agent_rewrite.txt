@@ -1,4 +1,22 @@
-I would structure this as a backend-first replacement project with a clean deletion boundary. We preserve only test evidence and agreed data contracts, then remove the old runtime rather than operating two agent frameworks in parallel.
+Unicorn Agent Rewrite Implementation Record
+===========================================
+
+Status: COMPLETE
+
+This file preserves the implementation roadmap and validation history. It is
+not a live runtime contract.
+
+Current contract authority:
+
+- `rewrite/contracts/`
+- `unicorn_agent/provider_turn_contract.txt`
+- `unicorn_agent/compact_provider_context.schema.txt`
+- `unicorn_agent/graphengine_agent_registry.txt`
+- `server_README.md`
+
+The project used a backend-first replacement with a clean deletion boundary.
+Test evidence and agreed contracts were preserved while the former runtime was
+removed rather than retained as a fallback.
 
 ## Phase 0: Freeze Scope
 
@@ -289,6 +307,7 @@ context_built
 iteration_started
 provider_request_mapped
 provider_http_started
+provider_http_failed
 provider_http_completed
 provider_output_extracted
 provider_response_normalized
@@ -347,6 +366,8 @@ Start with stable IDs:
 ```text
 graph.context
 datasets.selected
+metadata.compare_selected
+metadata.summary
 nodes.selected
 nodes.find_visible
 node.details
@@ -369,13 +390,19 @@ Browser-owned state such as selected taxids must arrive explicitly in `graph_sco
 
 Implemented:
 
-- froze the six canonical IDs:
+- froze the initial six canonical IDs:
   - `graph.context`
   - `datasets.selected`
   - `nodes.selected`
   - `nodes.find_visible`
   - `node.details`
   - `table.view`
+- added `metadata.summary` when metadata integration exposed a real read-only
+  discovery gap; it returns field names and compact coverage counts without raw
+  metadata rows
+- added `metadata.compare_selected` when relational metadata questions exposed
+  the need to join one requested field with selected-node counts; it returns
+  bounded descriptive group summaries and explicitly avoids causal claims
 - expanded every definition with description, when-to-use guidance, output
   summary, strict argument schema, backend implementation handler, and
   mutation flag
@@ -542,7 +569,7 @@ response normalization, compatibility parser, or turn loop.
 
 ## Phase 12: Validate Representative Workflows
 
-STATE - IN PROGRESS
+STATE - COMPLETE
 
 Required scenarios:
 
@@ -585,48 +612,163 @@ Manual validation on 2026-07-28:
 - PASS: `How many datasets are loaded?`
   - `datasets.selected` returned authoritative state
   - provider returned the correct final answer
-- PARTIAL: `Tell me about Viridiplantae`
+- PASS: `Tell me about Viridiplantae`
   - `nodes.find_visible` resolved taxid `33090`
   - `node.details` returned complete authoritative details
-  - provider then repeated the original lookup instead of consuming the detail
-    result
-  - provider-neutral post-tool instructions now explicitly require result reuse
-    and workflow advancement; manual rerun remains pending
-- PARTIAL: `Tell me about the selected nodes`
+  - provider consumed the detail result and returned a grounded final answer
+- PASS: `Tell me about the selected nodes`
   - `nodes.selected` returned 17 authoritative node summaries
-  - the next local-provider synthesis request reached the vLLM endpoint but
-    exhausted the 180-second transport timeout
-  - local OpenAI-compatible generation is now bounded to 2048 output tokens and
-    instructed to summarize large results concisely; manual rerun remains
-    pending
+  - the first rerun exhausted the 180-second transport timeout
+  - the second rerun reached the 2048-token generation limit while repeating
+    fields inside one malformed JSON object
+  - the local adapter now requests vLLM JSON-schema-constrained output instead
+    of an unconstrained JSON object
+  - token-limit termination is now reported explicitly as a truncated provider
+    response rather than parsing a nested empty object
+  - a third rerun produced a concise grounded answer but then filled the
+    remaining required schema fields with whitespace until the token limit
+  - the local vLLM schema now requires only `type`; response-specific fields
+    remain grammar-constrained but optional so a completed final answer can
+    close immediately
+  - the final manual rerun consumed the selected-node result and returned a
+    concise grounded answer
+
+Additional named-node validation:
+
+- PASS: `Tell me about node Triticinae`
+  - `nodes.find_visible` correctly grounded taxid `1648030`
+  - provider repeated the completed lookup instead of advancing to details
+  - provider instructions now derive an explicit next step from a single-match
+    lookup result: call `node.details` with the grounded taxid
+  - the manual rerun advanced to `node.details` and returned a grounded answer
+
+Additional metadata validation:
+
+- PASS: `What variables do we have in the metadata?`
+  - provider called `graph.context`, which intentionally exposes only the active
+    metadata visualization field
+  - no tool exposed the backend metadata table's available field names, so the
+    provider repeated `graph.context`
+  - added read-only `metadata.summary` with field names and compact coverage
+    counts but no raw metadata rows or per-dataset dictionaries
+  - first rerun still answered without a tool because the provider interpreted
+    `metadata.active_field: null` as unavailable metadata
+  - provider instructions now state that this value controls visualization only
+    and require `metadata.summary` before answering field-discovery prompts
+  - the manual rerun used `metadata.summary` and reported the available fields
+
+- PASS: descriptive comparison of `group` across selected nodes
+  - `metadata.summary` correctly reported that `group` exists but exposed
+    neither group values nor their relationship to per-dataset node counts
+  - provider therefore repeated the earlier field-list answer
+  - added `metadata.compare_selected` to group active datasets by one requested
+    field and aggregate current direct/subtree counts for selected nodes
+  - output labels the comparison as descriptive raw counts and explicitly does
+    not infer causal effects or statistical significance
+  - initial provider answers summarized broad ranges and once confused the
+    missing-metadata group with `filtered`
+  - comparison output is now node-centric and includes bounded pairwise group
+    summaries, allowing direct statements such as how many selected nodes have
+    higher filtered versus unfiltered counts
+  - provider must state whether the active comparison uses direct or subtree
+    counts and preserve the lack-of-normalization caveat
+  - manual queries now return grounded per-node and group-level count summaries
+
+- PASS: filtered versus unfiltered counts for `Triticum aestivium`
+  - the prompt misspelled `Triticum aestivum`, producing zero visible matches
+  - provider repeated the unsuccessful exact lookup
+  - visible-node lookup now supports scored close-name matches for minor typos
+  - metadata comparison accepts grounded selected taxids so a named-node query
+    can return only that node's group counts
+  - the manual rerun grounded the intended node and compared its group counts
 
 The repetition guard remains unchanged. Repeating an identical completed tool
 call is still a controlled terminal failure and remains required by scenario 6.
 
+Normal-path validation status:
+
+- scenarios 1-4 are complete
+- the supplemental named-node and metadata workflows above are complete
+- scenarios 5-8 are complete
+
+Deterministic trace-validation pass:
+
+1. Unknown tool request
+   - use a deterministic adapter response naming an unregistered tool
+   - assert `unknown_tool`, no tool execution, and a terminal `turn_failed`
+   - persist and validate the complete JSONL trace
+
+2. Repeated tool call
+   - return the same valid call on two consecutive iterations
+   - assert that the first call executes exactly once and its result is
+     reinjected
+   - assert that the second call terminates with `repeated_tool_call`
+   - persist and validate the complete JSONL trace
+
+3. `<think>` response
+   - drive the local OpenAI-compatible adapter with the preserved fixture
+   - assert that the provider-native response and raw extracted output retain
+     the complete `<think>` block
+   - assert that sanitized parsing input removes reasoning and normalizes the
+     following JSON response
+   - persist and validate both forms in the complete JSONL trace
+
+4. Network failure
+   - use a deterministic failing transport adapter for unit coverage
+   - assert a structured provider error, terminal `turn_failed`, and a complete
+     secret-free JSONL trace
+   - perform one final Agent-panel check against an unreachable local port to
+     confirm that the route and browser render the same structured failure
+
+Implementation boundary used:
+
+- add focused integration coverage in
+  `tests/unit/test_agent_failure_traces.py`
+- reuse the real orchestrator and `JsonlTraceStore`
+- use deterministic adapters/fixtures rather than asking a live model to emit
+  unknown or repeated calls
+- modify runtime code only if the new trace assertions reveal a missing event
+  or an unstructured failure boundary
+- the focused tests and manual network-failure check passed, closing Phase 12
+  before Phase 13 documentation cleanup
+
+Implementation status:
+
+- scenarios 5-8 now have deterministic persistent-JSONL integration coverage
+  in `tests/unit/test_agent_failure_traces.py`
+- network failures now emit `provider_http_failed` between
+  `provider_http_started` and terminal iteration/turn failure events
+- PASS: user confirmed the focused failure-trace test module
+- the first browser-level unreachable-port trace was produced by a backend
+  process started before `provider_http_failed` was added:
+  - it correctly recorded `provider_http_started`
+  - it correctly recorded `iteration_completed` with
+    `local_openai_compat_network_error`
+  - it correctly recorded terminal `turn_failed`
+  - the backend was restarted and the final rerun recorded the complete
+    expected terminal sequence:
+    - `provider_http_started`
+    - `provider_http_failed`
+    - `iteration_completed`
+    - `turn_failed`
+
 ## Phase 13: Remove Transition Documentation
 
-Once the new runtime works:
+STATE - COMPLETE
 
-- rewrite `provider_turn_contract.txt`;
-- rewrite the tool registry document;
-- replace the old compact-context proposal;
-- update `server_README.md`;
-- update `TODO.txt`;
-- remove references to canonical shadows and browser orchestration;
-- document how to locate and inspect traces.
+Implemented:
 
-## Recommended Commit Sequence
+- rewrote `provider_turn_contract.txt` around the live backend turn boundary
+- rewrote `graphengine_agent_registry.txt` around stable backend tool IDs
+- replaced the compact-context proposal with the exact runtime V1 shape
+- deleted the obsolete duplicate `canonical_turn_request.schema.txt`
+- updated `server_README.md` with Agent operation and trace inspection
+- left the user-deleted `TODO.txt` absent
+- removed obsolete runtime language from live Agent documentation
+- documented trace storage, environment override, retrieval, and `jq`
+  inspection
+- marked roadmap files as historical implementation records rather than
+  contract authorities
 
-1. Freeze scope and contracts.
-2. Add sanitized fixtures.
-3. Add new contract/fixture tests.
-4. Remove old agent runtime.
-5. Add backend package and tracing.
-6. Add registry and fake-provider orchestrator.
-7. Add local vLLM adapter.
-8. Add browser client.
-9. Add Google adapter.
-10. Add OpenAI adapter.
-11. Rewrite documentation.
-
-The key checkpoint is after Phase 9: before reconnecting a real LLM, we should be able to inspect a deterministic fake-provider turn from browser request through multiple tool iterations and final response. That proves the architecture is traceable before provider behavior complicates it.
+The Agent rewrite is complete. Future Agent work proceeds as feature
+development against the live contracts, not as continuation of this migration.

@@ -28,6 +28,13 @@ class BackendContextStore(Protocol):
 
     def build_tree_model(self, selection: Any, taxonomy: Any) -> Any: ...
 
+    def metadata_summary_payload(self) -> Mapping[str, Any] | None: ...
+
+    def metadata_for_dataset(
+        self,
+        dataset_name: str,
+    ) -> Mapping[str, str] | None: ...
+
 
 @dataclass(frozen=True)
 class ContextErrorDetail:

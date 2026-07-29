@@ -55,6 +55,7 @@
         "provider_input_created",
         "provider_request_mapped",
         "provider_http_started",
+        "provider_http_failed",
         "provider_http_completed",
         "provider_output_extracted",
         "provider_response_normalized",

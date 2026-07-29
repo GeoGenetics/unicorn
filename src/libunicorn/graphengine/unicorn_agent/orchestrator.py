@@ -471,10 +471,43 @@ class AgentOrchestrator:
             },
         )
         started_at = monotonic()
-        transport = self._provider.send_request(
-            native_request,
-            api_key=api_key,
-        )
+        try:
+            transport = self._provider.send_request(
+                native_request,
+                api_key=api_key,
+            )
+        except ProviderAdapterError as error:
+            duration_ms = max(0.0, (monotonic() - started_at) * 1000.0)
+            self._record(
+                trace_id,
+                iteration=iteration,
+                event="provider_http_failed",
+                data={
+                    "provider": provider_config["name"],
+                    "duration_ms": duration_ms,
+                    "error": {
+                        "code": error.code,
+                        "message": str(error),
+                    },
+                },
+            )
+            raise
+        except Exception:
+            duration_ms = max(0.0, (monotonic() - started_at) * 1000.0)
+            self._record(
+                trace_id,
+                iteration=iteration,
+                event="provider_http_failed",
+                data={
+                    "provider": provider_config["name"],
+                    "duration_ms": duration_ms,
+                    "error": {
+                        "code": "provider_request_failed",
+                        "message": "Provider request failed.",
+                    },
+                },
+            )
+            raise
         duration_ms = max(0.0, (monotonic() - started_at) * 1000.0)
         if not isinstance(transport, ProviderTransportResponse):
             raise ProviderAdapterError(

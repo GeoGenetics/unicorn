@@ -65,6 +65,23 @@ def test_provider_request_mapping_is_provider_native_and_secret_free(
         assert "messages" in native_request
         assert native_request["temperature"] == 0.0
         assert native_request["max_tokens"] == 2048
+        assert native_request["response_format"]["type"] == "json_schema"
+        assert (
+            native_request["response_format"]["json_schema"]["name"]
+            == "unicorn_provider_response"
+        )
+        assert (
+            native_request["response_format"]["json_schema"]["schema"][
+                "additionalProperties"
+            ]
+            is False
+        )
+        assert (
+            native_request["response_format"]["json_schema"]["schema"][
+                "required"
+            ]
+            == ["type"]
+        )
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
@@ -103,6 +120,196 @@ def test_post_tool_provider_mapping_requires_result_reuse(
     assert "Never repeat a tool call" in instructions
     assert "return a concise final_answer immediately" in instructions
     assert "do not restart node lookup" in instructions
+    assert "Conversation is non-authoritative" in instructions
+    assert "Answer the current user_prompt" in instructions
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_grounded_name_lookup_maps_an_explicit_node_details_next_step(
+    provider: str,
+) -> None:
+    adapter = provider_adapter(provider)
+    provider_input = valid_provider_input()
+    provider_input["iteration"] = 1
+    provider_input["tool_results"] = [
+        {
+            "schema_version": "unicorn_tool_result_v1",
+            "tool_id": "nodes.find_visible",
+            "arguments": {
+                "query": "Triticinae",
+                "limit": 100,
+            },
+            "ok": True,
+            "result": {
+                "query": "Triticinae",
+                "count": 1,
+                "matches": [
+                    {
+                        "taxid": 1648030,
+                        "name": "Triticinae",
+                    }
+                ],
+            },
+            "error": None,
+        }
+    ]
+
+    native_request = adapter.map_request(provider_input)
+    if provider == "openai":
+        instructions = native_request["instructions"]
+    elif provider == "google":
+        instructions = native_request["system_instruction"]
+    else:
+        instructions = native_request["messages"][0]["content"]
+
+    assert "grounded one match at taxid 1648030" in instructions
+    assert "Do not call nodes.find_visible again" in instructions
+    assert '{"taxid":1648030}' in instructions
+    assert "metadata.compare_selected" in instructions
+    assert '"taxids":[1648030]' in instructions
+
+
+def test_empty_name_lookup_maps_to_controlled_final_answer() -> None:
+    adapter = provider_adapter("local_openai_compat")
+    provider_input = valid_provider_input()
+    provider_input["iteration"] = 1
+    provider_input["tool_results"] = [
+        {
+            "schema_version": "unicorn_tool_result_v1",
+            "tool_id": "nodes.find_visible",
+            "arguments": {
+                "query": "unknown plant",
+            },
+            "ok": True,
+            "result": {
+                "query": "unknown plant",
+                "count": 0,
+                "matches": [],
+            },
+            "error": None,
+        }
+    ]
+
+    native_request = adapter.map_request(provider_input)
+    instructions = native_request["messages"][0]["content"]
+
+    assert "returned zero matches" in instructions
+    assert "Do not repeat the same lookup" in instructions
+    assert "check its spelling" in instructions
+
+
+def test_selected_nodes_map_one_multi_node_details_next_step() -> None:
+    adapter = provider_adapter("local_openai_compat")
+    provider_input = valid_provider_input()
+    provider_input["iteration"] = 1
+    provider_input["tool_results"] = [
+        {
+            "schema_version": "unicorn_tool_result_v1",
+            "tool_id": "nodes.selected",
+            "arguments": {},
+            "ok": True,
+            "result": {
+                "count": 2,
+                "nodes": [
+                    {
+                        "taxid": 4565,
+                        "name": "Triticum aestivum",
+                    },
+                    {
+                        "taxid": 4571,
+                        "name": "Triticum turgidum",
+                    },
+                ],
+            },
+            "error": None,
+        }
+    ]
+
+    native_request = adapter.map_request(provider_input)
+    instructions = native_request["messages"][0]["content"]
+
+    assert "Do not call nodes.selected again" in instructions
+    assert '{"taxids":[4565,4571]}' in instructions
+
+
+def test_metadata_summary_maps_field_or_comparison_decision() -> None:
+    adapter = provider_adapter("local_openai_compat")
+    provider_input = valid_provider_input()
+    provider_input["iteration"] = 1
+    provider_input["tool_results"] = [
+        {
+            "schema_version": "unicorn_tool_result_v1",
+            "tool_id": "metadata.summary",
+            "arguments": {},
+            "ok": True,
+            "result": {
+                "loaded": True,
+                "fields": ["group", "host", "site"],
+                "field_count": 3,
+            },
+            "error": None,
+        }
+    ]
+
+    native_request = adapter.map_request(provider_input)
+    instructions = native_request["messages"][0]["content"]
+
+    assert "available metadata fields" in instructions
+    assert "final_answer" in instructions
+    assert "metadata.compare_selected" in instructions
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_metadata_field_discovery_requires_summary_before_answer(
+    provider: str,
+) -> None:
+    adapter = provider_adapter(provider)
+    provider_input = valid_provider_input()
+    provider_input["user_prompt"] = "What variables do we have in the metadata?"
+
+    native_request = adapter.map_request(provider_input)
+    if provider == "openai":
+        instructions = native_request["instructions"]
+    elif provider == "google":
+        instructions = native_request["system_instruction"]
+    else:
+        instructions = native_request["messages"][0]["content"]
+
+    assert "does not mean the backend metadata table" in instructions
+    assert "do not return a final_answer" in instructions
+    assert (
+        '{"type":"tool_call","tool_id":"metadata.summary","arguments":{}}'
+        in instructions
+    )
+
+
+def test_metadata_comparison_maps_directly_to_grounded_final_answer() -> None:
+    adapter = provider_adapter("local_openai_compat")
+    provider_input = valid_provider_input()
+    provider_input["iteration"] = 1
+    provider_input["tool_results"] = [
+        {
+            "schema_version": "unicorn_tool_result_v1",
+            "tool_id": "metadata.compare_selected",
+            "arguments": {
+                "field": "group",
+            },
+            "ok": True,
+            "result": {
+                "field": "group",
+                "comparison_basis": "descriptive_raw_counts",
+                "groups": [],
+            },
+            "error": None,
+        }
+    ]
+
+    native_request = adapter.map_request(provider_input)
+    instructions = native_request["messages"][0]["content"]
+
+    assert "descriptive metadata-to-node count comparison" in instructions
+    assert "Do not call another tool" in instructions
+    assert "non-causal and non-normalized caveat" in instructions
 
 
 @pytest.mark.parametrize("provider,path,fixture", SUCCESS_FIXTURES)
@@ -170,3 +377,29 @@ def test_local_fenced_json_is_extracted_without_markdown_fences() -> None:
 
     assert "```" not in inspection.sanitized_text
     assert inspection.sanitized_text == fixture["expected_extracted_text"]
+
+
+def test_local_length_finish_reason_is_reported_as_truncated() -> None:
+    adapter = provider_adapter("local_openai_compat")
+    raw_response = {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {
+                    "content": (
+                        '{"type":"tool_call","tool_id":"nodes.selected",'
+                        '"arguments":{}'
+                    ),
+                },
+            }
+        ]
+    }
+
+    with pytest.raises(Exception) as caught:
+        adapter.inspect_response(raw_response)
+
+    assert (
+        getattr(caught.value, "code", None)
+        == "local_openai_compat_truncated_response"
+    )
+    assert "output-token limit" in str(caught.value)

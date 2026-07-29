@@ -40,7 +40,7 @@ class GoogleAdapter(ProviderAdapter):
             "system_instruction": provider_instructions(
                 provider_input["instructions"],
                 iteration=provider_input["iteration"],
-                has_tool_results=bool(provider_input["tool_results"]),
+                tool_results=provider_input["tool_results"],
             ),
             "input": serialize_provider_input(provider_input),
             "response_format": {

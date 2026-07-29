@@ -92,6 +92,35 @@ class FixtureStore:
         assert taxonomy is self.taxonomy
         return self.tree
 
+    def metadata_summary_payload(self) -> dict[str, Any]:
+        return {
+            "filename": "metadata.txt",
+            "fields": ["group", "host", "site"],
+            "rows_total": 3,
+            "matched_rows": 2,
+            "unmatched_rows": 1,
+            "datasets_with_metadata": [
+                "sample_a.bdamage.txt",
+                "sample_b.bdamage.txt",
+            ],
+        }
+
+    def metadata_for_dataset(
+        self,
+        dataset_name: str,
+    ) -> dict[str, str] | None:
+        rows = {
+            "sample_a.bdamage.txt": {
+                "group": "control",
+                "host": "wheat",
+            },
+            "sample_b.bdamage.txt": {
+                "group": "treated",
+                "host": "wheat",
+            },
+        }
+        return rows.get(dataset_name)
+
 
 def tool_request() -> dict[str, Any]:
     request = valid_browser_turn_request()
@@ -104,10 +133,10 @@ def tool_request() -> dict[str, Any]:
     return request
 
 
-def build_registry() -> Any:
+def build_registry(store: FixtureStore | None = None) -> Any:
     tools = require_agent_module("unicorn_agent.tools")
     return tools.create_read_only_registry(
-        store=FixtureStore(),
+        store=store or FixtureStore(),
         request=tool_request(),
     )
 
@@ -118,6 +147,8 @@ def test_read_only_registry_advertises_expected_tools() -> None:
     assert [tool["tool_id"] for tool in registry.provider_tools()] == [
         "datasets.selected",
         "graph.context",
+        "metadata.compare_selected",
+        "metadata.summary",
         "node.details",
         "nodes.find_visible",
         "nodes.selected",
@@ -126,6 +157,102 @@ def test_read_only_registry_advertises_expected_tools() -> None:
     assert all(tool["when_to_use"] for tool in registry.provider_tools())
     assert all(tool["output_summary"] for tool in registry.provider_tools())
     assert all(tool["mutation"] is False for tool in registry.provider_tools())
+
+
+def test_metadata_summary_exposes_fields_without_raw_rows() -> None:
+    registry = build_registry()
+
+    result = registry.dispatch("metadata.summary", {})
+
+    assert result == {
+        "loaded": True,
+        "filename": "metadata.txt",
+        "fields": ["group", "host", "site"],
+        "field_count": 3,
+        "rows_total": 3,
+        "matched_rows": 2,
+        "unmatched_rows": 1,
+        "selected_dataset_count": 2,
+        "selected_datasets_with_metadata": 2,
+    }
+    assert "rows" not in result
+
+
+def test_metadata_summary_reports_absent_metadata_cleanly() -> None:
+    class NoMetadataStore(FixtureStore):
+        def metadata_summary_payload(self) -> None:
+            return None
+
+    registry = build_registry(NoMetadataStore())
+
+    result = registry.dispatch("metadata.summary", {})
+
+    assert result["loaded"] is False
+    assert result["fields"] == []
+    assert result["field_count"] == 0
+    assert result["selected_dataset_count"] == 2
+    assert result["selected_datasets_with_metadata"] == 0
+
+
+def test_metadata_comparison_groups_selected_node_counts() -> None:
+    registry = build_registry()
+
+    result = registry.dispatch(
+        "metadata.compare_selected",
+        {
+            "field": "group",
+            "taxids": [33090],
+        },
+    )
+
+    assert result["field"] == "group"
+    assert result["count_mode"] == "subtree"
+    assert result["comparison_basis"] == "descriptive_raw_counts"
+    assert result["selected_node_count"] == 1
+    assert result["truncated"] is False
+    assert [group["value"] for group in result["groups"]] == [
+        "control",
+        "treated",
+    ]
+    assert result["groups"][0]["datasets"] == ["sample_a.bdamage.txt"]
+    assert result["groups"][0]["sum_across_nodes"] == 3000
+    assert result["groups"][1]["sum_across_nodes"] == 5000
+    assert result["node_comparisons"] == [
+        {
+            "taxid": 33090,
+            "name": "Viridiplantae",
+            "group_counts": [
+                {
+                    "value": "control",
+                    "sum": 3000,
+                    "mean": 3000.0,
+                    "minimum": 3000,
+                    "maximum": 3000,
+                },
+                {
+                    "value": "treated",
+                    "sum": 5000,
+                    "mean": 5000.0,
+                    "minimum": 5000,
+                    "maximum": 5000,
+                },
+            ],
+            "highest_mean_group": "treated",
+        }
+    ]
+    assert result["pairwise_comparisons"] == [
+        {
+            "left_value": "control",
+            "right_value": "treated",
+            "left_sum": 3000,
+            "right_sum": 5000,
+            "left_higher_node_count": 0,
+            "right_higher_node_count": 1,
+            "tied_node_count": 0,
+        }
+    ]
+    assert "causal effects" in result["caveat"]
+    assert "library-size normalization" in result["caveat"]
 
 
 def test_graph_context_and_dataset_tools_use_backend_state() -> None:
@@ -172,6 +299,23 @@ def test_selected_and_visible_lookup_tools_are_grounded() -> None:
     assert matches["count"] == 1
     assert matches["matches"][0]["taxid"] == 33090
     assert matches["matches"][0]["match_type"] == "name_prefix"
+
+
+def test_visible_lookup_tolerates_one_close_name_typo() -> None:
+    registry = build_registry()
+
+    matches = registry.dispatch(
+        "nodes.find_visible",
+        {
+            "query": "Tritcum",
+            "limit": 5,
+        },
+    )
+
+    assert matches["count"] == 1
+    assert matches["matches"][0]["taxid"] == 4565
+    assert matches["matches"][0]["match_type"] == "close_name"
+    assert matches["matches"][0]["match_score"] >= 0.86
 
 
 def test_node_details_supports_multiple_taxids() -> None:

@@ -16,6 +16,7 @@ from unicorn_agent.providers.base import (
     parse_normalized_output,
     post_json_transport,
     provider_instructions,
+    provider_response_schema,
     raise_provider_api_error,
     serialize_provider_input,
     validate_http_endpoint,
@@ -49,7 +50,7 @@ class LocalOpenAICompatibleAdapter(ProviderAdapter):
                     "content": provider_instructions(
                         provider_input["instructions"],
                         iteration=provider_input["iteration"],
-                        has_tool_results=bool(provider_input["tool_results"]),
+                        tool_results=provider_input["tool_results"],
                     ),
                 },
                 {
@@ -60,7 +61,13 @@ class LocalOpenAICompatibleAdapter(ProviderAdapter):
             "temperature": 0.0,
             "max_tokens": 2048,
             "response_format": {
-                "type": "json_object",
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "unicorn_provider_response",
+                    "schema": provider_response_schema(
+                        require_all_properties=False,
+                    ),
+                },
             },
         }
 
@@ -91,6 +98,7 @@ class LocalOpenAICompatibleAdapter(ProviderAdapter):
             raw_response,
             provider="local_openai_compat",
         )
+        _raise_if_truncated(raw_response)
         raw_text = _extract_raw_text(raw_response)
         return ProviderOutputInspection(
             raw_text=raw_text,
@@ -132,6 +140,24 @@ def _extract_raw_text(raw_response: Mapping[str, Any]) -> str:
     raise ProviderAdapterError(
         code="local_openai_compat_invalid_response",
         message="Local OpenAI-compatible response did not contain output text.",
+    )
+
+
+def _raise_if_truncated(raw_response: Mapping[str, Any]) -> None:
+    choices = raw_response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return
+    first_choice = choices[0]
+    if not isinstance(first_choice, Mapping):
+        return
+    if first_choice.get("finish_reason") != "length":
+        return
+    raise ProviderAdapterError(
+        code="local_openai_compat_truncated_response",
+        message=(
+            "Local OpenAI-compatible generation reached its output-token limit "
+            "before completing a provider response."
+        ),
     )
 
 

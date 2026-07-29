@@ -1,655 +1,209 @@
-Unicorn Compact Provider Context Schema
-=======================================
+Unicorn Compact Provider Context
+================================
+
+Status and Authority
+--------------------
+
+This document describes the compact context produced by
+`unicorn_agent/context.py`.
+
+The machine-readable authority is the `graph_context` definition in:
+
+```text
+rewrite/contracts/provider_adapter_input.schema.json
+```
+
+This is a live runtime shape, not a future proposal.
+
 
 Purpose
 -------
 
-This document defines the compact backend-authoritative context snapshot that
-Unicorn should send to model providers instead of the current larger
-frontend-built `graph_context` envelope.
+The compact context gives a provider enough orientation to:
 
-The goal is not just "fewer fields".
+- answer simple session questions directly
+- understand the broad active graph scope
+- choose an appropriate Unicorn tool for detailed questions
 
-The goal is:
-
-1. send only the smallest useful grounding snapshot for the current Unicorn
-   analysis state
-2. ensure that snapshot is assembled from backend-owned truth
-3. push detailed inspection into Unicorn-native tool calls rather than the
-   initial provider prompt
+It does not attempt to answer detailed graph, metadata, dataset, or report
+questions by itself.
 
 
-Why this exists
----------------
+Backend Construction
+--------------------
 
-The current prototype request payload still sends a relatively large provider
-context containing:
+The browser request carries a requested `graph_scope`. The backend:
 
-- browser-assembled graph context
-- duplicated backend-derived values
-- UI-adjacent state that is not always provider-relevant
-- data that the provider does not need unless it explicitly asks for it via a
-  tool call
+1. validates the complete turn request
+2. resolves dataset filenames through `GraphEngineStore`
+3. loads and verifies taxonomy filenames
+4. builds the active selection and tree
+5. applies `min_reads`
+6. verifies selected and focused taxids against threshold-visible nodes
+7. emits the compact context below
 
-This costs tokens every turn.
-
-It also creates architectural drift:
-
-- the browser ends up acting like the canonical context assembler
-- the provider sees a verbose mixed-origin envelope
-- detailed data is pushed proactively instead of requested on demand
+Browser values describe user intent. Backend-derived context is authoritative.
 
 
-Design principle
-----------------
-
-The provider should receive:
-
-- a compact snapshot of the current backend-backed Unicorn session
-- enough state to answer simple questions directly
-- enough state to decide which Unicorn tool to call next
-
-The provider should not receive:
-
-- full tree payloads
-- full report payloads
-- duplicated client/UI state
-- frontend-derived summaries that the backend already owns
-- large repeated arrays unless they are essential to reasoning
-
-
-Frozen compact-turn invariant
------------------------------
-
-This schema is not just a suggestion for a smaller payload.
-
-It is the intended normal-path provider contract for Unicorn graphengine.
-
-Frozen rules:
-
-1. compact-by-default
-- normal provider execution should use this compact context rather than the
-  older larger `graph_context` envelope
-
-2. tools-before-detail
-- if detailed graph inspection is needed, the provider should request it
-  through Unicorn-native tools rather than receive it proactively
-
-3. backend-authoritative grounding
-- backend-owned analysis state is authoritative for provider grounding
-- browser/UI state appears only when it changes human interpretation of the
-  backend-backed graph
-
-4. no repeated unchanged blobs
-- unchanged large context sections should not be resent turn after turn unless
-  they are truly required by the provider loop design
-
-5. debug is opt-in
-- fuller payload inspection may exist in a debug path, but it must not redefine
-  this compact normal-path contract
-
-
-Target architecture
--------------------
-
-The compact context should be assembled by the backend, not by the browser.
-
-Preferred flow:
-
-1. browser sends:
-   - prompt
-   - provider selection/runtime config
-   - minimal UI-only state that the backend does not already own
-2. backend builds compact provider context from active backend request context
-   and active backend analysis state
-3. backend sends that compact snapshot to the provider
-4. provider requests more detail only through Unicorn tools
-
-During transition, the browser may still call a local helper to preview this
-shape, but the schema itself is defined as backend-owned.
-
-
-Context assembly invariant
---------------------------
-
-Every field in the compact provider context should fall into exactly one of
-these categories:
-
-1. backend-owned active analysis context
-2. backend-owned active tree/report summary
-3. transient UI state that is necessary for interpretation
-
-If a field does not fit one of those categories, it should not be in the
-compact provider context.
-
-
-Top-level shape
----------------
-
-Proposed top-level object:
+Exact V1 Shape
+--------------
 
 ```json
 {
-  "captured_at": "2026-06-24T12:34:56.000Z",
-  "context_version": "v1-compact",
-  "session": {},
-  "datasets": {},
-  "tree": {},
-  "filters": {},
-  "metadata": {},
-  "report_state": {}
-}
-```
-
-Field-by-field intent is described below.
-
-
-Frozen step 2 schema decision
------------------------------
-
-The compact top-level shape is now intentionally narrower than earlier draft
-versions.
-
-Keep:
-
-- `session`
-- `datasets`
-- `tree`
-- `filters`
-- `metadata`
-- `report_state`
-
-Do not include as separate default top-level sections:
-
-- `taxonomy`
-- `selection`
-- `table`
-- `report`
-- `capabilities`
-
-How those concepts are handled now:
-
-- taxonomy identity is omitted from the compact default path and can be
-  recovered later through Unicorn tools when necessary
-- selection summary is folded into `tree`
-- active table/report scope is folded into `report_state`
-- capability detail belongs in the advertised tool registry, not in the
-  compact context blob
-
-
-Section 1. Session
-------------------
-
-Purpose:
-
-- identify the active Unicorn runtime mode
-- make backend authority explicit
-- allow later schema evolution
-
-Shape:
-
-```json
-"session": {
-  "mode": "backend",
-  "backend_connected": true,
-  "backend_tree_ready": true,
-  "transport": "backend-authoritative"
-}
-```
-
-Rules:
-
-- `mode` should always be `backend`
-- `backend_connected` is a coarse readiness bit
-- `backend_tree_ready` means a backend-backed tree is currently active
-- no provider runtime/auth data belongs here
-
-Do not include:
-
-- provider name
-- provider model
-- UI panel state
-
-
-Section 2. Datasets
--------------------
-
-Purpose:
-
-- tell the provider what active data scope it is reasoning about
-- provide only compact aggregate facts
-
-Shape:
-
-```json
-"datasets": {
-  "selected_names": [
-    "Lib_sim1_collapsed.alnfilt.bdamage.txt",
-    "Lib_sim1_collapsed.bdamage.txt"
-  ],
-  "selected_count": 2,
-  "total_reads": 79234328,
-  "direct_taxa": 1630
-}
-```
-
-Rules:
-
-- all dataset names should come from backend `request_context.dataset_names`
-- `selected_count` should be derived from that backend list
-- `total_reads` should come from backend tree/selection payloads
-- `direct_taxa` should come from backend tree/selection payloads
-
-Do not include:
-
-- full dataset file metadata
-- bytes
-- modification timestamps
-- per-dataset counts
-
-If the provider needs per-dataset detail, it should use a Unicorn tool such as
-`get_table_view`, `get_node_details`, or a future dedicated dataset/report
-tool.
-
-
-Section 3. Filters
-------------------
-
-Purpose:
-
-- tell the provider what filters shape the current backend view
-
-Shape:
-
-```json
-"filters": {
-  "min_reads": 1000,
-  "count_mode": "total",
-  "scale_mode": "sqrt",
-  "search": ""
-}
-```
-
-Rules:
-
-- `min_reads` must come from backend `request_context.min_reads`
-- `count_mode`, `scale_mode`, and `search` are UI interpretation settings and
-  may still come from the browser
-- only include these because they affect how a human is seeing the graph
-
-Important distinction:
-
-- `min_reads` affects backend tree/report scope and is therefore analysis state
-- `count_mode` and `scale_mode` affect rendering interpretation and are
-  currently UI state
-
-
-Section 4. Tree
----------------
-
-Purpose:
-
-- give the provider a compact summary of the current backend-backed tree view
-
-Shape:
-
-```json
-"tree": {
-  "visible_root": {
-    "taxid": 1,
-    "name": "root",
-    "rank": "no rank",
-    "direct": 2442,
-    "subtree": 79234328,
-    "child_count": 1
-  },
-  "visible_node_count": 50,
-  "selected_taxids": [33090, 4565],
-  "selected_count": 2,
-  "selected_preview": [
-    {
-      "taxid": 33090,
-      "name": "Viridiplantae",
-      "rank": "kingdom"
-    },
-    {
-      "taxid": 4565,
-      "name": "Triticum",
-      "rank": "genus"
-    }
-  ],
-  "expanded_taxids_preview": [2759, 33090, 35493],
-  "expanded_taxids_total": 3,
-  "collapsed_taxids_preview": [],
-  "collapsed_taxids_total": 0,
-  "focused_taxid": 33090,
-  "focused_name": "Viridiplantae"
-}
-```
-
-Rules:
-
-- `visible_root` should come from the active backend tree payload already
-  normalized into the frontend render model
-- `visible_node_count` can remain frontend-derived because it is a render-view
-  count, not an analysis summary the backend currently returns directly
-- `selected_taxids` and `selected_preview` may come from current frontend
-  selection state because selection still reflects user intent strongly
-- `expanded_taxids_preview` and `expanded_taxids_total` should come from backend
-  `request_context.expanded_taxids`
-- `collapsed_taxids_preview` and `collapsed_taxids_total` may remain frontend
-  summaries while collapsed-state handling stays client-side
-- `focused_taxid` and `focused_name` are allowed UI state because graph focus
-  is currently client-side interaction state
-
-Keep:
-
-- one root summary
-- one visible node count
-- selected taxid summary
-- effective expanded/collapsed summary
-- focused node summary
-
-Do not include:
-
-- the full visible tree
-- child lists
-- lineage arrays
-- per-node breakdowns
-
-If the provider needs more, it should use tools.
-
-
-Section 5. Metadata
--------------------
-
-Purpose:
-- expose only the compact metadata interpretation state relevant to the current
-  graph view
-
-Shape:
-
-```json
-"metadata": {
-  "active_field": "group",
-  "has_missing": true,
-  "values": [
-    { "value": "control", "dataset_count": 12 },
-    { "value": "treated", "dataset_count": 15 },
-    { "value": "__missing__", "dataset_count": 2 }
-  ]
-}
-```
-
-Rules:
-
-- include this block only when metadata-aware visualization is active or
-  metadata context is relevant to interpretation
-- `active_field` should come from the shared metadata resolver state
-- `has_missing` should be true when one or more active datasets resolve to the
-  canonical missing bucket
-- `values` should summarize visible/active dataset value groups only
-- counts should be scalar summaries, not per-dataset dumps
-
-Frozen step 3 metadata-summary decision:
-
-- the compact metadata block is resolver-derived, not table-derived
-- it is intended to summarize interpretation mode, not dataset detail
-- the default metadata summary contract is:
-  - `active_field`
-  - `has_missing`
-  - `values`
-- each `values[*]` entry should contain:
-  - `value`
-  - `dataset_count`
-- `__missing__` remains the canonical missing-value token in compact metadata
-  summaries just as it does in the shared visualization resolver
-
-Inclusion rule:
-
-- include `metadata` when metadata-aware visualization is active or when
-  metadata context materially affects interpretation
-- if no metadata-aware mode is active, runtime may either:
-  - omit `metadata`
-  - or send:
-    - `active_field: null`
-    - `has_missing: false`
-    - `values: []`
-- whichever runtime choice is implemented later should be applied consistently
-
-Do not include:
-
-- raw metadata rows
-- full metadata dictionaries for every dataset
-- full metadata tables
-- full per-dataset metadata dumps
-- field-color maps unless they become clearly necessary for provider reasoning
-
-That detail belongs behind Unicorn tools or later explicit dataset inspection
-paths.
-
-
-Section 6. Report State
------------------------
-
-Purpose:
-
-- summarize the currently active report or table scope without sending rows or
-  matrices
-
-Shape:
-
-```json
-"report_state": {
-  "active": true,
-  "kind": "count_matrix",
-  "scope": "selected_nodes",
-  "target": null,
-  "sort": null,
-  "limit": null,
-  "row_count": 10,
-  "dataset_count": 2
-}
-```
-
-Rules:
-
-- include this block only when a report or table view is active
-- values should summarize scope and size only
-- this is a report-state summary, not a report payload
-
-Do not include:
-
-- full row arrays
-- full matrix payloads
-- per-rank rows
-- per-dataset tables
-- provider capability declarations
-
-
-Recommended full compact example
---------------------------------
-
-```json
-{
-  "captured_at": "2026-06-24T18:12:44.000Z",
-  "context_version": "v1-compact",
   "session": {
-    "mode": "backend",
-    "backend_connected": true,
-    "backend_tree_ready": true,
-    "transport": "backend-authoritative"
+    "backend_connected": true
   },
   "datasets": {
-    "selected_names": [
-      "Lib_sim1_collapsed.alnfilt.bdamage.txt",
-      "Lib_sim1_collapsed.bdamage.txt"
-    ],
-    "selected_count": 2,
-    "total_reads": 79234328,
-    "direct_taxa": 1630
-  },
-  "filters": {
-    "min_reads": 1000,
-    "count_mode": "total",
-    "scale_mode": "sqrt",
-    "search": ""
+    "selected_count": 3
   },
   "tree": {
+    "visible_node_count": 537,
+    "selected_node_count": 17,
     "visible_root": {
       "taxid": 1,
       "name": "root",
-      "rank": "no rank",
-      "direct": 2442,
-      "subtree": 79234328,
-      "child_count": 1
+      "rank": "no rank"
     },
-    "visible_node_count": 50,
-    "selected_taxids": [33090],
-    "selected_count": 1,
-    "selected_preview": [
-      {
-        "taxid": 33090,
-        "name": "Viridiplantae",
-        "rank": "kingdom"
-      }
-    ],
-    "expanded_taxids_preview": [2759, 33090, 35493],
-    "expanded_taxids_total": 3,
-    "collapsed_taxids_preview": [],
-    "collapsed_taxids_total": 0,
-    "focused_taxid": null,
-    "focused_name": null
+    "focused_node": null
+  },
+  "filters": {
+    "min_reads": 2000,
+    "count_mode": "subtree"
   },
   "metadata": {
-    "active_field": "group",
-    "values": [
-      { "value": "control", "dataset_count": 1 },
-      { "value": "treated", "dataset_count": 1 }
-    ]
+    "active_field": null
   },
   "report_state": {
     "active": false,
-    "kind": null
+    "mode": null
   }
 }
 ```
 
-
-Fields that should be removed from the current large context
-------------------------------------------------------------
-
-The compact schema is explicitly meant to replace or shrink these categories:
-
-- duplicated backend block plus dataset block overlap
-- large conversation-independent frontend context wrappers
-- anything equivalent to full visible-tree structure
-- report/table structures beyond minimal active report summary
-- large arrays unless capped and semantically necessary
+All six top-level sections are required. Additional properties are rejected.
 
 
-Token budget strategy
+Field Semantics
+---------------
+
+`session.backend_connected`
+
+- Confirms that context was constructed through the backend runtime.
+
+`datasets.selected_count`
+
+- Number of datasets successfully resolved in the active backend selection.
+- Dataset names and per-dataset totals belong behind `datasets.selected`.
+
+`tree.visible_node_count`
+
+- Number of nodes surviving the current `min_reads` threshold.
+
+`tree.selected_node_count`
+
+- Number of requested selected taxids verified as visible.
+- The selected taxid list and node details belong behind `nodes.selected`.
+
+`tree.visible_root`
+
+- Compact `taxid`, `name`, and `rank` summary.
+- Null only when no dataset-backed tree is active.
+
+`tree.focused_node`
+
+- Compact verified focus summary, or null.
+
+`filters.min_reads`
+
+- Backend visibility threshold for the current graph scope.
+
+`filters.count_mode`
+
+- `direct` or `subtree`.
+- Determines count interpretation for applicable tools.
+
+`metadata.active_field`
+
+- Reserved compact metadata-visualization field.
+- The current V1 context builder emits null.
+- Null does not mean metadata is unavailable.
+- Field discovery belongs behind `metadata.summary`.
+
+`report_state`
+
+- Reserved compact report activity and mode summary.
+- The current V1 context builder emits `active: false` and `mode: null`.
+- Detailed report rows never belong in initial context.
+
+
+Deliberately Excluded
 ---------------------
 
-Suggested token discipline for the compact context:
+The default provider context does not contain:
 
-1. full dataset name list is acceptable while small
-2. if dataset count grows large, include:
-   - first N names
-   - `selected_count`
-   - `dataset_names_truncated: true`
-3. selected node preview should be capped
-4. expanded/collapsed summaries may need capping if expansion becomes large
-5. active report summary should stay scalar-heavy and matrix-light
+- dataset filenames or complete dataset records
+- raw visible-node arrays
+- selected taxid arrays
+- expanded or collapsed taxid arrays
+- taxonomy tables
+- raw metadata rows
+- per-dataset metadata dictionaries
+- node lineages and per-dataset node counts
+- count matrices or ranked report rows
+- provider credentials
+- browser DOM or rendering state
 
-Suggested default caps:
-
-- dataset name preview: 12
-- selected node preview: 5
-- expanded/collapsed taxid preview: 64
-
-If a cap is applied, add a boolean flag such as:
-
-- `selected_names_truncated`
-- `selected_preview_truncated`
-- `expanded_taxids_truncated`
-- `collapsed_taxids_truncated`
+Those details are available only through explicit read-only tools when
+relevant.
 
 
-Assembly rules
---------------
+Direct Answers and Tool Escalation
+----------------------------------
 
-Priority order for each field:
+The context can directly answer questions such as:
 
-1. active backend request context
-2. active backend payload summaries
-3. current frontend UI-only state, only when backend does not own the concept
+- What `min_reads` threshold is active?
+- How many datasets are selected?
+- How many nodes are visible?
+- How many nodes are selected?
+- What count mode is active?
 
-Examples:
+The provider should use tools for questions such as:
 
-- dataset names:
-  - source: backend request context
-- min_reads:
-  - source: backend request context
-- expanded taxids:
-  - source: backend request context
-- total_reads:
-  - source: backend tree/selection payload summary
-- direct_taxa:
-  - source: backend tree/selection payload summary
-- visible node count:
-  - source: frontend render state
-- selected taxids:
-  - source: frontend selection state
-- active metadata field/value summary:
-  - source: shared metadata resolver state
-- active report summary:
-  - source: current backend-normalized report/table state
+- Which datasets are selected? -> `datasets.selected`
+- Which nodes are selected? -> `nodes.selected`
+- Tell me about a named node. -> `nodes.find_visible`, then `node.details`
+- Which metadata fields exist? -> `metadata.summary`
+- How do metadata groups compare across selected nodes? ->
+  `metadata.compare_selected`
+- Show ranked rows. -> `table.view`
 
 
-Implementation plan
--------------------
-
-Suggested implementation sequence:
-
-1. Add a backend helper that builds `compact_provider_context`.
-2. Keep the current large `buildAgentContext()` temporarily for debugging.
-3. Add a second builder path:
-   - `buildCompactAgentContext()`
-   - or backend-side `build_compact_provider_context(...)`
-4. Log both shapes side-by-side during transition.
-5. Compare provider quality on representative prompts.
-6. Remove the larger context from provider payloads once the compact version is
-   validated.
-
-
-Validation questions
+Empty-Scope Behavior
 --------------------
 
-Before fully switching, validate these prompt types:
+With no selected datasets, context remains valid and reports:
 
-1. "What taxa show the most damage?"
-2. "What is currently selected?"
-3. "What datasets am I looking at?"
-4. "What subtree report is currently open?"
-5. "What filters are active right now?"
+- `datasets.selected_count: 0`
+- zero visible and selected nodes
+- null root and focus
+- the requested filter interpretation
 
-Success criterion:
-
-- simple prompts should still work without tool calls when the compact snapshot
-  already contains enough information
-- deeper prompts should trigger Unicorn-native tool calls rather than bloating
-  the base provider context
+Selected or focused taxids without active datasets are rejected rather than
+represented as valid context.
 
 
-Non-goals
----------
+Validation Failures
+-------------------
 
-This schema is not meant to:
+Backend context construction returns structured failures for conditions such
+as:
 
-- replace Unicorn-native tools
-- encode full analysis payloads inline
-- capture every UI detail
-- become a second hidden tree serialization format
+- unavailable datasets
+- unavailable or mismatched taxonomy files
+- invalid backend filenames
+- selected or focused taxids outside the visible scope
+- taxids supplied without active datasets
+- backend graph construction failure
 
-It is a compact grounding snapshot, not a transport for full analysis data.
+Context construction never silently accepts an unverified graph scope.

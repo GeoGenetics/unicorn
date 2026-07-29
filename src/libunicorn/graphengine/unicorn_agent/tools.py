@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Mapping
+from difflib import SequenceMatcher
 from typing import Any
 
 from unicorn_agent.context import (
@@ -17,6 +18,8 @@ from unicorn_agent.registry import ToolRegistry, ToolRegistryError
 
 GRAPH_CONTEXT = "graph.context"
 DATASETS_SELECTED = "datasets.selected"
+METADATA_COMPARE_SELECTED = "metadata.compare_selected"
+METADATA_SUMMARY = "metadata.summary"
 NODES_SELECTED = "nodes.selected"
 NODES_FIND_VISIBLE = "nodes.find_visible"
 NODE_DETAILS = "node.details"
@@ -43,6 +46,34 @@ _FIND_VISIBLE_ARGUMENTS = {
             "type": "integer",
             "minimum": 1,
             "maximum": 100,
+        },
+    },
+}
+
+_METADATA_COMPARE_ARGUMENTS = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["field"],
+    "properties": {
+        "field": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": r".*\S.*",
+        },
+        "taxids": {
+            "type": "array",
+            "items": {
+                "type": "integer",
+                "minimum": 1,
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": True,
+        },
+        "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
         },
     },
 }
@@ -169,6 +200,248 @@ class ReadOnlyToolService:
             "datasets": datasets,
         }
 
+    def metadata_summary(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        del arguments
+        summary = self._store.metadata_summary_payload()
+        selected_datasets = set(self._scope["datasets"])
+        if summary is None:
+            return {
+                "loaded": False,
+                "filename": None,
+                "fields": [],
+                "field_count": 0,
+                "rows_total": 0,
+                "matched_rows": 0,
+                "unmatched_rows": 0,
+                "selected_dataset_count": len(selected_datasets),
+                "selected_datasets_with_metadata": 0,
+            }
+
+        fields = [
+            str(field)
+            for field in summary.get("fields", [])
+            if isinstance(field, str) and field
+        ]
+        datasets_with_metadata = {
+            str(filename)
+            for filename in summary.get("datasets_with_metadata", [])
+            if isinstance(filename, str) and filename
+        }
+        return {
+            "loaded": True,
+            "filename": summary.get("filename"),
+            "fields": fields,
+            "field_count": len(fields),
+            "rows_total": int(summary.get("rows_total", 0)),
+            "matched_rows": int(summary.get("matched_rows", 0)),
+            "unmatched_rows": int(summary.get("unmatched_rows", 0)),
+            "selected_dataset_count": len(selected_datasets),
+            "selected_datasets_with_metadata": len(
+                selected_datasets & datasets_with_metadata
+            ),
+        }
+
+    def compare_selected_by_metadata(
+        self,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        selection, _, tree = self._get_models()
+        summary = self._store.metadata_summary_payload()
+        if summary is None:
+            raise ToolServiceError(
+                code="metadata_not_loaded",
+                message="No backend metadata table is loaded.",
+                tool_id=METADATA_COMPARE_SELECTED,
+            )
+
+        field = arguments["field"].strip()
+        fields = {
+            str(value)
+            for value in summary.get("fields", [])
+            if isinstance(value, str) and value
+        }
+        if field not in fields:
+            raise ToolServiceError(
+                code="metadata_field_not_found",
+                message=f"Metadata field {field!r} is not available.",
+                tool_id=METADATA_COMPARE_SELECTED,
+            )
+
+        limit = int(arguments.get("limit", 25))
+        scope_taxids = list(self._scope["selected_taxids"])
+        selected_taxids = list(arguments.get("taxids", scope_taxids))
+        outside_selection = sorted(set(selected_taxids) - set(scope_taxids))
+        if outside_selection:
+            raise ToolServiceError(
+                code="metadata_taxid_not_selected",
+                message=(
+                    "Metadata comparison taxids must belong to the current "
+                    "node selection."
+                ),
+                tool_id=METADATA_COMPARE_SELECTED,
+            )
+        selected_nodes = [
+            self._resolve_visible_node(
+                tree,
+                taxid,
+                tool_id=METADATA_COMPARE_SELECTED,
+            )
+            for taxid in selected_taxids[:limit]
+        ]
+
+        grouped_indices: dict[str, list[int]] = {}
+        grouped_datasets: dict[str, list[str]] = {}
+        for index, dataset in enumerate(selection.datasets):
+            filename = str(dataset.fileinfo.name)
+            metadata = self._store.metadata_for_dataset(filename)
+            raw_value = metadata.get(field) if metadata is not None else None
+            value = str(raw_value).strip() if raw_value is not None else ""
+            value = value or "__missing__"
+            grouped_indices.setdefault(value, []).append(index)
+            grouped_datasets.setdefault(value, []).append(filename)
+
+        count_mode = self._scope["count_mode"]
+        groups = []
+        node_values: dict[int, list[dict[str, Any]]] = {
+            int(node.taxid): []
+            for node in selected_nodes
+        }
+        ordered_values = sorted(
+            grouped_indices,
+            key=lambda value: (value == "__missing__", value.casefold()),
+        )
+        for value in ordered_values:
+            indices = grouped_indices[value]
+            node_counts = []
+            for node in selected_nodes:
+                source_counts = (
+                    node.direct_by_source
+                    if count_mode == "direct"
+                    else node.total_by_source
+                )
+                counts = [
+                    int(source_counts[index])
+                    if index < len(source_counts)
+                    else 0
+                    for index in indices
+                ]
+                count_sum = sum(counts)
+                group_count = {
+                    "value": value,
+                    "sum": count_sum,
+                    "mean": round(count_sum / len(counts), 3),
+                    "minimum": min(counts),
+                    "maximum": max(counts),
+                }
+                node_values[int(node.taxid)].append(group_count)
+                node_counts.append(group_count)
+            groups.append(
+                {
+                    "value": value,
+                    "dataset_count": len(indices),
+                    "datasets": grouped_datasets[value],
+                    "sum_across_nodes": sum(
+                        item["sum"]
+                        for item in node_counts
+                    ),
+                    "mean_across_nodes": round(
+                        sum(item["mean"] for item in node_counts)
+                        / len(node_counts),
+                        3,
+                    ) if node_counts else 0.0,
+                }
+            )
+
+        node_comparisons = []
+        for node in selected_nodes:
+            values = node_values[int(node.taxid)]
+            nonmissing = [
+                value
+                for value in values
+                if value["value"] != "__missing__"
+            ]
+            highest = (
+                max(nonmissing, key=lambda value: value["mean"])["value"]
+                if nonmissing
+                else None
+            )
+            node_comparisons.append(
+                {
+                    "taxid": int(node.taxid),
+                    "name": str(node.name),
+                    "group_counts": values,
+                    "highest_mean_group": highest,
+                }
+            )
+
+        pairwise_comparisons = []
+        comparable_values = [
+            value
+            for value in ordered_values
+            if value != "__missing__"
+        ][:10]
+        for left_index, left_value in enumerate(comparable_values):
+            for right_value in comparable_values[left_index + 1:]:
+                left_higher = 0
+                right_higher = 0
+                tied = 0
+                left_total = 0
+                right_total = 0
+                for comparison in node_comparisons:
+                    by_value = {
+                        item["value"]: item
+                        for item in comparison["group_counts"]
+                    }
+                    left_count = by_value[left_value]["mean"]
+                    right_count = by_value[right_value]["mean"]
+                    left_total += by_value[left_value]["sum"]
+                    right_total += by_value[right_value]["sum"]
+                    if left_count > right_count:
+                        left_higher += 1
+                    elif right_count > left_count:
+                        right_higher += 1
+                    else:
+                        tied += 1
+                pairwise_comparisons.append(
+                    {
+                        "left_value": left_value,
+                        "right_value": right_value,
+                        "left_sum": left_total,
+                        "right_sum": right_total,
+                        "left_higher_node_count": left_higher,
+                        "right_higher_node_count": right_higher,
+                        "tied_node_count": tied,
+                    }
+                )
+
+        return {
+            "field": field,
+            "count_mode": count_mode,
+            "comparison_basis": "descriptive_raw_counts",
+            "caveat": (
+                "Group summaries compare raw counts without library-size "
+                "normalization; they do not estimate causal effects or "
+                "statistical significance."
+            ),
+            "selected_node_count": len(scope_taxids),
+            "nodes_returned": len(selected_nodes),
+            "truncated": len(selected_nodes) < len(selected_taxids),
+            "group_count": len(groups),
+            "groups": groups,
+            "node_comparisons": node_comparisons,
+            "pairwise_comparisons": pairwise_comparisons,
+            "pairwise_truncated": len(comparable_values) < len(
+                [
+                    value
+                    for value in ordered_values
+                    if value != "__missing__"
+                ]
+            ),
+        }
+
     def list_selected_nodes(
         self,
         arguments: dict[str, Any],
@@ -206,14 +479,25 @@ class ReadOnlyToolService:
             name_folded = str(node.name).casefold()
             match_type = None
             priority = 99
+            match_score = 0.0
             if query == taxid_text:
-                match_type, priority = "taxid", 0
+                match_type, priority, match_score = "taxid", 0, 1.0
             elif query_folded == name_folded:
-                match_type, priority = "exact_name", 1
+                match_type, priority, match_score = "exact_name", 1, 1.0
             elif name_folded.startswith(query_folded):
-                match_type, priority = "name_prefix", 2
+                match_type, priority, match_score = "name_prefix", 2, 1.0
             elif query_folded in name_folded:
-                match_type, priority = "name_contains", 3
+                match_type, priority, match_score = "name_contains", 3, 1.0
+            elif len(query_folded) >= 4:
+                similarity = SequenceMatcher(
+                    None,
+                    query_folded,
+                    name_folded,
+                ).ratio()
+                if similarity >= 0.86:
+                    match_type = "close_name"
+                    priority = 4
+                    match_score = similarity
             if match_type is None:
                 continue
             match = _node_counts(
@@ -222,11 +506,13 @@ class ReadOnlyToolService:
             )
             match["match_type"] = match_type
             match["_priority"] = priority
+            match["_score"] = match_score
             matches.append(match)
 
         matches.sort(
             key=lambda item: (
                 item["_priority"],
+                -item["_score"],
                 str(item["name"]).casefold(),
                 int(item["taxid"]),
             )
@@ -234,6 +520,9 @@ class ReadOnlyToolService:
         matches = matches[:limit]
         for match in matches:
             del match["_priority"]
+            score = match.pop("_score")
+            if match["match_type"] == "close_name":
+                match["match_score"] = round(score, 3)
         return {
             "query": query,
             "count": len(matches),
@@ -362,8 +651,8 @@ def create_read_only_registry(
             "count, count mode, and minimum-read threshold."
         ),
         output_summary=(
-            "Compact session, dataset, tree, filter, metadata, and report-state "
-            "summaries."
+            "Compact session, dataset, tree, filter, active metadata display "
+            "field, and report-state summaries."
         ),
         arguments_schema=_NO_ARGUMENTS,
         handler=service.graph_context,
@@ -382,6 +671,41 @@ def create_read_only_registry(
         ),
         arguments_schema=_NO_ARGUMENTS,
         handler=service.list_selected_datasets,
+        mutation=False,
+    )
+    registry.register(
+        tool_id=METADATA_COMPARE_SELECTED,
+        description=(
+            "Compare selected-node counts across values of one metadata field."
+        ),
+        when_to_use=(
+            "Use when the user asks which values a metadata field contains or "
+            "how that field relates to the currently selected tree nodes. Pass "
+            "grounded taxids to restrict comparison to named selected nodes. "
+            "Results are descriptive raw-count comparisons, not causal effects."
+        ),
+        output_summary=(
+            "Metadata-value groups, node-centric counts, pairwise group "
+            "comparisons, and an explicit non-causal interpretation caveat."
+        ),
+        arguments_schema=_METADATA_COMPARE_ARGUMENTS,
+        handler=service.compare_selected_by_metadata,
+        mutation=False,
+    )
+    registry.register(
+        tool_id=METADATA_SUMMARY,
+        description="Return the compact backend metadata-table summary.",
+        when_to_use=(
+            "Use when the user asks which metadata variables or fields are "
+            "available, whether metadata is loaded, or how many rows and "
+            "datasets match metadata. Do not use graph.context for field names."
+        ),
+        output_summary=(
+            "Metadata load state, field names, row counts, backend match counts, "
+            "and selected-dataset metadata coverage without raw metadata rows."
+        ),
+        arguments_schema=_NO_ARGUMENTS,
+        handler=service.metadata_summary,
         mutation=False,
     )
     registry.register(
