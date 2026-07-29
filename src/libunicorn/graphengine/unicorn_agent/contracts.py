@@ -1,6 +1,6 @@
-"""Runtime validation for the frozen Unicorn Agent V1 contracts.
+"""Runtime validation for the Unicorn Agent V1 contracts.
 
-The machine-readable JSON Schemas in ``rewrite/contracts`` are the only
+The machine-readable JSON Schemas in ``unicorn_agent/schemas`` are the only
 authoritative contract definitions. This module loads and validates against
 them without copying their field shapes into Python.
 """
@@ -18,7 +18,7 @@ from jsonschema.exceptions import ValidationError, best_match
 from referencing import Registry, Resource
 
 
-CONTRACT_DIR = Path(__file__).resolve().parents[1] / "rewrite" / "contracts"
+CONTRACT_DIR = Path(__file__).resolve().parent / "schemas"
 
 _CONTRACT_FILES = {
     "browser_turn_request": "browser_turn_request.schema.json",

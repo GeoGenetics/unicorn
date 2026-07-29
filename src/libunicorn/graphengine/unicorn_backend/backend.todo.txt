@@ -64,7 +64,7 @@ That means:
 - localhost remains the supported single-machine setup
 
 2. Document the full live endpoint contract in one place.
-The semantics are now spread across `server_README.md`, code, and UI behavior.
+The semantics are now spread across `docs/backend.md`, code, and UI behavior.
 We should keep one concise backend contract reference for:
 
 - request parameters

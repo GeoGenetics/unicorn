@@ -52,7 +52,14 @@ cd src/libunicorn/graphengine
 uvicorn server_app:app --host 127.0.0.1 --port 8000
 ```
 
-The backend will create and use the local `uploads/` directory by default.
+The backend keeps runtime data outside tracked source. By default it creates:
+
+```text
+/path/to/unicorn/var/graphengine/
+├── uploads/
+└── logs/
+    └── agent_trace/
+```
 
 ### 6. Open the UI
 
@@ -72,13 +79,13 @@ In the UI:
   - host: `localhost`
 - click `Test Tunnel`
 
-![Backend connection panel](images/backend.png)
+![Backend connection panel](docs/images/backend.png)
 
 - upload or select datasets once the backend connection is live
 - once `nodes.dmp` and `names.dmp` are available to the backend and selected in
   the UI, click `Render Tree`
 
-![File upload and dataset selection panel](images/file_uploads.png)
+![File upload and dataset selection panel](docs/images/file_uploads.png)
 
 Once connected:
 
@@ -127,6 +134,36 @@ source /path/to/unicorn/.venv/bin/activate
 UNICORN_GRAPHENGINE_UPLOAD_DIR=/data/unicorn_graphengine/uploads \
 UNICORN_GRAPHENGINE_NODES_FILE=nodes.dmp \
 UNICORN_GRAPHENGINE_NAMES_FILE=names.dmp \
+uvicorn server_app:app --host 127.0.0.1 --port 8000
+```
+
+Use `UNICORN_GRAPHENGINE_RUNTIME_DIR` to relocate the complete runtime tree:
+
+```bash
+UNICORN_GRAPHENGINE_RUNTIME_DIR=/data/unicorn_graphengine \
+uvicorn server_app:app --host 127.0.0.1 --port 8000
+```
+
+`UNICORN_GRAPHENGINE_UPLOAD_DIR` and
+`UNICORN_GRAPHENGINE_AGENT_TRACE_DIR` override the corresponding runtime
+subdirectories independently.
+
+### Migrating an older checkout
+
+Older Graphengine versions used
+`src/libunicorn/graphengine/uploads/`. Existing untracked datasets, taxonomy,
+and `metadata.txt` are not moved automatically. Move them once:
+
+```bash
+mkdir -p /path/to/unicorn/var/graphengine/uploads
+mv /path/to/unicorn/src/libunicorn/graphengine/uploads/* \
+  /path/to/unicorn/var/graphengine/uploads/
+```
+
+Alternatively, retain the old location temporarily:
+
+```bash
+UNICORN_GRAPHENGINE_UPLOAD_DIR=/path/to/unicorn/src/libunicorn/graphengine/uploads \
 uvicorn server_app:app --host 127.0.0.1 --port 8000
 ```
 
@@ -215,8 +252,8 @@ In the UI:
 If the backend uses the default upload directory:
 
 ```bash
-cp sample1.bdamage.txt /path/to/unicorn/src/libunicorn/graphengine/uploads/
-cp sample2.bdamage.txt /path/to/unicorn/src/libunicorn/graphengine/uploads/
+cp sample1.bdamage.txt /path/to/unicorn/var/graphengine/uploads/
+cp sample2.bdamage.txt /path/to/unicorn/var/graphengine/uploads/
 ```
 
 Then in the UI:
@@ -256,7 +293,7 @@ Removing a sample means removing the file from the backend upload directory.
 ### Remove a sample on the backend filesystem
 
 ```bash
-rm /path/to/unicorn/src/libunicorn/graphengine/uploads/sample1.bdamage.txt
+rm /path/to/unicorn/var/graphengine/uploads/sample1.bdamage.txt
 ```
 
 Then in the UI:
@@ -269,7 +306,7 @@ Then in the UI:
 
 ```bash
 ssh youruser@your-remote-host \
-  'rm /path/to/unicorn/src/libunicorn/graphengine/uploads/sample1.bdamage.txt'
+  'rm /path/to/unicorn/var/graphengine/uploads/sample1.bdamage.txt'
 ```
 
 Then:
@@ -336,8 +373,10 @@ Browser:
 
 - The backend currently recognizes uploaded datasets by filename and expects
   `.bdamage.txt` inputs.
+- Bundled test datasets live under `tests/fixtures/datasets/`; automated tests
+  copy them into isolated temporary upload directories.
 - Sample removal is currently filesystem-based, not API-based.
 - The backend is authoritative: if a file is not present on the backend, the UI
   cannot use it.
 - For the detailed live backend contract, see:
-  - [server_README.md](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/graphengine/server_README.md)
+  - [docs/backend.md](docs/backend.md)

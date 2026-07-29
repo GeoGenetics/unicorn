@@ -20,7 +20,13 @@ from unicorn_compute.pcoa import build_count_matrix_pcoa_spec
 
 HOST = os.environ.get("UNICORN_GRAPHENGINE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("UNICORN_GRAPHENGINE_PORT", "8000"))
-UPLOAD_DIR = Path(os.environ.get("UNICORN_GRAPHENGINE_UPLOAD_DIR", "uploads")).resolve()
+DEFAULT_RUNTIME_DIR = Path(__file__).resolve().parents[3] / "var" / "graphengine"
+RUNTIME_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_RUNTIME_DIR", DEFAULT_RUNTIME_DIR)
+).expanduser().resolve()
+UPLOAD_DIR = Path(
+    os.environ.get("UNICORN_GRAPHENGINE_UPLOAD_DIR", RUNTIME_DIR / "uploads")
+).expanduser().resolve()
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 NODES_FILENAME = os.environ.get("UNICORN_GRAPHENGINE_NODES_FILE", "nodes.dmp")
 NAMES_FILENAME = os.environ.get("UNICORN_GRAPHENGINE_NAMES_FILE", "names.dmp")

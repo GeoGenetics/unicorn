@@ -24,7 +24,10 @@ _FORBIDDEN_KEYS = {
     "authorization",
     "x_unicorn_provider_api_key",
 }
-_DEFAULT_TRACE_ROOT = Path(__file__).resolve().parents[1] / "logs" / "agent_trace"
+_DEFAULT_RUNTIME_ROOT = (
+    Path(__file__).resolve().parents[4] / "var" / "graphengine"
+)
+RUNTIME_ROOT_ENV = "UNICORN_GRAPHENGINE_RUNTIME_DIR"
 TRACE_ROOT_ENV = "UNICORN_GRAPHENGINE_AGENT_TRACE_DIR"
 
 
@@ -141,7 +144,16 @@ class JsonlTraceStore(InMemoryTraceStore):
         configured = (
             root_dir
             or os.environ.get(TRACE_ROOT_ENV)
-            or _DEFAULT_TRACE_ROOT
+            or (
+                Path(
+                    os.environ.get(
+                        RUNTIME_ROOT_ENV,
+                        _DEFAULT_RUNTIME_ROOT,
+                    )
+                ).expanduser()
+                / "logs"
+                / "agent_trace"
+            )
         )
         self._root_dir = Path(configured).expanduser().resolve()
         self._paths: dict[str, Path] = {}

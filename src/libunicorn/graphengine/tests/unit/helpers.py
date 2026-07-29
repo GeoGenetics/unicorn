@@ -18,7 +18,7 @@ from unicorn_agent.providers.base import (
 
 
 GRAPHENGINE_DIR = Path(__file__).resolve().parents[2]
-CONTRACT_DIR = GRAPHENGINE_DIR / "rewrite" / "contracts"
+CONTRACT_DIR = GRAPHENGINE_DIR / "unicorn_agent" / "schemas"
 AGENT_FIXTURE_DIR = GRAPHENGINE_DIR / "tests" / "fixtures" / "agent"
 
 def load_json(path: Path) -> dict[str, Any]:

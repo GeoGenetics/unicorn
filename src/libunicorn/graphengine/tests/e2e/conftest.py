@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -17,11 +18,56 @@ from playwright.sync_api import Browser, Page, Playwright, expect, sync_playwrig
 GRAPHENGINE_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = Path(__file__).resolve().parents[5]
 DATA_DIR = REPO_ROOT / "data"
+TESTING_DIR = REPO_ROOT / "testing"
 VENV_PYTHON = GRAPHENGINE_DIR / ".venv" / "bin" / "python"
 BACKEND_SCRIPT = GRAPHENGINE_DIR / "server_app.py"
-TEST_LOG_DIR = GRAPHENGINE_DIR / "tests" / "logs"
-BACKEND_LOG = TEST_LOG_DIR / "e2e_backend.log"
-FRONTEND_LOG = TEST_LOG_DIR / "e2e_frontend.log"
+DATASET_FIXTURE_DIR = GRAPHENGINE_DIR / "tests" / "fixtures" / "datasets"
+TEST_TAXONOMY_DIR_ENV = "UNICORN_GRAPHENGINE_TEST_TAXONOMY_DIR"
+
+
+def seed_dataset_fixtures(upload_dir: Path) -> None:
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    fixtures = sorted(DATASET_FIXTURE_DIR.glob("*.bdamage.txt"))
+    if not fixtures:
+        pytest.fail(f"No graphengine dataset fixtures found in {DATASET_FIXTURE_DIR}")
+    for source in fixtures:
+        shutil.copy2(source, upload_dir / source.name)
+
+
+def taxonomy_source_files() -> dict[str, Path]:
+    configured = os.environ.get(TEST_TAXONOMY_DIR_ENV)
+    candidates = []
+    if configured:
+        candidates.append(Path(configured).expanduser().resolve())
+    candidates.extend((DATA_DIR, TESTING_DIR))
+
+    for directory in candidates:
+        nodes_file = directory / "nodes.dmp"
+        names_file = directory / "names.dmp"
+        if nodes_file.is_file() and names_file.is_file():
+            return {
+                "nodes": nodes_file,
+                "names": names_file,
+            }
+
+    searched = ", ".join(str(path) for path in candidates)
+    pytest.fail(
+        "Graphengine E2E taxonomy is unavailable. Set "
+        f"{TEST_TAXONOMY_DIR_ENV} to a directory containing nodes.dmp and "
+        f"names.dmp. Searched: {searched}"
+    )
+
+
+def seed_taxonomy_fixtures(upload_dir: Path) -> dict[str, Path]:
+    sources = taxonomy_source_files()
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    for source in sources.values():
+        destination = upload_dir / source.name
+        try:
+            destination.hardlink_to(source)
+        except OSError:
+            destination.symlink_to(source)
+    return sources
 
 
 def is_local_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -66,7 +112,7 @@ def terminate_process(process: subprocess.Popen[bytes]) -> None:
 
 
 @pytest.fixture()
-def services() -> Iterator[dict[str, str]]:
+def services(tmp_path: Path) -> Iterator[dict[str, str]]:
     if not VENV_PYTHON.is_file():
         pytest.fail(f"Missing virtualenv Python: {VENV_PYTHON}")
     if not BACKEND_SCRIPT.is_file():
@@ -76,11 +122,18 @@ def services() -> Iterator[dict[str, str]]:
     frontend_port = str(find_free_port())
     backend_url = f"http://127.0.0.1:{backend_port}/ping"
     frontend_url = f"http://127.0.0.1:{frontend_port}/index.html"
+    runtime_dir = tmp_path / "runtime"
+    upload_dir = runtime_dir / "uploads"
+    trace_dir = runtime_dir / "logs" / "agent_trace"
+    log_dir = tmp_path / "service_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    seed_dataset_fixtures(upload_dir)
+    seed_taxonomy_fixtures(upload_dir)
 
-    TEST_LOG_DIR.mkdir(parents=True, exist_ok=True)
-
-    backend_log = BACKEND_LOG.open("wb")
-    frontend_log = FRONTEND_LOG.open("wb")
+    backend_log_path = log_dir / "backend.log"
+    frontend_log_path = log_dir / "frontend.log"
+    backend_log = backend_log_path.open("wb")
+    frontend_log = frontend_log_path.open("wb")
 
     backend_process = subprocess.Popen(
         [str(VENV_PYTHON), str(BACKEND_SCRIPT)],
@@ -91,6 +144,9 @@ def services() -> Iterator[dict[str, str]]:
             **os.environ,
             "PYTHONUNBUFFERED": "1",
             "UNICORN_GRAPHENGINE_PORT": backend_port,
+            "UNICORN_GRAPHENGINE_RUNTIME_DIR": str(runtime_dir),
+            "UNICORN_GRAPHENGINE_UPLOAD_DIR": str(upload_dir),
+            "UNICORN_GRAPHENGINE_AGENT_TRACE_DIR": str(trace_dir),
         },
     )
     frontend_process = subprocess.Popen(
@@ -108,6 +164,11 @@ def services() -> Iterator[dict[str, str]]:
             "backend_url": backend_url,
             "frontend_url": frontend_url,
             "backend_base_url": f"http://127.0.0.1:{backend_port}",
+            "runtime_dir": str(runtime_dir),
+            "upload_dir": str(upload_dir),
+            "trace_dir": str(trace_dir),
+            "backend_log": str(backend_log_path),
+            "frontend_log": str(frontend_log_path),
         }
     finally:
         terminate_process(frontend_process)
@@ -186,13 +247,8 @@ def connected_page(page: Page) -> Iterator[Page]:
 
 
 @pytest.fixture(scope="session")
-def local_taxonomy_files() -> dict[str, Path | None]:
-    nodes_file = DATA_DIR / "nodes.dmp"
-    names_file = DATA_DIR / "names.dmp"
-    return {
-        "nodes": nodes_file if nodes_file.is_file() else None,
-        "names": names_file if names_file.is_file() else None,
-    }
+def local_taxonomy_files() -> dict[str, Path]:
+    return taxonomy_source_files()
 
 
 @pytest.fixture()

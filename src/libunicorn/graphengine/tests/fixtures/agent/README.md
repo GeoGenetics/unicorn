@@ -37,7 +37,7 @@ the expected parser behavior.
 
 Provider-native response envelopes preserve old-runtime evidence, while
 successful `expected_normalized_response` objects use the frozen
-`unicorn_provider_response_v1` contract under `rewrite/contracts/`.
+`unicorn_provider_response_v1` contract under `unicorn_agent/schemas/`.
 
 ## Fixture Inventory
 

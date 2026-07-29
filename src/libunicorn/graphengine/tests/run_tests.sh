@@ -8,11 +8,18 @@ REPO_ROOT="$(cd "${GRAPHENGINE_DIR}/../../.." && pwd)"
 VENV_PYTHON="${GRAPHENGINE_DIR}/.venv/bin/python"
 BACKEND_SCRIPT="${GRAPHENGINE_DIR}/server_app.py"
 CHECKLIST_FILE="${GRAPHENGINE_DIR}/tests/regression_checklist.md"
+DATASET_FIXTURE_DIR="${GRAPHENGINE_DIR}/tests/fixtures/datasets"
+DATA_DIR="${REPO_ROOT}/data"
+TESTING_DIR="${REPO_ROOT}/testing"
+TEST_TAXONOMY_DIR="${UNICORN_GRAPHENGINE_TEST_TAXONOMY_DIR:-}"
 BACKEND_URL="http://127.0.0.1:8000/ping"
 FRONTEND_URL="http://127.0.0.1:8081"
-LOG_DIR="${GRAPHENGINE_DIR}/tests/logs"
-BACKEND_LOG="${LOG_DIR}/backend.log"
-FRONTEND_LOG="${LOG_DIR}/frontend.log"
+RUNTIME_DIR=""
+UPLOAD_DIR=""
+TRACE_DIR=""
+LOG_DIR=""
+BACKEND_LOG=""
+FRONTEND_LOG=""
 BACKEND_PID=""
 FRONTEND_PID=""
 MODE="pytest"
@@ -111,6 +118,9 @@ Unicorn Graphengine Manual Test Runner
 
 Repo root:      ${REPO_ROOT}
 Graphengine:    ${GRAPHENGINE_DIR}
+Runtime dir:    ${RUNTIME_DIR}
+Upload dir:     ${UPLOAD_DIR}
+Trace dir:      ${TRACE_DIR}
 Backend log:    ${BACKEND_LOG}
 Frontend log:   ${FRONTEND_LOG}
 Frontend URL:   ${FRONTEND_URL}
@@ -149,6 +159,46 @@ When a failure happens, capture:
 EOF
 }
 
+prepare_manual_runtime() {
+  local candidate
+  local fixture
+  local taxonomy_file
+
+  RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/unicorn-graphengine-manual.XXXXXX")"
+  UPLOAD_DIR="${RUNTIME_DIR}/uploads"
+  TRACE_DIR="${RUNTIME_DIR}/logs/agent_trace"
+  LOG_DIR="${RUNTIME_DIR}/logs/services"
+  BACKEND_LOG="${LOG_DIR}/backend.log"
+  FRONTEND_LOG="${LOG_DIR}/frontend.log"
+
+  mkdir -p "${UPLOAD_DIR}" "${TRACE_DIR}" "${LOG_DIR}"
+
+  shopt -s nullglob
+  for fixture in "${DATASET_FIXTURE_DIR}"/*.bdamage.txt; do
+    cp "${fixture}" "${UPLOAD_DIR}/"
+  done
+  shopt -u nullglob
+
+  if [[ -z "${TEST_TAXONOMY_DIR}" ]]; then
+    for candidate in "${DATA_DIR}" "${TESTING_DIR}"; do
+      if [[ -f "${candidate}/nodes.dmp" && -f "${candidate}/names.dmp" ]]; then
+        TEST_TAXONOMY_DIR="${candidate}"
+        break
+      fi
+    done
+  fi
+
+  if [[ -n "${TEST_TAXONOMY_DIR}" ]]; then
+    for taxonomy_file in nodes.dmp names.dmp; do
+      if ! ln "${TEST_TAXONOMY_DIR}/${taxonomy_file}" "${UPLOAD_DIR}/${taxonomy_file}" 2>/dev/null; then
+        ln -s "${TEST_TAXONOMY_DIR}/${taxonomy_file}" "${UPLOAD_DIR}/${taxonomy_file}"
+      fi
+    done
+  else
+    echo "No test taxonomy found; upload nodes.dmp and names.dmp through the UI." >&2
+  fi
+}
+
 run_pytest() {
   require_file "${VENV_PYTHON}"
   cd "${GRAPHENGINE_DIR}"
@@ -165,8 +215,6 @@ run_manual() {
   require_file "${BACKEND_SCRIPT}"
   require_file "${CHECKLIST_FILE}"
 
-  mkdir -p "${LOG_DIR}"
-
   if port_in_use 8000; then
     echo "Port 8000 is already in use. Stop the existing backend before running this script." >&2
     exit 1
@@ -177,12 +225,17 @@ run_manual() {
     exit 1
   fi
 
+  prepare_manual_runtime
   print_banner
 
   echo "Starting backend with ${VENV_PYTHON} server_app.py"
   (
     cd "${GRAPHENGINE_DIR}"
-    exec "${VENV_PYTHON}" "${BACKEND_SCRIPT}"
+    exec env \
+      UNICORN_GRAPHENGINE_RUNTIME_DIR="${RUNTIME_DIR}" \
+      UNICORN_GRAPHENGINE_UPLOAD_DIR="${UPLOAD_DIR}" \
+      UNICORN_GRAPHENGINE_AGENT_TRACE_DIR="${TRACE_DIR}" \
+      "${VENV_PYTHON}" "${BACKEND_SCRIPT}"
   ) >"${BACKEND_LOG}" 2>&1 &
   BACKEND_PID=$!
 

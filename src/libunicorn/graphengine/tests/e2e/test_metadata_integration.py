@@ -1,5 +1,4 @@
 import os
-import shutil
 import socket
 import subprocess
 from pathlib import Path
@@ -24,18 +23,17 @@ def metadata_free_services(tmp_path: Path) -> Iterator[dict[str, str]]:
     frontend_port = str(_find_free_port())
     backend_url = f"http://127.0.0.1:{backend_port}/ping"
     frontend_url = f"http://127.0.0.1:{frontend_port}/index.html"
-    upload_dir = tmp_path / "uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir = tmp_path / "runtime"
+    upload_dir = runtime_dir / "uploads"
+    trace_dir = runtime_dir / "logs" / "agent_trace"
+    log_dir = tmp_path / "service_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
 
-    for source in (e2e_conftest.GRAPHENGINE_DIR / "uploads").iterdir():
-        if source.name == "metadata.txt":
-            continue
-        if source.is_file():
-            shutil.copy2(source, upload_dir / source.name)
+    e2e_conftest.seed_dataset_fixtures(upload_dir)
+    e2e_conftest.seed_taxonomy_fixtures(upload_dir)
 
-    e2e_conftest.TEST_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    backend_log = e2e_conftest.BACKEND_LOG.open("wb")
-    frontend_log = e2e_conftest.FRONTEND_LOG.open("wb")
+    backend_log = (log_dir / "backend.log").open("wb")
+    frontend_log = (log_dir / "frontend.log").open("wb")
 
     backend_process = subprocess.Popen(
         [str(e2e_conftest.VENV_PYTHON), str(e2e_conftest.BACKEND_SCRIPT)],
@@ -46,7 +44,9 @@ def metadata_free_services(tmp_path: Path) -> Iterator[dict[str, str]]:
             **os.environ,
             "PYTHONUNBUFFERED": "1",
             "UNICORN_GRAPHENGINE_PORT": backend_port,
+            "UNICORN_GRAPHENGINE_RUNTIME_DIR": str(runtime_dir),
             "UNICORN_GRAPHENGINE_UPLOAD_DIR": str(upload_dir),
+            "UNICORN_GRAPHENGINE_AGENT_TRACE_DIR": str(trace_dir),
         },
     )
     frontend_process = subprocess.Popen(
