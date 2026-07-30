@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,23 +13,22 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from unicorn_agent.routes import create_agent_router
 from unicorn_agent.runtime import create_agent_runtime
+from unicorn_backend.config import DEFAULT_RUNTIME_DIR, load_backend_config
 from unicorn_compute.barplot import build_count_matrix_barplot_spec
 from unicorn_compute.pcoa import build_count_matrix_pcoa_spec
 
 
-HOST = os.environ.get("UNICORN_GRAPHENGINE_HOST", "127.0.0.1")
-PORT = int(os.environ.get("UNICORN_GRAPHENGINE_PORT", "8000"))
-DEFAULT_RUNTIME_DIR = Path(__file__).resolve().parents[3] / "var" / "graphengine"
-RUNTIME_DIR = Path(
-    os.environ.get("UNICORN_GRAPHENGINE_RUNTIME_DIR", DEFAULT_RUNTIME_DIR)
-).expanduser().resolve()
-UPLOAD_DIR = Path(
-    os.environ.get("UNICORN_GRAPHENGINE_UPLOAD_DIR", RUNTIME_DIR / "uploads")
-).expanduser().resolve()
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-NODES_FILENAME = os.environ.get("UNICORN_GRAPHENGINE_NODES_FILE", "nodes.dmp")
-NAMES_FILENAME = os.environ.get("UNICORN_GRAPHENGINE_NAMES_FILE", "names.dmp")
-METADATA_FILENAME = "metadata.txt"
+BACKEND_CONFIG = load_backend_config()
+BACKEND_CONFIG.ensure_upload_dir()
+
+# Compatibility aliases remain until server_app.py becomes the thin entrypoint.
+HOST = BACKEND_CONFIG.host
+PORT = BACKEND_CONFIG.port
+RUNTIME_DIR = BACKEND_CONFIG.runtime_dir
+UPLOAD_DIR = BACKEND_CONFIG.upload_dir
+NODES_FILENAME = BACKEND_CONFIG.nodes_filename
+NAMES_FILENAME = BACKEND_CONFIG.names_filename
+METADATA_FILENAME = BACKEND_CONFIG.metadata_filename
 
 
 app = FastAPI(title="Unicorn Graph Engine Prototype API")
