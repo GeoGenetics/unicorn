@@ -18,6 +18,20 @@ from unicorn_backend.models import (
     TreeNodeModel,
 )
 from unicorn_backend.store import GraphEngineStore
+from unicorn_backend.tree import (
+    TreeServiceError,
+    build_lineage as _build_lineage,
+    collect_expandable_taxids as _collect_expandable_taxids_in_context,
+    dataset_breakdown as _dataset_breakdown,
+    filtered_child_count as _filtered_child_count,
+    node_passes_filter as _node_passes_filter,
+    normalize_taxids as _normalize_taxids,
+    require_node_present,
+    resolve_node_in_context,
+    resolve_selection_and_tree,
+    response_context as _response_context,
+    visible_tree_response,
+)
 from unicorn_compute.barplot import build_count_matrix_barplot_spec
 from unicorn_compute.pcoa import build_count_matrix_pcoa_spec
 
@@ -245,33 +259,23 @@ def _resolve_selection_and_tree(
     nodes_file: Optional[str],
     names_file: Optional[str],
 ) -> Tuple[SelectionModel, TaxonomyModel, TreeModel]:
-    available = STORE.list_files()
-    requested = _normalize_requested_files(files)
-    selected_names = requested if requested else sorted(path.name for path in available)
-    if not selected_names:
+    return _run_tree_service(
+        resolve_selection_and_tree,
+        STORE,
+        files,
+        nodes_file,
+        names_file,
+    )
+
+
+def _run_tree_service(operation, *args, **kwargs):
+    try:
+        return operation(*args, **kwargs)
+    except TreeServiceError as error:
         raise HTTPException(
-            status_code=400,
-            detail={"message": "No datasets selected for tree rendering."},
-        )
-    selection = STORE.build_selection(selected_names)
-    taxonomy = STORE.get_or_load_taxonomy(nodes_name=nodes_file, names_name=names_file)
-    tree = STORE.build_tree_model(selection, taxonomy)
-    return selection, taxonomy, tree
-
-
-def _response_context(
-    selection: SelectionModel,
-    taxonomy: TaxonomyModel,
-    min_reads: int,
-    expanded_taxids: List[int],
-) -> Dict[str, Any]:
-    return {
-        "dataset_names": list(selection.dataset_names),
-        "nodes_file": taxonomy.nodes_fileinfo.name,
-        "names_file": taxonomy.names_fileinfo.name if taxonomy.names_fileinfo else None,
-        "min_reads": min_reads,
-        "expanded_taxids": expanded_taxids,
-    }
+            status_code=error.status_code,
+            detail=error.detail,
+        ) from error
 
 
 def _error_detail(
@@ -291,76 +295,19 @@ def _error_detail(
     return detail
 
 
-def _node_passes_filter(node: TreeNodeModel, tree: TreeModel, min_reads: int) -> bool:
-    return node is tree.root or node.total >= max(0, min_reads)
-
-
-def _filtered_child_count(node: TreeNodeModel, min_reads: int) -> int:
-    threshold = max(0, min_reads)
-    return sum(1 for child in node.children if child.total >= threshold)
-
-
-def _build_lineage(node: TreeNodeModel, tree: TreeModel) -> List[Dict[str, Any]]:
-    lineage: List[Dict[str, Any]] = []
-    current: Optional[TreeNodeModel] = node
-    while current is not None:
-        lineage.append(
-            {
-                "taxid": current.taxid,
-                "name": current.name,
-                "rank": current.rank,
-            }
-        )
-        if current is tree.root or current.parent is None:
-            break
-        current = tree.root.find_taxid(current.parent)
-    lineage.reverse()
-    return lineage
-
-
-def _dataset_breakdown(selection: SelectionModel, node: TreeNodeModel) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    for index, dataset in enumerate(selection.datasets):
-        rows.append(
-            {
-                "dataset": dataset.fileinfo.name,
-                "direct": node.direct_by_source[index] if index < len(node.direct_by_source) else 0,
-                "subtree": node.total_by_source[index] if index < len(node.total_by_source) else 0,
-            }
-        )
-    return rows
-
-
 def _resolve_node_in_context(
     tree: TreeModel,
     taxid: int,
     min_reads: int,
     request_context: Dict[str, Any],
 ) -> TreeNodeModel:
-    node = tree.root.find_taxid(taxid)
-    if node is None:
-        raise HTTPException(
-            status_code=404,
-            detail=_error_detail(
-                "Requested node is not present in the active tree.",
-                code="node_not_in_active_tree",
-                request_context=request_context,
-                taxid=taxid,
-            ),
-        )
-    if not _node_passes_filter(node, tree, min_reads):
-        raise HTTPException(
-            status_code=409,
-            detail=_error_detail(
-                "Requested node exists in the active tree but is filtered out by the current min_reads threshold.",
-                code="node_filtered_out",
-                request_context=request_context,
-                taxid=taxid,
-                node_subtree_reads=node.total,
-                min_reads=min_reads,
-            ),
-        )
-    return node
+    return _run_tree_service(
+        resolve_node_in_context,
+        tree,
+        taxid,
+        min_reads,
+        request_context,
+    )
 
 
 def _table_rows_for_subtree(
@@ -418,23 +365,6 @@ def _top_children_rows(
     return rows[:limit]
 
 
-def _normalize_taxids(values: Optional[List[int]]) -> List[int]:
-    if not values:
-        return []
-    out: List[int] = []
-    seen: set[int] = set()
-    for value in values:
-        try:
-            taxid = int(value)
-        except (TypeError, ValueError):
-            continue
-        if taxid in seen:
-            continue
-        seen.add(taxid)
-        out.append(taxid)
-    return out
-
-
 def _selected_count_matrix_report(
     selection: "SelectionModel",
     selected_nodes: List["TreeNodeModel"],
@@ -475,22 +405,6 @@ def _selected_count_matrix_report(
     }
 
 
-def _collect_expandable_taxids_in_context(
-    node: TreeNodeModel,
-    tree: TreeModel,
-    min_reads: int,
-    expanded_taxids: set[int],
-) -> None:
-    eligible_children = [
-        child for child in node.children
-        if _node_passes_filter(child, tree, min_reads)
-    ]
-    if eligible_children:
-        expanded_taxids.add(node.taxid)
-    for child in eligible_children:
-        _collect_expandable_taxids_in_context(child, tree, min_reads, expanded_taxids)
-
-
 def _visible_tree_response(
     selection: SelectionModel,
     taxonomy: TaxonomyModel,
@@ -498,25 +412,15 @@ def _visible_tree_response(
     min_reads: int,
     expanded_taxids: set[int],
 ) -> Dict[str, Any]:
-    visible_tree, active_expanded_taxids = STORE.build_visible_tree_payload(
+    return _run_tree_service(
+        visible_tree_response,
+        STORE,
+        selection,
+        taxonomy,
         tree,
-        expanded_taxids=expanded_taxids,
-        min_reads=min_reads,
+        min_reads,
+        expanded_taxids,
     )
-    return {
-        "ok": True,
-        "datasets": [STORE.dataset_summary_payload(dataset) for dataset in selection.datasets],
-        "taxonomy": taxonomy.to_status_payload(),
-        "tree": visible_tree,
-        "missing_taxids": tree.missing_taxids,
-        "expanded_taxids": active_expanded_taxids,
-        "min_reads": min_reads,
-        "total_reads": selection.total_reads,
-        "direct_taxa": len(selection.direct_counts),
-        "request_context": _response_context(selection, taxonomy, min_reads, active_expanded_taxids),
-        "metadata": STORE.metadata_summary_payload(),
-        "cache": STORE.cache_status(),
-    }
 
 
 @app.get("/root-view")
@@ -543,16 +447,12 @@ def expand_node(
 ) -> Dict[str, Any]:
     selection, taxonomy, tree = _resolve_selection_and_tree(files, nodes_file, names_file)
     request_context = _response_context(selection, taxonomy, min_reads, sorted(set(expanded or [])))
-    if not tree.root.has_taxid(taxid):
-        raise HTTPException(
-            status_code=404,
-            detail=_error_detail(
-                "Requested node is not present in the active tree.",
-                code="node_not_in_active_tree",
-                request_context=request_context,
-                taxid=taxid,
-            ),
-        )
+    _run_tree_service(
+        require_node_present,
+        tree,
+        taxid,
+        request_context,
+    )
     requested_expanded_taxids = set(expanded or [])
     requested_expanded_taxids.add(taxid)
     return _visible_tree_response(selection, taxonomy, tree, min_reads, requested_expanded_taxids)
