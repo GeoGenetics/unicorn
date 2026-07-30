@@ -37,3 +37,4 @@ doc/*.pdf
 __pycache__/
 *.py[cod]
 logs/
+src/libunicorn/graphengine/run_server.sh
