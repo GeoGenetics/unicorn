@@ -65,6 +65,16 @@ def test_dataset_payloads_preserve_counts_and_optional_metadata() -> None:
     assert render_payload["counts"] == dataset.counts_payload
     assert render_payload["total_reads"] == 8
     assert summary_payload["metadata"] == {"group": "filtered"}
+    assert summary_payload["damage"] == {
+        "available": False,
+        "schema": None,
+        "taxa": 0,
+        "valid_taxa": 0,
+        "invalid_taxa": 0,
+        "count_scope": "direct",
+        "damage_scope": "subtree",
+    }
+    assert "damage" not in render_payload
     assert "counts" not in summary_payload
 
 

@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from unicorn_backend.damage_contract import (
+    BDAMAGE_COUNT_SCOPE,
+    BDAMAGE_DAMAGE_SCOPE,
+)
+
+
+def _json_safe_float(value: float) -> Optional[float]:
+    return value if math.isfinite(value) else None
 
 
 @dataclass(frozen=True)
@@ -74,6 +84,77 @@ class MetadataModel:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class DamagePosition:
+    position: int
+    k5: float
+    n5: float
+    k3: float
+    n3: float
+    dx5: float
+    dx3: float
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "position": self.position,
+            "k5": _json_safe_float(self.k5),
+            "n5": _json_safe_float(self.n5),
+            "k3": _json_safe_float(self.k3),
+            "n3": _json_safe_float(self.n3),
+            "dx5": _json_safe_float(self.dx5),
+            "dx3": _json_safe_float(self.dx3),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DamageProfile:
+    taxid: int
+    ct_frequency: float
+    ga_frequency: float
+    amplitude: float
+    decay: float
+    background: float
+    phi: float
+    zfit: float
+    fit_ct0: float
+    fit_ga0: float
+    nll: float
+    positions: Tuple[DamagePosition, ...]
+    fit_valid: bool
+    missing_fields: Tuple[str, ...]
+
+    @property
+    def count_scope(self) -> str:
+        return BDAMAGE_COUNT_SCOPE
+
+    @property
+    def damage_scope(self) -> str:
+        return BDAMAGE_DAMAGE_SCOPE
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "taxid": self.taxid,
+            "count_scope": self.count_scope,
+            "damage_scope": self.damage_scope,
+            "ct_frequency": _json_safe_float(self.ct_frequency),
+            "ga_frequency": _json_safe_float(self.ga_frequency),
+            "A": _json_safe_float(self.amplitude),
+            "q": _json_safe_float(self.decay),
+            "c": _json_safe_float(self.background),
+            "phi": _json_safe_float(self.phi),
+            "zfit": _json_safe_float(self.zfit),
+            "fit_ct0": _json_safe_float(self.fit_ct0),
+            "fit_ga0": _json_safe_float(self.fit_ga0),
+            "nll": _json_safe_float(self.nll),
+            "positions": [
+                position.to_payload()
+                for position in self.positions
+            ],
+            "fit_valid": self.fit_valid,
+            "missing_fields": list(self.missing_fields),
+        }
+
+
 @dataclass
 class DatasetModel:
     fileinfo: FileInfo
@@ -82,6 +163,34 @@ class DatasetModel:
     counts_payload: List[Dict[str, Any]]
     total_reads: int
     total_taxa: int
+    damage_by_taxid: Dict[int, DamageProfile] = field(default_factory=dict)
+    damage_schema: Optional[str] = None
+
+    @property
+    def damage_taxa(self) -> int:
+        return len(self.damage_by_taxid)
+
+    @property
+    def valid_damage_taxa(self) -> int:
+        return sum(
+            profile.fit_valid
+            for profile in self.damage_by_taxid.values()
+        )
+
+    @property
+    def invalid_damage_taxa(self) -> int:
+        return self.damage_taxa - self.valid_damage_taxa
+
+    def damage_summary_payload(self) -> Dict[str, Any]:
+        return {
+            "available": self.damage_schema is not None,
+            "schema": self.damage_schema,
+            "taxa": self.damage_taxa,
+            "valid_taxa": self.valid_damage_taxa,
+            "invalid_taxa": self.invalid_damage_taxa,
+            "count_scope": BDAMAGE_COUNT_SCOPE,
+            "damage_scope": BDAMAGE_DAMAGE_SCOPE,
+        }
 
     def to_render_payload(self) -> Dict[str, Any]:
         payload = self.fileinfo.to_payload()
@@ -103,6 +212,7 @@ class DatasetModel:
             {
                 "total_reads": self.total_reads,
                 "total_taxa": self.total_taxa,
+                "damage": self.damage_summary_payload(),
             }
         )
         if metadata is not None:

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from unicorn_backend.config import BackendConfig
 from unicorn_backend.models import FileInfo
 from unicorn_backend.store import GraphEngineStore
+from tests.unit.damage_helpers import damage_row, wide_bdamage_text
 
 
 def _config(upload_dir: Path, *, names_filename: str = "names.dmp") -> BackendConfig:
@@ -28,13 +29,10 @@ def _config(upload_dir: Path, *, names_filename: str = "names.dmp") -> BackendCo
 def store_fixture(tmp_path: Path) -> tuple[GraphEngineStore, Path, Path]:
     dataset = tmp_path / "sample.bdamage.txt"
     dataset.write_text(
-        "\n".join([
-            "#taxid\tcount\tname",
-            '10\t5\t"Clade A"',
-            '11\t3\t"Species A"',
-            '10\t2\t"Clade A"',
-        ])
-        + "\n",
+        wide_bdamage_text([
+            damage_row(10, 7, "Clade A"),
+            damage_row(11, 3, "Species A"),
+        ]),
         encoding="utf-8",
     )
     ignored = tmp_path / "ignored.txt"
@@ -74,7 +72,9 @@ def test_dataset_discovery_parsing_and_selection_cache(
 
     assert dataset.counts_map == {10: 7, 11: 3}
     assert dataset.total_reads == 10
-    assert dataset.total_taxa == 3
+    assert dataset.total_taxa == 2
+    assert dataset.damage_taxa == 2
+    assert dataset.valid_damage_taxa == 2
     assert selection.direct_counts == {10: 7, 11: 3}
     assert cached_selection is selection
     assert store.cache_status()["dataset_cache_entries"] == 1
@@ -90,7 +90,10 @@ def test_dataset_change_invalidates_selection_and_tree_caches(
     tree = store.build_tree_model(selection, taxonomy)
 
     dataset_path.write_text(
-        '10\t50\t"Clade A"\n11\t30\t"Species A"\n',
+        wide_bdamage_text([
+            damage_row(10, 50, "Clade A", A=0.25),
+            damage_row(11, 30, "Species A"),
+        ]),
         encoding="utf-8",
     )
     refreshed_selection = store.build_selection([dataset_path.name])
@@ -101,6 +104,12 @@ def test_dataset_change_invalidates_selection_and_tree_caches(
 
     assert refreshed_selection is not selection
     assert refreshed_selection.total_reads == 80
+    assert (
+        refreshed_selection.datasets[0]
+        .damage_by_taxid[10]
+        .amplitude
+        == 0.25
+    )
     assert refreshed_tree is not tree
     assert refreshed_tree.root.total == 80
 

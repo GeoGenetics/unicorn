@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import math
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
@@ -11,7 +12,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import HTTPException
 
 from unicorn_backend.config import BackendConfig
+from unicorn_backend.damage_contract import (
+    BDAMAGE_COLUMNS,
+    BDAMAGE_FIT_COLUMNS,
+    BDAMAGE_HEADER_COLUMNS,
+    BDAMAGE_POSITION_COLUMNS,
+    BDAMAGE_POSITION_COUNT,
+    BDAMAGE_SCHEMA_VERSION,
+)
 from unicorn_backend.models import (
+    DamagePosition,
+    DamageProfile,
     DatasetModel,
     FileInfo,
     MetadataModel,
@@ -24,6 +35,16 @@ from unicorn_backend.models import (
 
 
 LOGGER = logging.getLogger("unicorn.graphengine")
+
+_FIT_VALID_COLUMNS = (
+    "A",
+    "q",
+    "c",
+    "phi",
+    "fitCT0",
+    "fitGA0",
+    "nll",
+)
 
 
 def _error_detail(
@@ -74,6 +95,89 @@ def _file_info(path: Path) -> FileInfo:
             operation="stat",
             file_role="backend file",
         )
+
+
+def _raise_bdamage_error(
+    path: Path,
+    *,
+    code: str,
+    message: str,
+    line: Optional[int] = None,
+    **extra: Any,
+) -> None:
+    detail = _error_detail(
+        message,
+        code=code,
+        filename=path.name,
+        **extra,
+    )
+    if line is not None:
+        detail["line"] = line
+    raise HTTPException(status_code=400, detail=detail)
+
+
+def _parse_non_negative_integer(
+    path: Path,
+    *,
+    column: str,
+    raw_value: str,
+    line: int,
+) -> int:
+    try:
+        value = int(raw_value.strip())
+    except ValueError:
+        _raise_bdamage_error(
+            path,
+            code="invalid_bdamage_value",
+            message=(
+                f"Column {column!r} must contain a non-negative integer."
+            ),
+            line=line,
+            column=column,
+            value=raw_value,
+        )
+    if value < 0:
+        _raise_bdamage_error(
+            path,
+            code="invalid_bdamage_value",
+            message=(
+                f"Column {column!r} must contain a non-negative integer."
+            ),
+            line=line,
+            column=column,
+            value=raw_value,
+        )
+    return value
+
+
+def _parse_damage_float(
+    path: Path,
+    *,
+    column: str,
+    raw_value: str,
+    line: int,
+) -> float:
+    try:
+        value = float(raw_value.strip())
+    except ValueError:
+        _raise_bdamage_error(
+            path,
+            code="invalid_bdamage_value",
+            message=f"Column {column!r} must contain a floating-point value.",
+            line=line,
+            column=column,
+            value=raw_value,
+        )
+    if math.isinf(value):
+        _raise_bdamage_error(
+            path,
+            code="invalid_bdamage_value",
+            message=f"Column {column!r} does not support infinite values.",
+            line=line,
+            column=column,
+            value=raw_value,
+        )
+    return value
 
 
 class GraphEngineStore:
@@ -130,30 +234,241 @@ class GraphEngineStore:
         counts_map: Dict[int, int] = {}
         names_map: Dict[int, str] = {}
         counts_payload: List[Dict[str, Any]] = []
+        damage_by_taxid: Dict[int, DamageProfile] = {}
         total_reads = 0
-        total_taxa = 0
         try:
-            with path.open("r", encoding="utf-8") as handle:
-                for raw_line in handle:
-                    line = raw_line.strip()
-                    if not line or line.startswith("#"):
+            with path.open(
+                "r",
+                encoding="utf-8",
+                newline="",
+            ) as handle:
+                reader = csv.reader(
+                    handle,
+                    delimiter="\t",
+                    quotechar='"',
+                    strict=True,
+                )
+                raw_header: Optional[List[str]] = None
+                for row in reader:
+                    if not row or all(not value.strip() for value in row):
                         continue
-                    parts = line.split("\t")
-                    if len(parts) < 2:
-                        continue
-                    try:
-                        taxid = int(parts[0])
-                        count = int(parts[1])
-                    except ValueError:
-                        continue
-                    name = (
-                        "\t".join(parts[2:]).strip().strip('"')
-                        if len(parts) > 2
-                        else ""
+                    raw_header = list(row)
+                    break
+
+                if raw_header is None:
+                    _raise_bdamage_error(
+                        path,
+                        code="unsupported_bdamage_schema",
+                        message=(
+                            "Damage dataset is empty and does not contain "
+                            "the required 43-column header."
+                        ),
                     )
-                    clean_name = name or "NA"
-                    counts_map[taxid] = counts_map.get(taxid, 0) + count
-                    if clean_name != "NA" and taxid not in names_map:
+
+                normalized_header = [
+                    "taxid" if value == "#taxid" else value
+                    for value in raw_header
+                ]
+                if "#taxid" not in raw_header:
+                    _raise_bdamage_error(
+                        path,
+                        code="unsupported_bdamage_schema",
+                        message=(
+                            "Damage dataset header must identify taxids "
+                            "with the V1 '#taxid' column."
+                        ),
+                        line=reader.line_num,
+                        required_column="#taxid",
+                    )
+                if len(normalized_header) != len(set(normalized_header)):
+                    duplicates = sorted({
+                        column
+                        for column in normalized_header
+                        if normalized_header.count(column) > 1
+                    })
+                    _raise_bdamage_error(
+                        path,
+                        code="unsupported_bdamage_schema",
+                        message=(
+                            "Damage dataset header contains duplicate columns."
+                        ),
+                        line=reader.line_num,
+                        duplicate_columns=duplicates,
+                    )
+
+                missing = [
+                    column
+                    for column in BDAMAGE_COLUMNS
+                    if column not in normalized_header
+                ]
+                unknown = [
+                    column
+                    for column in normalized_header
+                    if column not in BDAMAGE_COLUMNS
+                ]
+                legacy_header = normalized_header == [
+                    "taxid",
+                    "count",
+                    "name",
+                ]
+                if legacy_header:
+                    _raise_bdamage_error(
+                        path,
+                        code="unsupported_bdamage_schema",
+                        message=(
+                            "Legacy three-column .bdamage.txt files are not "
+                            "supported. Regenerate this dataset with the "
+                            "current unicorn lca command."
+                        ),
+                        line=reader.line_num,
+                        required_columns=list(BDAMAGE_HEADER_COLUMNS),
+                    )
+                if unknown:
+                    _raise_bdamage_error(
+                        path,
+                        code="unsupported_bdamage_schema",
+                        message=(
+                            "Damage dataset header contains columns outside "
+                            "the supported Unicorn V1 schema."
+                        ),
+                        line=reader.line_num,
+                        unknown_columns=unknown,
+                    )
+                if missing:
+                    _raise_bdamage_error(
+                        path,
+                        code="missing_bdamage_columns",
+                        message=(
+                            "Damage dataset is missing required V1 columns."
+                        ),
+                        line=reader.line_num,
+                        missing_columns=missing,
+                    )
+                if len(normalized_header) != len(BDAMAGE_COLUMNS):
+                    _raise_bdamage_error(
+                        path,
+                        code="unsupported_bdamage_schema",
+                        message=(
+                            "Damage dataset header does not match the "
+                            "supported Unicorn V1 schema."
+                        ),
+                        line=reader.line_num,
+                    )
+
+                column_index = {
+                    column: index
+                    for index, column in enumerate(normalized_header)
+                }
+                for row in reader:
+                    if not row or all(not value.strip() for value in row):
+                        continue
+                    if len(row) != len(normalized_header):
+                        _raise_bdamage_error(
+                            path,
+                            code="invalid_bdamage_value",
+                            message=(
+                                "Damage dataset row has a different number "
+                                "of fields than its header."
+                            ),
+                            line=reader.line_num,
+                            expected_columns=len(normalized_header),
+                            actual_columns=len(row),
+                        )
+
+                    taxid = _parse_non_negative_integer(
+                        path,
+                        column="taxid",
+                        raw_value=row[column_index["taxid"]],
+                        line=reader.line_num,
+                    )
+                    count = _parse_non_negative_integer(
+                        path,
+                        column="count",
+                        raw_value=row[column_index["count"]],
+                        line=reader.line_num,
+                    )
+                    if taxid in damage_by_taxid:
+                        _raise_bdamage_error(
+                            path,
+                            code="duplicate_bdamage_taxid",
+                            message=(
+                                "Damage dataset contains more than one "
+                                f"profile for taxid {taxid}."
+                            ),
+                            line=reader.line_num,
+                            taxid=taxid,
+                        )
+
+                    clean_name = (
+                        row[column_index["name"]].strip()
+                        or "NA"
+                    )
+                    values = {
+                        column: _parse_damage_float(
+                            path,
+                            column=column,
+                            raw_value=row[column_index[column]],
+                            line=reader.line_num,
+                        )
+                        for column in (
+                            *BDAMAGE_FIT_COLUMNS,
+                            *BDAMAGE_POSITION_COLUMNS,
+                        )
+                    }
+                    positions = tuple(
+                        DamagePosition(
+                            position=position,
+                            k5=values[f"K5_{position}"],
+                            n5=values[f"N5_{position}"],
+                            k3=values[f"K3_{position}"],
+                            n3=values[f"N3_{position}"],
+                            dx5=values[f"Dx5_{position}"],
+                            dx3=values[f"Dx3_{position}"],
+                        )
+                        for position in range(BDAMAGE_POSITION_COUNT)
+                    )
+                    missing_fields = tuple(
+                        column
+                        for column, value in values.items()
+                        if not math.isfinite(value)
+                    )
+                    has_evidence = any(
+                        (
+                            math.isfinite(position.n5)
+                            and position.n5 > 0
+                        )
+                        or (
+                            math.isfinite(position.n3)
+                            and position.n3 > 0
+                        )
+                        for position in positions
+                    )
+                    fit_valid = (
+                        has_evidence
+                        and all(
+                            math.isfinite(values[column])
+                            for column in _FIT_VALID_COLUMNS
+                        )
+                    )
+                    damage_by_taxid[taxid] = DamageProfile(
+                        taxid=taxid,
+                        ct_frequency=values["CTfreq"],
+                        ga_frequency=values["GAfreq"],
+                        amplitude=values["A"],
+                        decay=values["q"],
+                        background=values["c"],
+                        phi=values["phi"],
+                        zfit=values["Zfit"],
+                        fit_ct0=values["fitCT0"],
+                        fit_ga0=values["fitGA0"],
+                        nll=values["nll"],
+                        positions=positions,
+                        fit_valid=fit_valid,
+                        missing_fields=missing_fields,
+                    )
+
+                    counts_map[taxid] = count
+                    if clean_name != "NA":
                         names_map[taxid] = clean_name
                     counts_payload.append(
                         {
@@ -163,12 +478,17 @@ class GraphEngineStore:
                         }
                     )
                     total_reads += count
-                    total_taxa += 1
         except PermissionError:
             _raise_filesystem_http_error(
                 path,
                 operation="read",
                 file_role="dataset file",
+            )
+        except csv.Error as error:
+            _raise_bdamage_error(
+                path,
+                code="invalid_bdamage_value",
+                message=f"Damage dataset is not valid TSV: {error}.",
             )
         return DatasetModel(
             fileinfo=fileinfo,
@@ -176,7 +496,9 @@ class GraphEngineStore:
             names_map=names_map,
             counts_payload=counts_payload,
             total_reads=total_reads,
-            total_taxa=total_taxa,
+            total_taxa=len(counts_map),
+            damage_by_taxid=damage_by_taxid,
+            damage_schema=BDAMAGE_SCHEMA_VERSION,
         )
 
     def _parse_nodes(self, path: Path) -> Dict[int, TaxonomyNode]:

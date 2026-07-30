@@ -18,6 +18,7 @@ from unicorn_backend.routers import core as core_routes
 from unicorn_backend.routers import reports as report_routes
 from unicorn_backend.routers import tree as tree_routes
 from unicorn_backend.store import GraphEngineStore
+from tests.unit.damage_helpers import damage_row, wide_bdamage_text
 
 
 @dataclass(frozen=True)
@@ -36,23 +37,19 @@ def backend_fixture(
     dataset_a = tmp_path / "sample_a.bdamage.txt"
     dataset_b = tmp_path / "sample_b.bdamage.txt"
     dataset_a.write_text(
-        "\n".join([
-            "#taxid\tcount\tname",
-            '10\t5\t"Clade A"',
-            '11\t3\t"Species A"',
-            '20\t2\t"Species B"',
-        ])
-        + "\n",
+        wide_bdamage_text([
+            damage_row(10, 5, "Clade A"),
+            damage_row(11, 3, "Species A"),
+            damage_row(20, 2, "Species B"),
+        ]),
         encoding="utf-8",
     )
     dataset_b.write_text(
-        "\n".join([
-            "#taxid\tcount\tname",
-            '10\t1\t"Clade A"',
-            '11\t7\t"Species A"',
-            '20\t4\t"Species B"',
-        ])
-        + "\n",
+        wide_bdamage_text([
+            damage_row(10, 1, "Clade A"),
+            damage_row(11, 7, "Species A"),
+            damage_row(20, 4, "Species B"),
+        ]),
         encoding="utf-8",
     )
     (tmp_path / "nodes.dmp").write_text(

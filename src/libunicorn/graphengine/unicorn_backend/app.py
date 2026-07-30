@@ -11,6 +11,7 @@ from unicorn_agent.tracing import JsonlTraceStore
 from unicorn_backend.config import BackendConfig, load_backend_config
 from unicorn_backend.routers.compute import create_compute_router
 from unicorn_backend.routers.core import create_core_router
+from unicorn_backend.routers.damage import create_damage_router
 from unicorn_backend.routers.reports import create_report_router
 from unicorn_backend.routers.tree import create_tree_router
 from unicorn_backend.store import GraphEngineStore
@@ -51,6 +52,7 @@ def create_app(config: BackendConfig | None = None) -> FastAPI:
     )
     application.include_router(create_tree_router(store=store))
     application.include_router(create_report_router(store=store))
+    application.include_router(create_damage_router(store=store))
     application.include_router(create_compute_router(store=store))
     application.add_middleware(
         CORSMiddleware,

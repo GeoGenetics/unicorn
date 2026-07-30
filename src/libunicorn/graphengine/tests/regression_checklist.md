@@ -85,6 +85,24 @@ Run this checklist after any non-trivial graphengine change.
 2. Confirm node labels and report views stay consistent.
 3. If a report is open, confirm it rerenders or stays valid.
 
+## Damage Flow
+
+1. Select exactly one node and confirm the `Damage` action becomes available.
+2. Open the damage popup and confirm observed 5-prime C-to-T and 3-prime
+   G-to-A points are visually distinct.
+3. Confirm valid fitted curves are visible and invalid fits retain only
+   observed evidence.
+4. Confirm missing profiles are labeled and are not drawn as zero-valued
+   series.
+5. Confirm direct read counts and cumulative subtree damage are labeled as
+   different scopes.
+6. Change the active metadata field and confirm popup labels and colors remain
+   consistent with the tree legend, barplot, and PCoA.
+7. Select multiple nodes and confirm Damage opens a compact taxon-by-dataset
+   table.
+8. Export normalized TSV and confirm it includes scope, metadata, observed
+   evidence, and fitted-value columns.
+
 
 ## Backend Agent Flow
 

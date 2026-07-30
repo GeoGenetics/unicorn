@@ -24,6 +24,8 @@ EXPECTED_ROUTES = {
     ("/root-view", frozenset({"GET"})),
     ("/expand-node", frozenset({"GET"})),
     ("/node-tooltip", frozenset({"GET"})),
+    ("/damage/node", frozenset({"POST"})),
+    ("/damage/selected", frozenset({"POST"})),
     ("/table-view", frozenset({"GET"})),
     ("/subtree-report", frozenset({"GET"})),
     ("/subtree-report", frozenset({"POST"})),

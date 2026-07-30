@@ -226,6 +226,79 @@ Notes:
 - `datasets` is a per-dataset direct/subtree breakdown
 - this is the remote source for graph hover and detailed node inspection
 
+#### `POST /damage/node`
+
+Purpose:
+- returns one backend-authoritative damage profile comparison for a taxid
+  across selected datasets
+
+JSON request:
+- `taxid` required
+- `files` required non-empty dataset filename list
+- `nodes_file`
+- `names_file`
+
+Response fields:
+- `ok`
+- `taxid`
+- `name`
+- `count_scope`
+- `damage_scope`
+- `datasets`
+- `request_context`
+
+Per-dataset fields:
+- `dataset`
+- `direct_count`
+- `profile_present`
+- `profile_status`
+  - `valid`, `invalid`, or `missing`
+- `fit_valid`
+- `missing_fields`
+- `observed`
+- `fit`
+
+Notes:
+- `direct_count` applies only to the exact taxid
+- observed and fitted damage applies to the taxid plus descendant evidence
+- profiles and fitted parameters remain separate per dataset
+- missing profiles are represented explicitly and never converted to zeros
+- non-finite producer values are returned as JSON `null`
+- dataset summaries expose only compact damage capability counts; tree,
+  report, and render payloads never include the full profile map
+
+#### `POST /damage/selected`
+
+Purpose:
+- returns a compact backend-authoritative damage comparison for multiple
+  selected taxids
+- resolves the active datasets and taxonomy once for the complete selection
+
+JSON request:
+- `taxids` required unique list containing 1 to 250 positive taxids
+- `files` required non-empty dataset filename list
+- `nodes_file`
+- `names_file`
+
+Response fields:
+- `ok`
+- `count_scope`
+- `damage_scope`
+- `nodes`
+- `request_context`
+
+Each `nodes` entry uses the same `taxid`, `name`, scope, and per-dataset
+profile fields returned by `POST /damage/node`. Repeated request context is
+omitted from individual nodes.
+
+Notes:
+- the endpoint is intended for compact selected-node tables and normalized
+  export
+- it does not aggregate datasets, metadata groups, or fitted parameters
+- selections larger than 250 taxids must be narrowed before requesting damage
+- requests larger than 5,000 taxon-by-dataset profiles are rejected with
+  `damage_selection_too_large`
+
 #### `GET /table-view`
 
 Purpose:

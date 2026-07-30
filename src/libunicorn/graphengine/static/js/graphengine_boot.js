@@ -12,11 +12,12 @@
     const treeRender = namespace.treeRender;
     const ui = namespace.ui;
     const selection = namespace.selection;
+    const damage = namespace.damage;
     const reports = namespace.reports;
     const agentUi = namespace.agentUi;
 
-    if (!state || !els || !backend || !metadata || !treeRender || !ui || !selection || !reports || !agentUi) {
-      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree render, UI, selection, reports, and Agent UI modules to load before boot.");
+    if (!state || !els || !backend || !metadata || !treeRender || !ui || !selection || !damage || !reports || !agentUi) {
+      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree render, UI, selection, damage, reports, and Agent UI modules to load before boot.");
     }
 
     els.renderBtn.onclick = async (event) => {
@@ -69,6 +70,9 @@
     }
     if (els.rankReportBtn) {
       els.rankReportBtn.addEventListener("click", reports.openSelectedRankReport);
+    }
+    if (els.damageBtn) {
+      els.damageBtn.addEventListener("click", damage.openSelectedDamage);
     }
     els.selectDescendantsBtn.addEventListener("click", selection.selectDescendants);
     if (els.selectToRankBtn) {

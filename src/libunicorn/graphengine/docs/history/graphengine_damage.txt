@@ -4,7 +4,7 @@ Graphengine Damage Integration
 Status
 ------
 
-PLANNING
+IN PROGRESS
 
 
 Objective
@@ -81,7 +81,7 @@ Deferred:
 Step 1: Freeze the Damage Input Contract
 ----------------------------------------
 
-Status: NOT STARTED
+Status: DONE
 
 Decision:
 
@@ -170,11 +170,27 @@ Definition of done:
 - legacy files fail cleanly;
 - no parser can silently absorb damage columns into `name`.
 
+Implementation notes:
+
+- added `unicorn_backend.damage_contract` as the machine-readable owner of the
+  V1 schema ID, exact columns, field categories, position layout, and scope
+  labels;
+- documented the complete input contract in
+  `docs/damage_input_contract.md`;
+- froze the 43-column producer order while requiring future parsing to resolve
+  fields by name and reject changed schemas;
+- froze direct-count and subtree-damage semantics;
+- froze NaN input and JSON-null output behavior;
+- froze legacy three-column rejection and structured error names;
+- added focused unit tests for schema identity, exact header uniqueness, field
+  categories, and producer position order;
+- intentionally left parser behavior unchanged for Step 2.
+
 
 Step 2: Add Schema-Aware Damage Parsing
 ---------------------------------------
 
-Status: NOT STARTED
+Status: DONE
 
 Current problem:
 
@@ -274,11 +290,35 @@ Definition of done:
 - damage profiles are retained without lossy string conversion;
 - invalid fits remain distinguishable from zero damage.
 
+Implementation notes:
+
+- added typed `DamagePosition` and `DamageProfile` backend models;
+- extended `DatasetModel` with the parsed schema, per-taxid damage profiles,
+  and valid/invalid damage profile counts;
+- replaced the permissive three-column parser with exact V1 header
+  validation and header-name-based field resolution;
+- parse direct counts, taxon names, fitted parameters, and five positional
+  damage records independently;
+- reject missing/unknown/duplicate columns, invalid numeric values, infinite
+  values, duplicate taxids, and legacy three-column files with structured
+  errors;
+- preserve producer `nan` internally, record missing fields, and convert
+  non-finite values to JSON `null` in model payloads;
+- derive conservative `fit_valid` state from finite fit outputs and nonzero
+  N5/N3 evidence without inventing a scientific threshold;
+- retained existing file-fingerprint cache invalidation and added coverage
+  proving changed damage values invalidate dependent caches;
+- converted bundled E2E datasets to synthetic 43-column fixtures while
+  preserving their original taxids, names, and direct counts;
+- added focused parser tests for valid wide input, quoted names, reordered
+  columns, fractional evidence, NaN handling, invalid fits, malformed values,
+  duplicates, legacy rejection, and direct-count totals.
+
 
 Step 3: Make the Backend Own Damage State
 -----------------------------------------
 
-Status: NOT STARTED
+Status: DONE
 
 Dataset summaries should expose capability information without dumping every
 profile:
@@ -390,11 +430,36 @@ Definition of done:
 - profile absence and invalidity are explicit;
 - normal Graphengine payloads do not become unnecessarily large.
 
+Implementation notes:
+
+- added `DatasetModel.damage_summary_payload()` and included only this compact
+  capability block in dataset summary responses;
+- kept raw per-taxid profiles out of render, tree, report, barplot, and PCoA
+  payloads;
+- added `unicorn_backend.damage` as the owner of node damage response
+  construction and JSON-safe observed/fitted normalization;
+- added `POST /damage/node` through a dedicated Pydantic request model and
+  thin damage router;
+- registered the damage router through the backend application factory;
+- return per-dataset `valid`, `invalid`, or `missing` profile state, direct
+  count, observed frequencies/evidence, fit parameters, positional curves,
+  and missing-field details;
+- validate the requested taxid against the active backend-induced tree and
+  resolve datasets/taxonomy through the existing authoritative store;
+- used the producer-generated `example43.bdamage.txt` fixture to confirm real
+  fractional values, scientific notation, and NaN handling;
+- refined `fit_valid` so a missing `Zfit` diagnostic does not invalidate an
+  otherwise finite fit with usable evidence;
+- excluded the large producer fixture from normal E2E dataset seeding so it
+  does not silently alter existing two-sample browser scenarios;
+- added focused service, route, capability-summary, producer-fixture, error,
+  scope, and strict-JSON regression coverage.
+
 
 Step 4: Add the First Damage Visualization
 ------------------------------------------
 
-Status: NOT STARTED
+Status: DONE
 
 First UI slice:
 
@@ -443,11 +508,40 @@ Definition of done:
 - colors and labels agree with existing Graphengine visualizations;
 - direct counts and subtree damage cannot be mistaken for the same scope.
 
+Implementation notes:
+
+- added a `Damage` report action that is enabled only when the backend tree is
+  ready and exactly one node is selected;
+- added `graphengine_damage.js` as the sole frontend owner of damage requests,
+  Plotly trace construction, popup rendering, and damage-specific client-log
+  events;
+- request only the selected taxid and active backend dataset/taxonomy scope
+  through `POST /damage/node`;
+- reused `getSelectedResolvedMetadataDisplays()` for the exact dataset labels
+  and colors already consumed by the tree, barplot, and PCoA;
+- render observed 5-prime C-to-T and 3-prime G-to-A evidence as distinct
+  marker shapes, with evidence depth in hover details;
+- render fitted `Dx5` and `Dx3` curves as solid and dashed lines only when the
+  backend marks the fit valid;
+- keep missing datasets out of the plot and show invalid/missing states in
+  per-dataset summary cards instead of manufacturing zero-valued profiles;
+- show direct read counts and cumulative subtree damage as separate scope
+  badges with an explicit warning;
+- expose `A`, `q`, `c`, `phi`, `Zfit`, and `nll` for each present profile;
+- added focused E2E coverage in
+  `tests/e2e/test_damage_visualization.py`.
+
+Regression command:
+
+```bash
+./run_tests.sh -s tests/e2e/test_damage_visualization.py
+```
+
 
 Step 5: Export and Multi-Node Follow-Up
 ---------------------------------------
 
-Status: NOT STARTED
+Status: DONE
 
 After the one-node view is stable:
 
@@ -468,11 +562,45 @@ damage.compare_metadata
 
 These are not part of the first integration pass.
 
+Implemented first follow-up slice:
+
+- added `POST /damage/selected` for 1 to 250 unique selected taxids;
+- reject requests above 5,000 taxon-by-dataset profiles before constructing
+  the response;
+- resolve active datasets and taxonomy once per multi-node request;
+- preserve the single-node `POST /damage/node` and plot behavior;
+- enable the Damage action for one or more selected nodes;
+- render multiple selected nodes as a compact taxon-by-dataset table;
+- keep direct count, cumulative damage, profile validity, and per-dataset fit
+  values explicit in the table;
+- reuse shared metadata labels and colors in both the one-node and multi-node
+  views;
+- add one normalized long-form TSV serializer shared by both views;
+- export one row per taxon, dataset, and terminal position, including metadata,
+  scope, observed evidence, fit parameters, and fitted positional values;
+- add backend contract/guardrail tests and E2E table/export coverage.
+
+Explicitly deferred:
+
+- small-multiple damage plots for multiple nodes;
+- metadata-group aggregation or comparison statistics;
+- user-configurable fit-quality filtering;
+- read-only Agent damage tools.
+
+Focused regression commands:
+
+```bash
+./run_tests.sh -s tests/unit/test_backend_damage.py \
+  tests/unit/test_backend_app.py
+
+./run_tests.sh -s tests/e2e/test_damage_visualization.py
+```
+
 
 Step 6: Regression and Migration Gate
 -------------------------------------
 
-Status: NOT STARTED
+Status: DONE
 
 Required unit coverage:
 
@@ -509,6 +637,37 @@ Definition of done:
 - old files fail with actionable errors;
 - current files expose damage without changing count behavior;
 - manual browser inspection confirms the damage view is scientifically clear.
+
+Implementation notes:
+
+- replaced bundled runtime test datasets with valid V1 wide fixtures and kept
+  the producer-generated `example43.bdamage.txt` as a parser/upload fixture;
+- retain no legacy three-column runtime fixture; strict rejection is generated
+  and asserted in the parser tests;
+- cover wide parsing, model state, cache invalidation, backend service, route
+  errors, scope labels, and strict JSON serialization in focused unit tests;
+- cover real wide-file upload and tree rendering in the browser;
+- inspect popup Plotly data to require distinct observed marker and fitted-line
+  traces;
+- exercise mixed valid/missing profiles without hiding the valid dataset;
+- compare damage legend labels and colors directly with the shared metadata
+  resolver before and after changing the active metadata field;
+- retain count matrix, barplot, and PCoA regression coverage in
+  `tests/e2e/test_selection_reports.py`;
+- document the supported wide schema, direct-count versus subtree-damage
+  scopes, visualization workflow, and actionable legacy rejection in the main
+  README and `docs/damage_input_contract.md`.
+
+Focused regression commands:
+
+```bash
+./run_tests.sh -s tests/unit/test_backend_damage_contract.py \
+  tests/unit/test_backend_damage_parsing.py \
+  tests/unit/test_backend_damage.py
+
+./run_tests.sh -s tests/e2e/test_damage_visualization.py \
+  tests/e2e/test_selection_reports.py
+```
 
 
 Deferred Unicorn LCA Work

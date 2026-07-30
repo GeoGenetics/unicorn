@@ -23,11 +23,18 @@ VENV_PYTHON = GRAPHENGINE_DIR / ".venv" / "bin" / "python"
 BACKEND_SCRIPT = GRAPHENGINE_DIR / "server_app.py"
 DATASET_FIXTURE_DIR = GRAPHENGINE_DIR / "tests" / "fixtures" / "datasets"
 TEST_TAXONOMY_DIR_ENV = "UNICORN_GRAPHENGINE_TEST_TAXONOMY_DIR"
+PARSER_ONLY_DATASET_FIXTURES = {
+    "example43.bdamage.txt",
+}
 
 
 def seed_dataset_fixtures(upload_dir: Path) -> None:
     upload_dir.mkdir(parents=True, exist_ok=True)
-    fixtures = sorted(DATASET_FIXTURE_DIR.glob("*.bdamage.txt"))
+    fixtures = sorted(
+        path
+        for path in DATASET_FIXTURE_DIR.glob("*.bdamage.txt")
+        if path.name not in PARSER_ONLY_DATASET_FIXTURES
+    )
     if not fixtures:
         pytest.fail(f"No graphengine dataset fixtures found in {DATASET_FIXTURE_DIR}")
     for source in fixtures:

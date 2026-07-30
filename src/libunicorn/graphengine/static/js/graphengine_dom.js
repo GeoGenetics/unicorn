@@ -43,6 +43,7 @@
     uncollapseTipsBtn: document.getElementById("uncollapseTipsBtn"),
     subtreeReportBtn: document.getElementById("subtreeReportBtn"),
     rankReportBtn: document.getElementById("rankReportBtn"),
+    damageBtn: document.getElementById("damageBtn"),
     selectDescendantsBtn: document.getElementById("selectDescendantsBtn"),
     selectToRankBtn: document.getElementById("selectToRankBtn"),
     selectToRankValue: document.getElementById("selectToRankValue"),

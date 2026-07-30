@@ -989,6 +989,9 @@
     els.toggleTableBtn.disabled = !backendTreeReady;
     els.subtreeReportBtn.disabled = !backendTreeReady;
     els.rankReportBtn.disabled = !backendTreeReady;
+    if (els.damageBtn) {
+      els.damageBtn.disabled = !backendTreeReady || !hasSelection;
+    }
     els.selectDescendantsBtn.disabled = !backendTreeReady || !hasSelection;
     if (els.selectToRankBtn) {
       els.selectToRankBtn.disabled = !backendTreeReady || !hasSelection || !hasTargetRank;
