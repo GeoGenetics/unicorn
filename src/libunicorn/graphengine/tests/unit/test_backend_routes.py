@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -81,7 +81,18 @@ def backend_fixture(
     monkeypatch.setattr(server_app, "NODES_FILENAME", "nodes.dmp")
     monkeypatch.setattr(server_app, "NAMES_FILENAME", "names.dmp")
     monkeypatch.setattr(server_app, "METADATA_FILENAME", "metadata.txt")
-    monkeypatch.setattr(server_app, "STORE", server_app.GraphEngineStore())
+    store_config = replace(
+        server_app.BACKEND_CONFIG,
+        upload_dir=tmp_path,
+        nodes_filename="nodes.dmp",
+        names_filename="names.dmp",
+        metadata_filename="metadata.txt",
+    )
+    monkeypatch.setattr(
+        server_app,
+        "STORE",
+        server_app.GraphEngineStore(config=store_config),
+    )
 
     return BackendFixture(
         upload_dir=tmp_path,
@@ -587,4 +598,3 @@ def test_representative_backend_errors_are_frozen(
         status_code=400,
         code="invalid_barplot_request",
     )
-
