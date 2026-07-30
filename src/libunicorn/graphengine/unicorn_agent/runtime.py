@@ -68,7 +68,11 @@ class BackendAgentRuntime:
 def create_agent_runtime(
     *,
     store: BackendContextStore,
+    trace_store: JsonlTraceStore | None = None,
 ) -> BackendAgentRuntime:
-    """Create the request-scoped live-provider Phase 10 runtime."""
+    """Create the backend-owned Agent runtime."""
 
-    return BackendAgentRuntime(store=store)
+    return BackendAgentRuntime(
+        store=store,
+        trace_store=trace_store,
+    )

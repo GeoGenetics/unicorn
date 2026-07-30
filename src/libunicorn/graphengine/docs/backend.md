@@ -66,8 +66,9 @@ Configuration precedence:
   `UNICORN_GRAPHENGINE_NAMES_FILE` select taxonomy filenames or explicit
   paths.
 
-The upload directory is created when `server_app.py` is imported. Tests set
-all runtime path variables to temporary directories before importing the app.
+The upload directory is created by `unicorn_backend.app.create_app()`.
+`server_app.py` only re-exports the production application for compatibility.
+Tests inject temporary runtime configuration when constructing isolated apps.
 
 
 ## Shared request context

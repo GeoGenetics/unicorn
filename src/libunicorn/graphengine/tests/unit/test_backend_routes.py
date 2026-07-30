@@ -2,27 +2,36 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
+from functools import partial
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi import HTTPException
 from starlette.datastructures import UploadFile
 
-import server_app
+from unicorn_backend.config import BackendConfig, load_backend_config
+from unicorn_backend.routers import compute as compute_routes
+from unicorn_backend.routers import core as core_routes
+from unicorn_backend.routers import reports as report_routes
+from unicorn_backend.routers import tree as tree_routes
+from unicorn_backend.store import GraphEngineStore
 
 
 @dataclass(frozen=True)
 class BackendFixture:
     upload_dir: Path
     dataset_names: list[str]
+    config: BackendConfig
+    store: GraphEngineStore
+    api: SimpleNamespace
 
 
 @pytest.fixture()
 def backend_fixture(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> BackendFixture:
     dataset_a = tmp_path / "sample_a.bdamage.txt"
     dataset_b = tmp_path / "sample_b.bdamage.txt"
@@ -77,26 +86,62 @@ def backend_fixture(
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(server_app, "UPLOAD_DIR", tmp_path)
-    monkeypatch.setattr(server_app, "NODES_FILENAME", "nodes.dmp")
-    monkeypatch.setattr(server_app, "NAMES_FILENAME", "names.dmp")
-    monkeypatch.setattr(server_app, "METADATA_FILENAME", "metadata.txt")
     store_config = replace(
-        server_app.BACKEND_CONFIG,
+        load_backend_config(environ={}, repository_root=tmp_path),
+        runtime_dir=tmp_path,
         upload_dir=tmp_path,
+        agent_trace_dir=tmp_path / "logs" / "agent_trace",
         nodes_filename="nodes.dmp",
         names_filename="names.dmp",
         metadata_filename="metadata.txt",
     )
-    monkeypatch.setattr(
-        server_app,
-        "STORE",
-        server_app.GraphEngineStore(config=store_config),
+    store = GraphEngineStore(config=store_config)
+    api = SimpleNamespace(
+        ping=partial(core_routes.ping, store=store, config=store_config),
+        upload=partial(core_routes.upload, store=store, config=store_config),
+        upload_metadata=partial(
+            core_routes.upload_metadata,
+            store=store,
+            config=store_config,
+        ),
+        metadata_status=partial(core_routes.metadata_status, store=store),
+        list_datasets=partial(core_routes.list_datasets, store=store),
+        taxonomy_status=partial(core_routes.taxonomy_status, store=store),
+        model_status=partial(
+            core_routes.model_status,
+            store=store,
+            config=store_config,
+        ),
+        render_data=partial(core_routes.render_data, store=store),
+        tree_model=partial(core_routes.tree_model, store=store),
+        root_view=partial(tree_routes.root_view, store=store),
+        expand_node=partial(tree_routes.expand_node, store=store),
+        node_tooltip=partial(tree_routes.node_tooltip, store=store),
+        uncollapse_to_tips=partial(
+            tree_routes.uncollapse_to_tips,
+            store=store,
+        ),
+        table_view=partial(report_routes.table_view, store=store),
+        subtree_report=partial(report_routes.subtree_report, store=store),
+        subtree_report_post=partial(
+            report_routes.subtree_report_post,
+            store=store,
+        ),
+        rank_report=partial(report_routes.rank_report, store=store),
+        rank_report_post=partial(
+            report_routes.rank_report_post,
+            store=store,
+        ),
+        compute_barplot=partial(compute_routes.compute_barplot, store=store),
+        compute_pcoa=partial(compute_routes.compute_pcoa, store=store),
     )
 
     return BackendFixture(
         upload_dir=tmp_path,
         dataset_names=[dataset_a.name, dataset_b.name],
+        config=store_config,
+        store=store,
+        api=api,
     )
 
 
@@ -122,7 +167,7 @@ def _assert_http_error(
 def test_core_status_and_dataset_contracts(
     backend_fixture: BackendFixture,
 ) -> None:
-    ping = server_app.ping()
+    ping = backend_fixture.api.ping()
     _assert_exact_keys(
         ping,
         {
@@ -149,7 +194,7 @@ def test_core_status_and_dataset_contracts(
     assert ping["metadata"]["matched_rows"] == 2
     assert ping["metadata"]["unmatched_rows"] == 1
 
-    datasets = server_app.list_datasets()
+    datasets = backend_fixture.api.list_datasets()
     _assert_exact_keys(datasets, {"ok", "datasets", "metadata"})
     assert [entry["filename"] for entry in datasets["datasets"]] == (
         backend_fixture.dataset_names
@@ -160,7 +205,7 @@ def test_core_status_and_dataset_contracts(
         "site": "alpha",
     }
 
-    metadata = server_app.metadata_status()
+    metadata = backend_fixture.api.metadata_status()
     assert metadata == {
         "ok": True,
         "metadata": datasets["metadata"],
@@ -170,14 +215,17 @@ def test_core_status_and_dataset_contracts(
 def test_taxonomy_model_render_and_tree_contracts(
     backend_fixture: BackendFixture,
 ) -> None:
-    taxonomy = server_app.taxonomy_status(nodes_file=None, names_file=None)
+    taxonomy = backend_fixture.api.taxonomy_status(
+        nodes_file=None,
+        names_file=None,
+    )
     _assert_exact_keys(taxonomy, {"ok", "taxonomy", "cache"})
     assert taxonomy["taxonomy"]["node_count"] == 4
     assert taxonomy["taxonomy"]["name_count"] == 4
     assert taxonomy["taxonomy"]["nodes_file"]["filename"] == "nodes.dmp"
     assert taxonomy["taxonomy"]["names_file"]["filename"] == "names.dmp"
 
-    model = server_app.model_status(
+    model = backend_fixture.api.model_status(
         files=backend_fixture.dataset_names,
         nodes_file=None,
         names_file=None,
@@ -208,7 +256,9 @@ def test_taxonomy_model_render_and_tree_contracts(
         "missing_taxid_examples": [],
     }
 
-    render = server_app.render_data(files=backend_fixture.dataset_names)
+    render = backend_fixture.api.render_data(
+        files=backend_fixture.dataset_names,
+    )
     _assert_exact_keys(
         render,
         {
@@ -223,7 +273,7 @@ def test_taxonomy_model_render_and_tree_contracts(
     assert render["total_taxa"] == 6
     assert render["direct_taxa"] == 3
 
-    tree = server_app.tree_model(
+    tree = backend_fixture.api.tree_model(
         files=backend_fixture.dataset_names,
         nodes_file=None,
         names_file=None,
@@ -253,7 +303,7 @@ def test_dataset_and_metadata_upload_contracts(
         BytesIO(b'30\t9\t"Uploaded Species"\n'),
         filename="../../uploaded.bdamage.txt",
     )
-    uploaded = asyncio.run(server_app.upload(dataset_upload))
+    uploaded = asyncio.run(backend_fixture.api.upload(dataset_upload))
     assert uploaded == {
         "ok": True,
         "filename": "uploaded.bdamage.txt",
@@ -274,7 +324,9 @@ def test_dataset_and_metadata_upload_contracts(
         ),
         filename="replacement.tsv",
     )
-    result = asyncio.run(server_app.upload_metadata(metadata_upload))
+    result = asyncio.run(
+        backend_fixture.api.upload_metadata(metadata_upload)
+    )
     _assert_exact_keys(result, {"ok", "metadata", "saved_to"})
     assert result["metadata"]["filename"] == "metadata.txt"
     assert result["metadata"]["fields"] == ["cohort"]
@@ -292,7 +344,9 @@ def test_invalid_metadata_upload_is_structured_and_removed(
         filename="invalid.tsv",
     )
     detail = _assert_http_error(
-        lambda: asyncio.run(server_app.upload_metadata(invalid_upload)),
+        lambda: asyncio.run(
+            backend_fixture.api.upload_metadata(invalid_upload)
+        ),
         status_code=400,
         code="metadata_missing_dataset_column",
     )
@@ -305,7 +359,7 @@ def test_invalid_metadata_upload_is_structured_and_removed(
 def test_visible_tree_expansion_tooltip_and_table_contracts(
     backend_fixture: BackendFixture,
 ) -> None:
-    root = server_app.root_view(
+    root = backend_fixture.api.root_view(
         files=backend_fixture.dataset_names,
         nodes_file=None,
         names_file=None,
@@ -334,7 +388,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
     assert [child["taxid"] for child in root["tree"]["children"]] == [10, 20]
     assert root["expanded_taxids"] == []
 
-    expanded = server_app.expand_node(
+    expanded = backend_fixture.api.expand_node(
         taxid=10,
         files=backend_fixture.dataset_names,
         nodes_file=None,
@@ -349,7 +403,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
     )
     assert [child["taxid"] for child in clade["children"]] == [11]
 
-    tooltip = server_app.node_tooltip(
+    tooltip = backend_fixture.api.node_tooltip(
         taxid=10,
         files=backend_fixture.dataset_names,
         nodes_file=None,
@@ -363,7 +417,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
     assert [entry["taxid"] for entry in tooltip["node"]["lineage"]] == [1, 10]
     assert [entry["direct"] for entry in tooltip["node"]["datasets"]] == [5, 1]
 
-    table = server_app.table_view(
+    table = backend_fixture.api.table_view(
         scope="root",
         taxid=None,
         files=backend_fixture.dataset_names,
@@ -389,7 +443,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
     assert table["row_count"] == 3
     assert [row["taxid"] for row in table["rows"]] == [11, 10, 20]
 
-    uncollapsed = server_app.uncollapse_to_tips({
+    uncollapsed = backend_fixture.api.uncollapse_to_tips({
         "taxids": [10],
         "files": backend_fixture.dataset_names,
         "nodes_file": None,
@@ -403,7 +457,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
 def test_get_and_post_report_contracts_match(
     backend_fixture: BackendFixture,
 ) -> None:
-    subtree_get = server_app.subtree_report(
+    subtree_get = backend_fixture.api.subtree_report(
         taxid=None,
         taxids=[10, 20],
         files=backend_fixture.dataset_names,
@@ -411,7 +465,7 @@ def test_get_and_post_report_contracts_match(
         names_file=None,
         min_reads=0,
     )
-    subtree_post = server_app.subtree_report_post({
+    subtree_post = backend_fixture.api.subtree_report_post({
         "taxids": [10, 20],
         "files": backend_fixture.dataset_names,
         "min_reads": 0,
@@ -438,14 +492,14 @@ def test_get_and_post_report_contracts_match(
         },
     ]
 
-    rank_get = server_app.rank_report(
+    rank_get = backend_fixture.api.rank_report(
         taxids=[11, 20],
         files=backend_fixture.dataset_names,
         nodes_file=None,
         names_file=None,
         min_reads=0,
     )
-    rank_post = server_app.rank_report_post({
+    rank_post = backend_fixture.api.rank_report_post({
         "taxids": [11, 20],
         "files": backend_fixture.dataset_names,
         "min_reads": 0,
@@ -479,7 +533,7 @@ def test_barplot_and_pcoa_compute_contracts(
         "min_reads": 0,
         "count_mode": "direct",
     }
-    barplot = server_app.compute_barplot({
+    barplot = backend_fixture.api.compute_barplot({
         **common_payload,
         "dataset_colors": {
             "sample_a.bdamage.txt": "#112233",
@@ -494,7 +548,7 @@ def test_barplot_and_pcoa_compute_contracts(
         [1, 4],
     ]
 
-    pcoa = server_app.compute_pcoa({
+    pcoa = backend_fixture.api.compute_pcoa({
         **common_payload,
         "distance_metric": "bray_curtis",
     })
@@ -515,7 +569,9 @@ def test_representative_backend_errors_are_frozen(
     backend_fixture: BackendFixture,
 ) -> None:
     missing_dataset = _assert_http_error(
-        lambda: server_app.render_data(files=["missing.bdamage.txt"]),
+        lambda: backend_fixture.api.render_data(
+            files=["missing.bdamage.txt"]
+        ),
         status_code=404,
     )
     assert missing_dataset == {
@@ -524,7 +580,7 @@ def test_representative_backend_errors_are_frozen(
     }
 
     missing_taxonomy = _assert_http_error(
-        lambda: server_app.taxonomy_status(
+        lambda: backend_fixture.api.taxonomy_status(
             nodes_file="missing.dmp",
             names_file=None,
         ),
@@ -536,7 +592,7 @@ def test_representative_backend_errors_are_frozen(
     }
 
     invalid_taxid = _assert_http_error(
-        lambda: server_app.expand_node(
+        lambda: backend_fixture.api.expand_node(
             taxid=999,
             files=backend_fixture.dataset_names,
             nodes_file=None,
@@ -550,7 +606,7 @@ def test_representative_backend_errors_are_frozen(
     assert invalid_taxid["taxid"] == 999
 
     filtered_taxid = _assert_http_error(
-        lambda: server_app.node_tooltip(
+        lambda: backend_fixture.api.node_tooltip(
             taxid=20,
             files=backend_fixture.dataset_names,
             nodes_file=None,
@@ -564,7 +620,7 @@ def test_representative_backend_errors_are_frozen(
     assert filtered_taxid["min_reads"] == 7
 
     _assert_http_error(
-        lambda: server_app.table_view(
+        lambda: backend_fixture.api.table_view(
             scope="invalid",
             taxid=None,
             files=backend_fixture.dataset_names,
@@ -578,7 +634,7 @@ def test_representative_backend_errors_are_frozen(
         code="invalid_scope",
     )
     _assert_http_error(
-        lambda: server_app.subtree_report(
+        lambda: backend_fixture.api.subtree_report(
             taxid=None,
             taxids=None,
             files=backend_fixture.dataset_names,
@@ -590,7 +646,7 @@ def test_representative_backend_errors_are_frozen(
         code="missing_taxids",
     )
     _assert_http_error(
-        lambda: server_app.compute_barplot({
+        lambda: backend_fixture.api.compute_barplot({
             "taxids": [10],
             "files": backend_fixture.dataset_names,
             "count_mode": "invalid",

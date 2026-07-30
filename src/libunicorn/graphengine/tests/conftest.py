@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 
-# Set runtime paths before test modules import server_app or tracing.
+# Set runtime paths before test modules import the application or tracing.
 _TEST_RUNTIME = TemporaryDirectory(prefix="unicorn-graphengine-pytest-")
 _RUNTIME_DIR = Path(_TEST_RUNTIME.name)
 

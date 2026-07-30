@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-import server_app
+from unicorn_backend.app import app
 from unicorn_backend.config import (
     DEFAULT_NAMES_FILENAME,
     DEFAULT_NODES_FILENAME,
@@ -103,14 +103,9 @@ def test_invalid_port_fails_during_configuration_loading() -> None:
         )
 
 
-def test_server_app_exposes_configuration_compatibility_aliases() -> None:
-    config = server_app.BACKEND_CONFIG
+def test_application_owns_the_resolved_backend_configuration() -> None:
+    config = app.state.backend_config
 
-    assert server_app.HOST == config.host
-    assert server_app.PORT == config.port
-    assert server_app.RUNTIME_DIR == config.runtime_dir
-    assert server_app.UPLOAD_DIR == config.upload_dir
-    assert server_app.NODES_FILENAME == config.nodes_filename
-    assert server_app.NAMES_FILENAME == config.names_filename
-    assert server_app.METADATA_FILENAME == config.metadata_filename
-    assert server_app.UPLOAD_DIR.is_dir()
+    assert app.state.graphengine_store.config is config
+    assert app.state.agent_runtime._store is app.state.graphengine_store
+    assert config.upload_dir.is_dir()

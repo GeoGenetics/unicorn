@@ -1,0 +1,145 @@
+Migration Order
+1. Runtime hygiene - DONE
+   Move test datasets into tests/fixtures/datasets/.
+   Make tests use temporary upload and log directories.
+   Stop tracking generated test logs.
+   Ignore root log files and caches.
+   Keep taxonomy/runtime uploads outside tracked source.
+
+   Completed:
+   - moved committed sample datasets into tests/fixtures/datasets/
+   - made E2E services seed per-test temporary upload directories
+   - made E2E taxonomy discovery explicit and seeded taxonomy into temporary
+     uploads without tracking the large taxonomy files
+   - made pytest imports use an isolated temporary runtime
+   - made the manual runner use a temporary runtime and service logs
+   - removed tracked generated test logs
+   - ignored source-root logs, caches, uploads, and var/graphengine/
+   - moved backend defaults to repository-level var/graphengine/
+   - retained explicit runtime, upload, and trace environment overrides
+
+2. Static frontend placement - DONE
+   Move JS files to static/js/.
+   Move CSS to static/css/.
+   Keep index.html at the root.
+   Update only asset paths.
+
+   Completed:
+   - moved all Graphengine runtime JavaScript modules into static/js/
+   - moved styles.css into static/css/
+   - kept index.html at the Graphengine root
+   - preserved script order and cache-busting query strings
+   - changed only stylesheet and script asset paths
+
+3. Contracts and documentation - DONE
+   Move live schemas into unicorn_agent/schemas/.
+   Move live documentation into docs/.
+   Move completed rewrite records into docs/history/.
+   Move vLLM connectivity script into examples/vllm/.
+
+   Completed:
+   - moved runtime JSON schemas and their README into unicorn_agent/schemas/
+   - updated runtime and unit-test schema loaders to the package-owned path
+   - moved backend and Agent documentation into docs/
+   - moved documentation images into docs/images/
+   - consolidated completed rewrite records under docs/history/
+   - moved the local vLLM connectivity helper into examples/vllm/
+   - updated live documentation and README references
+
+4. Backend package extraction - DONE
+   Populate unicorn_backend/.
+   Move models and store first.
+   Move tree/report helpers second.
+   Add route modules last.
+   Reduce server_app.py to a compatibility import.
+
+   Completed:
+   - extracted runtime configuration, models, store, tree services, and report
+     services into unicorn_backend/
+   - added focused core, tree, report, and compute router modules
+   - added one application factory that owns configuration, store, Agent
+     runtime, middleware, and router composition
+   - reduced server_app.py to a compatibility app re-export and script
+     entrypoint
+   - preserved historical startup commands and all route contracts
+   - passed the full unit and E2E suites plus representative manual smoke
+
+Optional frontend ownership cleanup
+Split graphengine_backend.js and graphengine_reports.js only when feature work makes those boundaries painful.
+
+
+Recommended Layout
+graphengine/
+├── README.md
+├── index.html
+├── server_app.py                 # Compatibility entrypoint only
+├── server_requirements.txt
+├── run_tests.sh
+│
+├── static/
+│   ├── css/
+│   │   └── styles.css
+│   └── js/
+│       ├── graphengine_core.js
+│       ├── graphengine_state.js
+│       ├── graphengine_dom.js
+│       ├── graphengine_metadata.js
+│       ├── graphengine_tree_model.js
+│       ├── graphengine_backend.js
+│       ├── graphengine_tree_render.js
+│       ├── graphengine_ui.js
+│       ├── graphengine_selection.js
+│       ├── graphengine_reports.js
+│       ├── graphengine_agent_ui.js
+│       └── graphengine_boot.js
+│
+├── unicorn_backend/
+│   ├── __init__.py
+│   ├── app.py
+│   ├── config.py
+│   ├── models.py
+│   ├── store.py
+│   ├── tree.py
+│   ├── reports.py
+│   └── routers/
+│       ├── core.py
+│       ├── tree.py
+│       ├── reports.py
+│       └── compute.py
+│
+├── unicorn_agent/
+│   ├── schemas/
+│   ├── providers/
+│   └── existing Python modules
+│
+├── unicorn_compute/
+│   └── existing computation modules
+│
+├── docs/
+│   ├── backend.md
+│   ├── agent/
+│   │   ├── provider_turn_contract.md
+│   │   ├── compact_context.md
+│   │   └── tool_registry.md
+│   ├── history/
+│   │   ├── agent_rewrite.txt
+│   │   ├── remove_checklist.txt
+│   │   └── phase0_freeze_scope.txt
+│   └── images/
+│
+├── examples/
+│   └── vllm/
+│       └── desktop_chat.py
+│
+└── tests/
+    ├── e2e/
+    ├── unit/
+    ├── fixtures/
+    │   ├── agent/
+    │   └── datasets/
+    └── regression_checklist.md
+
+var/graphengine/
+├── uploads/
+└── logs/
+    └── agent_trace/
