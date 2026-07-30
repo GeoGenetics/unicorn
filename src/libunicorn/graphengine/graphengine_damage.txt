@@ -1,0 +1,617 @@
+Graphengine Damage Integration
+==============================
+
+Status
+------
+
+PLANNING
+
+
+Objective
+---------
+
+Give Graphengine the ability to load, retain, expose, and visualize the damage
+information produced by the current `unicorn lca` `.bdamage.txt` output.
+
+This work is a Graphengine integration project. It does not change LCA
+assignment, mismatch accumulation, damage fitting, or Unicorn's C output.
+
+
+Primary User Outcome
+--------------------
+
+For a selected taxonomic node, a user should be able to:
+
+- inspect damage estimates for every selected dataset;
+- see observed 5-prime C-to-T and 3-prime G-to-A frequencies by position;
+- see the fitted damage curve;
+- inspect fit parameters and evidence depth;
+- compare samples using their existing Graphengine colors and metadata;
+- distinguish missing or invalid damage evidence from an estimated zero.
+
+
+Core Semantic Invariants
+------------------------
+
+1. `count` remains the number of reads assigned directly to the row's exact
+   LCA taxid.
+2. Damage observations and fitted parameters describe the row taxid plus all
+   descendant taxids used by `unicorn lca` during damage rollup.
+3. Graphengine must label this scope explicitly:
+
+```text
+count_scope = direct
+damage_scope = subtree
+```
+
+4. Damage parameters from different datasets must never be added or averaged
+   implicitly.
+5. Missing evidence, an invalid fit, and a fitted zero are distinct states.
+6. Existing tree topology and count aggregation semantics must not change.
+7. Sample colors and metadata display semantics remain owned by the existing
+   shared metadata resolver.
+
+
+Scope
+-----
+
+Included:
+
+- the current wide `.bdamage.txt` format;
+- strict schema validation;
+- backend damage models and storage;
+- backend damage payloads;
+- selected-node damage summaries;
+- observed and fitted damage visualization;
+- sample-color and metadata reuse;
+- parser, backend, and E2E regression coverage.
+
+Deferred:
+
+- raw `.mmm.txt` decoding;
+- changes to `unicorn lca`;
+- changes to damage estimation;
+- recomputing damage in Python;
+- combining fitted parameters across datasets;
+- metadata-group statistical tests;
+- Agent tools for damage;
+- causal or authenticity classification.
+
+
+Step 1: Freeze the Damage Input Contract
+----------------------------------------
+
+Status: NOT STARTED
+
+Decision:
+
+- support only the current wide `.bdamage.txt` format;
+- remove legacy three-column `.bdamage.txt` support;
+- reject unsupported files cleanly instead of treating trailing damage fields
+  as part of the taxon name.
+
+Required header:
+
+```text
+#taxid
+count
+name
+CTfreq
+GAfreq
+A
+q
+c
+phi
+Zfit
+fitCT0
+fitGA0
+nll
+K5_0 N5_0 K3_0 N3_0 Dx5_0 Dx3_0
+K5_1 N5_1 K3_1 N3_1 Dx5_1 Dx3_1
+K5_2 N5_2 K3_2 N3_2 Dx5_2 Dx3_2
+K5_3 N5_3 K3_3 N3_3 Dx5_3 Dx3_3
+K5_4 N5_4 K3_4 N3_4 Dx5_4 Dx3_4
+```
+
+The format currently contains 43 columns.
+
+Parsing rules:
+
+- parse the file as tab-separated data with quoted names;
+- normalize `#taxid` to the internal field name `taxid`;
+- require one header row;
+- require every current damage field;
+- reject duplicate header names;
+- reject unknown columns so a future producer format cannot be mistaken for
+  the frozen current format;
+- resolve columns by header name rather than silently relying on position;
+- parse `taxid` and `count` as non-negative integers;
+- parse damage fields as floating-point values;
+- accept case-insensitive `nan` as missing numeric information;
+- reject malformed finite numeric values;
+- require one row per taxid;
+- reject duplicate taxids rather than merging incompatible fitted profiles;
+- preserve fractional K and N values because multi-alignment weighting can
+  produce non-integer evidence;
+- treat row order as unspecified.
+
+The producer does not currently emit a schema version. Graphengine should
+assign the internal version:
+
+```text
+unicorn_bdamage_v1
+```
+
+only after the complete expected header has been validated. Header changes
+must be treated as a new or unsupported schema rather than accepted
+implicitly.
+
+Proposed structured errors:
+
+```text
+unsupported_bdamage_schema
+missing_bdamage_columns
+invalid_bdamage_value
+duplicate_bdamage_taxid
+```
+
+Compatibility consequence:
+
+- the existing three-column runtime file will no longer load;
+- bundled three-column E2E fixtures must be replaced with valid wide fixtures;
+- users must regenerate old datasets with the current `unicorn lca` command;
+- Graphengine should report the unsupported schema and required columns
+  clearly.
+
+Definition of done:
+
+- the current 43-column schema has one documented interpretation;
+- direct-count and subtree-damage scopes are explicit;
+- legacy files fail cleanly;
+- no parser can silently absorb damage columns into `name`.
+
+
+Step 2: Add Schema-Aware Damage Parsing
+---------------------------------------
+
+Status: NOT STARTED
+
+Current problem:
+
+`GraphEngineStore._parse_dataset()` joins every field after `count` into the
+taxon name. This works only for the legacy three-column format.
+
+Introduce backend models resembling:
+
+```text
+DamagePosition:
+    position
+    k5
+    n5
+    k3
+    n3
+    dx5
+    dx3
+
+DamageProfile:
+    taxid
+    count_scope
+    damage_scope
+    ct_frequency
+    ga_frequency
+    A
+    q
+    c
+    phi
+    zfit
+    fit_ct0
+    fit_ga0
+    nll
+    positions
+    fit_valid
+    missing_fields
+```
+
+Extend `DatasetModel` with:
+
+```text
+damage_by_taxid
+damage_taxa
+valid_damage_taxa
+invalid_damage_taxa
+damage_schema
+```
+
+Keep existing count ownership:
+
+```text
+counts_map[taxid] = direct count
+names_map[taxid] = parsed name
+```
+
+Parser behavior:
+
+1. Read and validate the header.
+2. Build a header-name to column-index map.
+3. Parse count fields independently from damage fields.
+4. Build one `DamageProfile` per taxid.
+5. Derive `fit_valid` from finite required fit values and usable evidence.
+6. Preserve NaN values internally as missing values.
+7. Keep dataset cache invalidation based on the existing file signature.
+
+Serialization rule:
+
+- internal models may use NaN to represent producer-side missing values;
+- JSON responses must convert every non-finite value to `null`;
+- backend payloads must never emit non-standard JSON `NaN` or `Infinity`;
+- `fit_valid` and missing-field information must explain why values are null.
+
+Fit validity must initially be conservative. Graphengine should not invent a
+scientific threshold. At minimum, a profile is not valid when:
+
+- `nll` is not finite;
+- fitted parameters are not finite;
+- all displayed N5 and N3 evidence values are absent or zero.
+
+Tests:
+
+- valid current wide file;
+- quoted taxon names;
+- fractional K and N values;
+- NaN handling;
+- missing required column;
+- invalid integer count;
+- invalid floating-point field;
+- duplicate taxid;
+- legacy three-column rejection;
+- cache invalidation after damage values change;
+- count totals remain identical to the sum of direct counts.
+
+Definition of done:
+
+- names, counts, and damage are parsed independently;
+- old count behavior remains unchanged for valid wide files;
+- damage profiles are retained without lossy string conversion;
+- invalid fits remain distinguishable from zero damage.
+
+
+Step 3: Make the Backend Own Damage State
+-----------------------------------------
+
+Status: NOT STARTED
+
+Dataset summaries should expose capability information without dumping every
+profile:
+
+```json
+{
+  "damage": {
+    "available": true,
+    "schema": "unicorn_bdamage_v1",
+    "taxa": 1200,
+    "valid_taxa": 1134,
+    "invalid_taxa": 66,
+    "count_scope": "direct",
+    "damage_scope": "subtree"
+  }
+}
+```
+
+Add one focused read-only backend endpoint:
+
+```text
+POST /damage/node
+```
+
+Suggested request:
+
+```json
+{
+  "taxid": 33090,
+  "files": ["sample_a.bdamage.txt", "sample_b.bdamage.txt"],
+  "nodes_file": "nodes.dmp",
+  "names_file": "names.dmp"
+}
+```
+
+Suggested response:
+
+```json
+{
+  "ok": true,
+  "taxid": 33090,
+  "name": "Viridiplantae",
+  "count_scope": "direct",
+  "damage_scope": "subtree",
+  "datasets": [
+    {
+      "dataset": "sample_a.bdamage.txt",
+      "direct_count": 100,
+      "profile_present": true,
+      "fit_valid": true,
+      "observed": {
+        "ct_frequency": 0.12,
+        "ga_frequency": 0.11,
+        "positions": []
+      },
+      "fit": {
+        "A": 0.10,
+        "q": 0.20,
+        "c": 0.01,
+        "phi": 100.0,
+        "zfit": 4.2,
+        "fit_ct0": 0.11,
+        "fit_ga0": 0.11,
+        "nll": 123.0
+      }
+    }
+  ],
+  "request_context": {}
+}
+```
+
+Rules:
+
+- the endpoint reads only backend-authoritative datasets;
+- requested datasets use the existing filename resolution;
+- the taxid must exist in the active taxonomy/tree context;
+- a missing profile is returned explicitly, not converted to zeros;
+- fitted parameters remain per dataset;
+- all missing or non-finite numeric values are serialized as JSON `null`;
+- normal tree and report payloads remain compact;
+- count matrix, barplot, and PCoA behavior remain unchanged.
+
+Potential service placement:
+
+```text
+unicorn_backend/damage.py
+unicorn_backend/routers/damage.py
+```
+
+The service owns normalization and response construction. The router owns only
+HTTP request parsing and structured error mapping.
+
+Tests:
+
+- dataset capability summary;
+- one valid profile;
+- one invalid profile;
+- one dataset missing the requested taxid;
+- multiple selected datasets;
+- missing dataset;
+- taxid outside the active tree;
+- exact scope labels;
+- strict JSON output with no NaN or Infinity tokens;
+- no damage payload added to unrelated tree/report responses.
+
+Definition of done:
+
+- damage state is backend-owned and queryable;
+- profile absence and invalidity are explicit;
+- normal Graphengine payloads do not become unnecessarily large.
+
+
+Step 4: Add the First Damage Visualization
+------------------------------------------
+
+Status: NOT STARTED
+
+First UI slice:
+
+- add a `Damage` action for selected nodes;
+- initially require exactly one selected node;
+- open a dedicated popup or panel;
+- request data through `POST /damage/node`;
+- render one dataset series using its existing Graphengine sample color.
+
+Plot contents:
+
+- observed 5-prime C-to-T frequency, `K5 / N5`, by position;
+- observed 3-prime G-to-A frequency, `K3 / N3`, by position;
+- fitted 5-prime curve from `Dx5`;
+- fitted 3-prime curve from `Dx3`;
+- evidence depth in hover text;
+- dataset and active metadata label in hover text.
+
+Summary contents:
+
+- taxid, name, and explicit subtree-damage scope;
+- direct read count per dataset;
+- `A`, `q`, `c`, `phi`, `Zfit`, and `nll`;
+- valid, invalid, and missing profile status;
+- a warning that damage evidence is cumulative over descendants.
+
+Color and grouping:
+
+- reuse the shared metadata resolver;
+- do not create a damage-specific sample color map;
+- preserve the same dataset labels used by barplot and PCoA;
+- metadata grouping can be displayed immediately, but group-level statistics
+  remain deferred.
+
+Missing-data behavior:
+
+- do not plot a zero line for missing profiles;
+- do not plot fitted curves for invalid fits;
+- show which datasets are missing or invalid;
+- allow valid datasets to remain visible when another dataset is invalid.
+
+Definition of done:
+
+- a selected node can open an interpretable per-dataset damage view;
+- observed points and fitted curves are visually distinct;
+- colors and labels agree with existing Graphengine visualizations;
+- direct counts and subtree damage cannot be mistaken for the same scope.
+
+
+Step 5: Export and Multi-Node Follow-Up
+---------------------------------------
+
+Status: NOT STARTED
+
+After the one-node view is stable:
+
+- add export of normalized node damage data;
+- support a compact selected-node damage table;
+- consider small multiples for multiple nodes;
+- consider metadata-group summaries;
+- expose fit-quality filtering only after criteria are scientifically frozen;
+- add read-only Agent tools only after the UI and backend contracts stabilize.
+
+Possible future tools:
+
+```text
+damage.node
+damage.selected
+damage.compare_metadata
+```
+
+These are not part of the first integration pass.
+
+
+Step 6: Regression and Migration Gate
+-------------------------------------
+
+Status: NOT STARTED
+
+Required unit coverage:
+
+- wide parser contract;
+- strict legacy rejection;
+- damage models;
+- backend service;
+- route response and error shapes;
+- cache invalidation;
+- count-tree behavior unchanged.
+
+Required E2E coverage:
+
+- upload a valid wide `.bdamage.txt` file;
+- render the tree;
+- select one taxon;
+- open the damage view;
+- confirm observed and fitted series;
+- switch metadata field and preserve colors;
+- include a missing or invalid profile;
+- verify count matrix, barplot, and PCoA still work.
+
+Migration work:
+
+- replace bundled three-column fixtures with small valid wide fixtures;
+- regenerate the current runtime example using the current `unicorn lca`;
+- document the minimum supported `.bdamage.txt` schema;
+- document the clean error shown for old files;
+- retain old files only in Git history or dedicated parser-rejection fixtures.
+
+Definition of done:
+
+- all unit and E2E tests pass;
+- old files fail with actionable errors;
+- current files expose damage without changing count behavior;
+- manual browser inspection confirms the damage view is scientifically clear.
+
+
+Deferred Unicorn LCA Work
+-------------------------
+
+The following issues belong to `unicorn lca` and `unicorn_damage`, not to this
+Graphengine integration project.
+
+1. Ancestor output completeness
+
+Taxa receive output rows only when at least one read is assigned directly to
+that taxid. An ancestor with zero direct reads receives no row even when
+descendants contain damage evidence.
+
+Questions to freeze later:
+
+- should all observed ancestors receive rows?
+- if so, should `count` remain direct and permit zero?
+- should a separate cumulative count be emitted?
+
+2. Missing MD tags
+
+Alignments without `MD` contribute to read counts but silently contribute no
+damage evidence.
+
+Questions to freeze later:
+
+- should missing-MD alignments be counted and reported?
+- should output include usable alignment/read counts?
+- should a fit-validity or evidence-status column be emitted?
+
+3. Reverse-strand handling
+
+Mismatch accumulation contains no explicit reverse-strand normalization.
+
+Required future work:
+
+- verify BAM sequence orientation assumptions;
+- verify which physical read end maps to 5-prime and 3-prime positions;
+- compare expected C-to-T and G-to-A patterns on forward and reverse
+  alignments;
+- add strand-specific fixtures.
+
+4. No-information fits
+
+When no usable damage evidence exists, initialized nonzero parameters can
+remain in the output while `nll` becomes NaN.
+
+Required future work:
+
+- emit explicit fit validity;
+- write missing fitted parameters as NaN when no fit occurred;
+- prevent finite-looking `A`, `q`, `c`, `phi`, or `Zfit` values from
+  representing an unfitted profile.
+
+5. Optimizer termination
+
+The coordinate-descent optimizer reduces step sizes after a non-improving pass
+but exits instead of retrying the newly reduced steps.
+
+Required future work:
+
+- correct and test convergence behavior;
+- add synthetic known-parameter fixtures;
+- compare estimates and likelihoods against a trusted implementation.
+
+6. Deterministic output
+
+Rows follow hash-map iteration order and are not deterministic.
+
+Required future work:
+
+- sort output rows by taxid or another documented stable key;
+- test byte-stable output for identical inputs.
+
+7. Output schema/versioning
+
+The wide `.bdamage.txt` format has no explicit schema version, fit-status
+field, damage-scope field, or producer configuration metadata.
+
+Potential future additions:
+
+```text
+schema_version
+count_scope
+damage_scope
+fit_valid
+mmm_size
+usable_alignments
+usable_reads
+```
+
+Any producer format change should be versioned and coordinated with
+Graphengine's parser contract.
+
+
+Recommended Development Order
+-----------------------------
+
+1. Freeze Step 1 before changing parser code.
+2. Implement parser models and strict validation.
+3. Replace test fixtures and restore green count/tree tests.
+4. Add the backend damage service and route.
+5. Add the one-node damage visualization.
+6. Complete regression and migration documentation.
+7. Return to deferred LCA correctness work as a separate project.
