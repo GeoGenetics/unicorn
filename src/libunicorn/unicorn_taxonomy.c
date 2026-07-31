@@ -144,8 +144,9 @@ static nodes_t _loadnodemap(const char *fname, int *_ret)
 		return nodes;
 }
 
-static int2chr_t *_loadtaxnames(const char *fname)
+static int2chr_t *_loadtaxnames(const char *fname, strarena_t *arena)
 {
+  if (!fname || !arena) return NULL;
   gzFile gz = Z_NULL;
   gz = gzopen(fname, "rb");
   if (gz == Z_NULL) {
@@ -171,11 +172,18 @@ static int2chr_t *_loadtaxnames(const char *fname)
     if ( kh_eq_str(toks[3], "scientific name") ) {
       i = int2chr_put(nmap, key, &absent);
       if (!absent) continue;
-      kh_val(nmap, i) = strdup(toks[1]);
+      char *name = _strarena_strdup(arena, toks[1]);
+      if (!name) goto fail;
+      kh_val(nmap, i) = name;
     }
   }
   gzclose(gz);
   return nmap;
+
+fail:
+  int2chr_destroy(nmap);
+  gzclose(gz);
+  return NULL;
 }
 
 static int8_t tloadnodes(const char *nodes, utax_t *utax, int *_ret)
@@ -195,7 +203,7 @@ static int8_t tloadnames(const char *names, utax_t *utax, int *_ret)
 	*_ret = -6;
 	if (!names || !utax) goto exit; // Error if names or utax is NULL
 	*_ret = -7;
-	int2chr_t *map = _loadtaxnames(names);
+	int2chr_t *map = _loadtaxnames(names, &utax->name_arena);
 	if (!map) goto exit;
 	utax->namemap = map;
 	*_ret = 0;
@@ -381,15 +389,11 @@ static uint8_t tloadaccessions(const char *acc2tax,
 
 void unicorn_closetaxonomy(utax_t *utax)
 {
-	khint_t k;
 	if (utax) {
 		if (utax->nodes.map) uint2tup_destroy(utax->nodes.map);
 		if (utax->nodes.levelmap) chr2int_destroy(utax->nodes.levelmap);
-		if (utax->namemap) {
-			kh_foreach(utax->namemap, k)
-				free((void *)kh_val(utax->namemap, k));
-			int2chr_destroy(utax->namemap);
-		}
+		if (utax->namemap) int2chr_destroy(utax->namemap);
+		_strarena_destroy(&utax->name_arena);
 		if (utax->accmap) {
 			emap_chr2int_t *map = utax->accmap;
 			_echr2intdel(map);
