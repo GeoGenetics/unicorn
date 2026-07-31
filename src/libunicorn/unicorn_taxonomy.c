@@ -94,26 +94,36 @@ const char *unicornranks[8] = {
                                  "class",  "phylum",  "kingdom",  "domain"
                               };
 
+static void _destroynodes(nodes_t *nodes)
+{
+  if (!nodes) return;
+  if (nodes->map) uint2tup_destroy(nodes->map);
+  if (nodes->levelmap) chr2int_destroy(nodes->levelmap);
+  nodes->map = NULL;
+  nodes->levelmap = NULL;
+}
+
 static nodes_t _loadnodemap(const char *fname, int *_ret)
 {
 	*_ret = -1;
 	int absent;
 	nodes_t nodes = {0,0};
-	uint2tup_t *map = uint2tup_init();
-	chr2int_t *levels = chr2int_init();
-	if (!map || !levels) { *_ret = 4; goto exit; }
-	gzFile fp = gzopen(fname, "r");
+	gzFile fp = Z_NULL;
+	nodes.map = uint2tup_init();
+	nodes.levelmap = chr2int_init();
+	if (!nodes.map || !nodes.levelmap) { *_ret = 4; goto fail; }
+	fp = gzopen(fname, "r");
 	if (!fp) {
 		*_ret = 2;
 		if (VERBOSE)
 			fprintf(stderr, "[libunicorn::%s] Error opening taxonomy nodes file %s\n", __func__, fname);
-		goto exit;
+		goto fail;
 	}
 
 	khint_t j, k;
 	for (uint8_t i = 0; i < 8; i++) {
-		j = chr2int_put(levels, unicornranks[i], &absent);
-		kh_val(levels, j) = i;
+		j = chr2int_put(nodes.levelmap, unicornranks[i], &absent);
+		kh_val(nodes.levelmap, j) = i;
 	}
 	char buf[4096];
 	char *toks[4];
@@ -131,19 +141,21 @@ static nodes_t _loadnodemap(const char *fname, int *_ret)
 		taxid  = strtoul(toks[0], NULL, 10);
 		parent = strtoul(toks[1], NULL, 10);
 		uint32_t level;
-		j = chr2int_get(levels, toks[2]);
-		if (j == kh_end(levels)) level = 0;
-		else level = kh_val(levels, j);
+		j = chr2int_get(nodes.levelmap, toks[2]);
+		if (j == kh_end(nodes.levelmap)) level = 0;
+		else level = kh_val(nodes.levelmap, j);
 		utuple_t tup = {parent, NULL, level};
-		k = uint2tup_put(map, taxid, &absent);
-		kh_val(map, k) = tup;
+		k = uint2tup_put(nodes.map, taxid, &absent);
+		kh_val(nodes.map, k) = tup;
 	}
 	gzclose(fp);
-	nodes.map = map;
-	nodes.levelmap = levels;
 	*_ret = 0;
-	exit:
-		return nodes;
+	return nodes;
+
+fail:
+	if (fp) gzclose(fp);
+	_destroynodes(&nodes);
+	return nodes;
 }
 
 static int2chr_t *_loadtaxnames(const char *fname, strarena_t *arena)
@@ -432,17 +444,34 @@ static uint8_t tloadaccessions(const char *acc2tax,
 	return *ret ? 1 : 0;
 }
 
+static uint8_t _loadkeeptaxa(const char *keeptaxa, uint32q_t *taxa)
+{
+  if (!taxa) return 1;
+  if (!keeptaxa) return 0;
+  char *copy = strdup(keeptaxa);
+  if (!copy) return 1;
+
+  kv_init(*taxa);
+  char *token = strtok(copy, ",");
+  while (token) {
+    kv_push(uint32_t, *taxa, strtoul(token, NULL, 10));
+    token = strtok(NULL, ",");
+  }
+  free(copy);
+  return 0;
+}
+
 void unicorn_closetaxonomy(utax_t *utax)
 {
 	if (utax) {
-		if (utax->nodes.map) uint2tup_destroy(utax->nodes.map);
-		if (utax->nodes.levelmap) chr2int_destroy(utax->nodes.levelmap);
+		_destroynodes(&utax->nodes);
 		if (utax->namemap) int2chr_destroy(utax->namemap);
 		_strarena_destroy(&utax->name_arena);
 		if (utax->accmap) {
 			emap_chr2int_t *map = utax->accmap;
 			_echr2intdel(map);
 		}
+		kv_destroy(utax->keeptaxa);
 		free(utax);
 	}
 }
@@ -463,7 +492,10 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 	if ( tloadnodes(nodes, utax, ret) )                     goto exit;
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);
 	if ( tloadnames(names, utax, ret) )                     goto exit;
-	if (kh_size(utax->nodes.map) != kh_size(utax->namemap)) goto exit;
+	if (kh_size(utax->nodes.map) != kh_size(utax->namemap)) {
+		*ret = 9;
+		goto exit;
+	}
 	utax->numnodes = kh_size(utax->nodes.map);
 	if (acc2tax) {
 		if (VERBOSE) {fflush(stderr); fprintf(stderr, "[libunicorn::%s] Loading accessions\n", __func__);}
@@ -473,17 +505,9 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 		utax->accmap = NULL;
 		utax->numaccs = 0;
 	}
-
-  if (keeptaxa) {
-		kv_init(utax->keeptaxa);
-		char *kt = strdup(keeptaxa);
-		char *token = strtok(kt, ",");
-		while (token) {
-			uint32_t taxid = strtoul(token, NULL, 10);
-			kv_push(uint32_t, utax->keeptaxa, taxid);
-			token = strtok(NULL, ",");
-		}
-		free(kt);
+	if (_loadkeeptaxa(keeptaxa, &utax->keeptaxa)) {
+		*ret = 10;
+		goto exit;
 	}
 
 	if (rank) {
@@ -491,8 +515,8 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 		k = chr2int_get(utax->nodes.levelmap, rank);
 		if ( k == kh_end(utax->nodes.levelmap)) {
 			fprintf(stderr, "[libunicorn::%s] Warning: '%s' no such rank in taxonomy\n",
-										  __func__, rank);
-			rank = strdup("species");
+											__func__, rank);
+			rank = "species";
 		}
 	}
 	utax->rank = rank ? rank : NULL;
