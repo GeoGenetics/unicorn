@@ -1,5 +1,6 @@
 #define _XOPEN_SOURCE 700
 #include <zlib.h>
+#include <stdatomic.h>
 #include "unicorn_internal.h"
 
 #include "klib/kseq.h"
@@ -39,6 +40,7 @@ typedef struct accmappipe_t {
     emap_chr2int_t *map;
     uint8_t nthreads;
     uint32_t ndup; //Number uf duplicate entries in acc2taxid files
+    _Atomic uint8_t failed;
 } accmappipe_t;
 
 
@@ -225,7 +227,6 @@ static void _forINSERT(void *data, long i, int tid)
     k = chr2int_put(submap, a.accv, &absent);
     if (!absent) {
       if (a.taxid != kh_val(submap, k) ) dup++;
-      free(a.accv);
       continue;
     }
     kh_val(submap, k) = a.taxid;
@@ -233,15 +234,29 @@ static void _forINSERT(void *data, long i, int tid)
   step->dups[i] = dup;
 }
 
-static tdataq_t *_loaddqueue(kstream_t *ks, uint8_t bits, uint32_t *_nacc)
+static void _destroy_dataq(tdataq_t *dataq, uint8_t bits)
+{
+  if (!dataq) return;
+  for (uint8_t i = 0; i < 1U<<bits; i++)
+    kv_destroy(dataq[i]);
+  free(dataq);
+}
+
+static tdataq_t *_loaddqueue(kstream_t *ks,
+                             emap_chr2int_t *map,
+                             uint32_t *_nacc,
+                             uint8_t *_failed)
 {
 	uint32_t nacc = 0;
 	tdataq_t *dataq = NULL;
-	if (!ks) goto exit;
+	kstring_t kstr = {0};
+	if (!ks || !map || !_nacc || !_failed) return NULL;
+	*_failed = 0;
+	uint8_t bits = map->bits;
 	dataq = calloc(1U<<bits, sizeof(tdataq_t));
+	if (!dataq) goto fail;
 	for (uint8_t i = 0; i < 1U<<bits; i++)
 		kv_resize(data_t, dataq[i], MAXLOAD);
-	kstring_t kstr = {0};
 	char *key;
 	uint32_t val;
 	uint8_t low;
@@ -253,37 +268,58 @@ static tdataq_t *_loaddqueue(kstream_t *ks, uint8_t bits, uint32_t *_nacc)
       continue;
     }
 		low = kh_hash_str(key) & ((1U<<bits) - 1);
-		data_t a = {strdup(key), val};
+		char *copy = _strarena_strdup(&map->key_arena, key);
+		if (!copy) goto fail;
+		data_t a = {copy, val};
 		kv_push(data_t, dataq[low], a);
 		kstr.l = 0;
 		nacc++;
 		if ( MAXLOAD <= nacc) break;
- 	}
+	}
 	free(kstr.s);
-	exit:
 		*_nacc = nacc;
 		return dataq;
+
+fail:
+	free(kstr.s);
+	_destroy_dataq(dataq, bits);
+	*_failed = 1;
+	*_nacc = 0;
+	return NULL;
 }
 
 static void *_accmapP(void *shared, int step, void *in)
 {
   accmappipe_t *p = (accmappipe_t *)shared;
   if      ( 0 == step) { //Load data into queues
+    if (atomic_load(&p->failed)) return NULL;
     uint32_t nacc = 0;
-		tdataq_t *dataq = _loaddqueue(p->ks, EBITS, &nacc);
+		uint8_t failed = 0;
+		tdataq_t *dataq = _loaddqueue(p->ks, p->map, &nacc, &failed);
+    if (failed) {
+      atomic_store(&p->failed, 1);
+      return NULL;
+    }
     if (nacc) {
         accmapstep_t *stepd = calloc(1, sizeof(accmapstep_t));
+        if (!stepd) {
+          _destroy_dataq(dataq, EBITS);
+          atomic_store(&p->failed, 1);
+          return NULL;
+        }
         stepd->dataq = dataq;
         stepd->n     = nacc;
         stepd->map   = p->map;
         stepd->dups  = calloc(1U<<EBITS, sizeof(uint32_t));
+        if (!stepd->dups) {
+          _destroy_dataq(dataq, EBITS);
+          free(stepd);
+          atomic_store(&p->failed, 1);
+          return NULL;
+        }
         return stepd;
     }
-    for (uint8_t i = 0; i < 1U<<EBITS; i++) {
-        tdataq_t q = dataq[i];
-        kv_destroy(q);
-    }
-    free(dataq);
+    _destroy_dataq(dataq, EBITS);
   }
   else if ( 1 == step) { //Insert data into the map
     accmapstep_t *stepd = (accmapstep_t *)in;
@@ -294,14 +330,10 @@ static void *_accmapP(void *shared, int step, void *in)
   else if ( 2 == step) { //Free data
     accmapstep_t *stepd   = (accmapstep_t *)in;
     tdataq_t *dataq = stepd->dataq;
-    for (uint8_t i = 0; i < 1U<<EBITS; i++) {
-        tdataq_t q = dataq[i];
-        kv_destroy(q);
-    }
+    _destroy_dataq(dataq, EBITS);
     for (uint32_t i = 0; i < 1U<<EBITS; i++)
         p->ndup += stepd->dups[i];
     free(stepd->dups);
-    free(dataq);
     free(stepd);
   }
   return 0;
@@ -313,22 +345,35 @@ static emap_chr2int_t *_csvload(BGZF *fp, uint8_t nthreads)
 	if (!fp) return NULL;
 	emap_chr2int_t *map = _echr2intinit(EBITS, 0); // Initialize with 6 bits
 	if (!map) return NULL;
-	// Load the map from data
   accmappipe_t p = {0};
-  void *forpool  = kt_forpool_init(nthreads);
+  atomic_init(&p.failed, 0);
+  void *forpool = NULL;
+	kstring_t kstr = {0};
+  kstream_t *ks = NULL;
+
+  forpool = kt_forpool_init(nthreads);
+  if (!forpool) goto fail;
   p.map      = map;
   p.nthreads = nthreads;
   p.forpool  = forpool;
-	kstring_t kstr = {0};
-  kstream_t *ks = ks_init(fp);
+  ks = ks_init(fp);
+  if (!ks) goto fail;
 	p.ks = ks;
   ks_getuntil(p.ks, '\n', &kstr, 0);
   p.fp = fp;
 	kt_pipeline(3, _accmapP, &p, 3);
-  kt_forpool_destroy(forpool);
+  if (atomic_load(&p.failed)) goto fail;
+	kt_forpool_destroy(forpool);
 	free(kstr.s);
   ks_destroy(ks);
 	return map;
+
+fail:
+  if (forpool) kt_forpool_destroy(forpool);
+  free(kstr.s);
+  if (ks) ks_destroy(ks);
+  _echr2intdel(map);
+  return NULL;
 }
 
 static emap_chr2int_t *_csv2_chr2intmap(const char *in,
