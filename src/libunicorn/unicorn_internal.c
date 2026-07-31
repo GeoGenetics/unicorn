@@ -21,6 +21,58 @@ KSTREAM_INIT(gzFile, gzread, 134217728U)
 
 uint8_t VERBOSE = 0;
 
+void _strarena_init(strarena_t *arena, size_t block_size)
+{
+  if (!arena) return;
+  memset(arena, 0, sizeof(*arena));
+  arena->block_size = block_size ? block_size : UNICORN_STRARENA_DEFAULT_BLOCK_SIZE;
+}
+
+char *_strarena_strdup(strarena_t *arena, const char *source)
+{
+  if (!arena || !source) return NULL;
+
+  size_t length = strlen(source);
+  if (length == SIZE_MAX) return NULL;
+  size_t required = length + 1;
+  strarena_block_t *block = arena->tail;
+
+  if (!block || block->capacity - block->used < required) {
+    size_t capacity = arena->block_size ? arena->block_size : UNICORN_STRARENA_DEFAULT_BLOCK_SIZE;
+    if (capacity < required) capacity = required;
+    if (capacity > SIZE_MAX - sizeof(*block)) return NULL;
+
+    block = malloc(sizeof(*block) + capacity);
+    if (!block) return NULL;
+    block->next = NULL;
+    block->capacity = capacity;
+    block->used = 0;
+    if (arena->tail) arena->tail->next = block;
+    else arena->head = block;
+    arena->tail = block;
+    arena->reserved_bytes += capacity;
+    arena->block_count++;
+  }
+
+  char *copy = block->data + block->used;
+  memcpy(copy, source, required);
+  block->used += required;
+  arena->used_bytes += required;
+  return copy;
+}
+
+void _strarena_destroy(strarena_t *arena)
+{
+  if (!arena) return;
+  strarena_block_t *block = arena->head;
+  while (block) {
+    strarena_block_t *next = block->next;
+    free(block);
+    block = next;
+  }
+  memset(arena, 0, sizeof(*arena));
+}
+
 void unicorn_setverbose(void)
 {
   VERBOSE = 1;

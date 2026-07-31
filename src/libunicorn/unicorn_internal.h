@@ -498,6 +498,32 @@ KHASHL_MAP_INIT(static, chr2int_t, chr2int,
                 const char *, uint32_t,
                 kh_hash_str, kh_eq_str)
 
+/*
+  Append-only string storage for pointers retained by hash maps. Blocks are
+  never relocated, so strings remain valid until the arena is destroyed.
+*/
+#define UNICORN_STRARENA_DEFAULT_BLOCK_SIZE (64U * 1024U)
+
+typedef struct strarena_block_t {
+  struct strarena_block_t *next;
+  size_t capacity;
+  size_t used;
+  char data[];
+} strarena_block_t;
+
+typedef struct strarena_t {
+  strarena_block_t *head;
+  strarena_block_t *tail;
+  size_t block_size;
+  size_t reserved_bytes;
+  size_t used_bytes;
+  size_t block_count;
+} strarena_t;
+
+void _strarena_init(strarena_t *arena, size_t block_size);
+char *_strarena_strdup(strarena_t *arena, const char *source);
+void _strarena_destroy(strarena_t *arena);
+
 
 typedef struct emap_chr2int_t {
     chr2int_t **maps;  //Submaps 1<<bits total maps
