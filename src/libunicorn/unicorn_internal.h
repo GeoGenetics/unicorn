@@ -529,6 +529,7 @@ typedef struct emap_chr2int_t {
     chr2int_t **maps;  //Submaps 1<<bits total maps
     uint8_t   bits;
     uint64_t  size;    //Number of elements in the map
+    strarena_t key_arena; // Raw accession key storage
     //Special flags
     uint8_t   is_ff;   //Was the map loaded from a file?
     char       **keys;    //key array used in file loading
@@ -583,6 +584,7 @@ typedef struct utax_t {
   uint64_t numaccs;       // Number of accessions in the taxonomy
   nodes_t  nodes;         // Map of taxid to parent taxid
   int2chr_t  *namemap;    // Map of taxid to names
+  strarena_t name_arena;  // Scientific-name storage
   emap_chr2int_t *accmap; // Map of accession to taxid
   const char *rank;
 	uint32q_t keeptaxa;     // Set of taxids to keep, if empty all taxa are kept

@@ -408,6 +408,8 @@ utax_t *unicorn_loadtaxonomy(const char *acc2tax,
 	*ret = 8;
 	if (!nodes || !names) return NULL;
 	utax_t *utax = calloc(1, sizeof(utax_t));
+	if (!utax) goto exit;
+	_strarena_init(&utax->name_arena, 0);
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading nodes\n", __func__);
 	if ( tloadnodes(nodes, utax, ret) )                     goto exit;
 	if (VERBOSE) fprintf(stderr, "[libunicorn::%s] Loading names\n", __func__);

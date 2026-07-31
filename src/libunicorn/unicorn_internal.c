@@ -256,6 +256,7 @@ emap_chr2int_t *_echr2intinit(uint8_t bits, uint8_t is_ff)
   int ret = -1;
   emap_chr2int_t *map = calloc(1, sizeof(emap_chr2int_t));
   if (!map) goto exit;
+  if (!is_ff) _strarena_init(&map->key_arena, 0);
   map->bits = bits;
   map->maps = (chr2int_t **)calloc(1U<<bits, sizeof(chr2int_t*));
   if (!map->maps) goto exit;
