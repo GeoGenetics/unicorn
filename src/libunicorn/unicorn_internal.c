@@ -230,9 +230,12 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
 void _echr2intdel(emap_chr2int_t *map)
 {
   if (!map) return;
-  for (uint8_t i = 0; i < 1U<<map->bits; i++) {
-    chr2int_t *submap = map->maps[i];
-    chr2int_destroy(submap);
+  if (map->maps) {
+    for (uint8_t i = 0; i < 1U<<map->bits; i++) {
+      chr2int_t *submap = map->maps[i];
+      if (submap) chr2int_destroy(submap);
+    }
+    free(map->maps);
   }
   if (map->is_ff) {
     if (map->keys) {
@@ -240,8 +243,9 @@ void _echr2intdel(emap_chr2int_t *map)
           if (map->keys[i]) free(map->keys[i]);
       free(map->keys);
     }
-  } else _strarena_destroy(&map->key_arena);
-  free(map->maps);
+  } else {
+    _strarena_destroy(&map->key_arena);
+  }
   free(map);
 }
 
