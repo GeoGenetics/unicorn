@@ -34,6 +34,7 @@ SOFTWARE.
 typedef struct taxa {
   uint32_t taxid;
   uint64_t count;
+  uint64_t subtree_count;
   float *mmm;
   float CTfreq;
   float GAfreq;

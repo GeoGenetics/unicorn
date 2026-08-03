@@ -146,6 +146,7 @@ static khint_t _taxamap_touch(damagemap_t *taxamap, uint32_t taxid, uint8_t mmm)
     uint8_t j;
     kh_val(taxamap, k).taxid   = taxid;
     kh_val(taxamap, k).count   = 0;
+    kh_val(taxamap, k).subtree_count = 0;
     kh_val(taxamap, k).mmm     = _mmm_alloc(mmm);
     kh_val(taxamap, k).CTfreq = 0.0f;
     kh_val(taxamap, k).GAfreq = 0.0f;

@@ -116,20 +116,27 @@ static uint8_t _utax_is_descendant_or_self(const utax_t *utax, uint32_t focal_ta
   return cur == focal_taxid;
 }
 
-static float *_damage_mrollup(const damagemap_t *taxmap, const utax_t *utax, uint32_t taxid, uint8_t mmm)
+static float *_damage_mrollup(const damagemap_t *taxmap,
+                              const utax_t *utax,
+                              uint32_t taxid,
+                              uint8_t mmm,
+                              uint64_t *subtree_count)
 {
   khint_t k;
-  float *rollup;
+  float *rollup = NULL;
   size_t cells, idx;
-  if (!taxmap || !utax || !taxid || mmm == 0) return NULL;
+  if (subtree_count) *subtree_count = 0;
+  if (!taxmap || !utax || !taxid || !subtree_count) return NULL;
   cells = _mmm_cells(mmm);
-  if (!cells) return NULL;
-  rollup = _mmm_alloc(mmm);
-  if (!rollup) return NULL;
+  if (cells) {
+    rollup = _mmm_alloc(mmm);
+    if (!rollup) return NULL;
+  }
   kh_foreach(taxmap, k) {
     const taxa_t src = kh_val(taxmap, k);
-    if (!src.mmm) continue;
     if (!_utax_is_descendant_or_self(utax, taxid, src.taxid)) continue;
+    *subtree_count += src.count;
+    if (!rollup || !src.mmm) continue;
     for (idx = 0; idx < cells; idx++) {
       rollup[idx] += src.mmm[idx];
     }
@@ -406,10 +413,20 @@ static void _statfor(void *data, long i, int tid)
   if (kh_exist(taxmap, i)) {
     taxa_t clade_taxa;
     taxa_t out_taxa;
-    float *mmm = _damage_mrollup(taxmap, utax, kh_key(taxmap, i), step->mmm);
-    if (!mmm) return;
-    clade_taxa = kh_val(taxmap, i);
+    uint64_t subtree_count = 0;
+    float *mmm = _damage_mrollup(taxmap,
+                                  utax,
+                                  kh_key(taxmap, i),
+                                  step->mmm,
+                                  &subtree_count);
+    if (step->mmm && !mmm) return;
     out_taxa = kh_val(taxmap, i);
+    out_taxa.subtree_count = subtree_count;
+    if (!step->mmm) {
+      kh_val(taxmap, i) = out_taxa;
+      return;
+    }
+    clade_taxa = out_taxa;
     clade_taxa.mmm = mmm;
 		_damage_collapse_k5n5(clade_taxa.mmm, step->mmm, &K5, &N5);
     _damage_collapse_k3n3(clade_taxa.mmm, step->mmm, &K3, &N3);
@@ -443,7 +460,7 @@ static void _statfor(void *data, long i, int tid)
 
 uint8_t unicorn_computedamage(damagemap_t *taxmap, const utax_t *utax, uint8_t mmm, uint8_t threads)
 {
-  if (!taxmap || mmm == 0) return 1;
+  if (!taxmap || !utax) return 1;
   void *forpool = kt_forpool_init(threads);
   forstep_t forstep = {taxmap, utax, mmm};
   if (!forpool) return 1;
