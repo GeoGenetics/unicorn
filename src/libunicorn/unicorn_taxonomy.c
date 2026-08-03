@@ -265,10 +265,13 @@ static tdataq_t *_loaddqueue(kstream_t *ks,
 	if (!ks || !map || !_nacc || !_failed) return NULL;
 	*_failed = 0;
 	uint8_t bits = map->bits;
-	dataq = calloc(1U<<bits, sizeof(tdataq_t));
+	uint32_t nqueues = 1U << bits;
+	uint32_t queue_reserve = (MAXLOAD + nqueues - 1U) / nqueues;
+	dataq = calloc(nqueues, sizeof(tdataq_t));
 	if (!dataq) goto fail;
-	for (uint8_t i = 0; i < 1U<<bits; i++)
-		kv_resize(data_t, dataq[i], MAXLOAD);
+	/* MAXLOAD bounds the complete batch, not each hash shard. */
+	for (uint32_t i = 0; i < nqueues; i++)
+		kv_resize(data_t, dataq[i], queue_reserve);
 	char *key;
 	uint32_t val;
 	uint8_t low;
@@ -279,7 +282,7 @@ static tdataq_t *_loaddqueue(kstream_t *ks,
       kstr.l = 0;
       continue;
     }
-		low = kh_hash_str(key) & ((1U<<bits) - 1);
+		low = kh_hash_str(key) & (nqueues - 1U);
 		char *copy = _strarena_strdup(&map->key_arena, key);
 		if (!copy) goto fail;
 		data_t a = {copy, val};
