@@ -11,6 +11,8 @@ src/*.o
 src/.DS_Store
 *.dSYM
 src/libunicorn/*.o
+src/tests/test_*
+!src/tests/*.c
 .RData
 .Rhistory
 other_code

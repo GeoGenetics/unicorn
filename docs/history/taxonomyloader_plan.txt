@@ -1,0 +1,146 @@
+**Design**
+
+This document describes the methodology to follow for taxonomy loader optimization.
+
+Problem - The taxonomy loader owns persistent strings through individual
+          `strdup()` allocations. Closing a production taxonomy therefore
+          performs one `free()` per retained scientific name and accession.
+          The current production fixture retains 2,668,535 scientific names
+          and 1,329,902 accession keys: about four million individual frees.
+
+Scope:
+
+- Optimize only persistent string ownership for taxonomy names and plain-text
+  accession keys.
+- Preserve public taxonomy APIs, hash types, lookup behavior, and the 64-shard
+  accession map layout.
+- Keep serialized `.khash` loading behavior unchanged.
+- Do not combine this change with the separate `_loaddqueue()` capacity
+  over-allocation fix.
+
+Non-goals:
+
+- Do not change accession parsing, duplicate reporting, taxonomy semantics,
+  or rank/name selection.
+- Do not introduce a production dependency on the unapproved `.khash` path.
+
+Proposed solution:
+
+Add one small internal `strarena_t` utility:
+
+- linked allocation blocks with `capacity` and `used`
+- `strarena_strdup()` copies a string into the current block
+- allocates a new block only when necessary
+- `strarena_destroy()` frees its blocks once
+
+The hash maps still store ordinary `const char *` pointers. Only allocation
+ownership changes.
+
+Arena invariants:
+
+- A returned string pointer is never moved for the lifetime of its map.
+- Blocks are linked, never grown with `realloc()`.
+- Arena allocation happens only in sequential loader stages; worker threads
+  only read the already-created key pointers while inserting into shards.
+- A failed allocation is reported to the caller and leaves no partially
+  initialized ownership state behind.
+- A string larger than the default block size receives a suitably sized
+  dedicated block.
+
+Ownership would become:
+
+| Data | Current ownership | Arena ownership |
+|---|---|---|
+| Scientific names | one `strdup()` per name | `utax_t.name_arena` |
+| Plain-text accession keys | one `strdup()` per accession | `emap_chr2int_t.key_arena` |
+| Serialized `.khash` keys | contiguous file-loaded buffers | unchanged |
+
+This keeps the unapproved serialized path completely out of the production solution.
+
+**Implementation Plan**
+
+1. DONE Add an internal string-arena type and helpers.
+   - Define the type in [unicorn_internal.h](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/unicorn_internal.h).
+   - Implement allocation and destruction in [unicorn_internal.c](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/unicorn_internal.c).
+   - Use linked blocks, never `realloc()` existing blocks, because hash-map keys retain stable pointers.
+   - Give allocation an explicit failure return (`NULL`), and make destroy
+     safe for a zero-initialized or partially initialized arena.
+   - Start with one conservative default block size, such as 64 KiB, and
+     retain internal byte and block counters for diagnostics and benchmarking.
+
+2. DONE Attach arena ownership to taxonomy structures.
+   - Add a name arena to `utax_t`.
+   - Add an accession-key arena to `emap_chr2int_t`.
+   - Let zero-initialization represent an empty arena; raw accession loading
+     populates `key_arena`, while the serialized path leaves it empty.
+   - Leave the existing `is_ff` serialized-map ownership path unchanged.
+   - Keep the ownership distinction explicit in `_echr2intdel()` so a
+     file-backed map can never be mistaken for an arena-backed map.
+
+3. DONE Convert scientific-name loading first.
+   - Replace `strdup(toks[1])` in [_loadtaxnames()](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/unicorn_taxonomy.c) with arena allocation.
+   - Preserve the current behavior of allocating only after `int2chr_put()` confirms that the taxid was absent.
+   - Update `unicorn_closetaxonomy()` to destroy the name hash table, then free the name arena once, with no per-value loop.
+   - If name-arena allocation fails, abort name loading cleanly and ensure
+     `unicorn_loadtaxonomy()` can release the partially built taxonomy.
+
+4. DONE Convert plain-text accession loading.
+   - Replace `strdup(key)` in [_loaddqueue()](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/unicorn_taxonomy.c) with allocation from the accession arena.
+   - Preserve the current 64-shard queueing and insertion logic.
+   - Preserve duplicate accounting and first-seen accession behavior.
+   - Change `_forINSERT()` so rejected duplicates no longer call `free(a.accv)`; their arena bytes are reclaimed at taxonomy close.
+   - Keep arena writes in `_loaddqueue()` only. `_forINSERT()` must not grow
+     the arena because it runs in parallel across the 64 shards.
+
+5. DONE Update accession destruction.
+   - In [_echr2intdel()](/home/jregalado/Projects/GeoGenetics/unicorn/src/libunicorn/unicorn_internal.c), remove the `kh_foreach(... free(key))` loop for raw text-loaded maps.
+   - Destroy the 64 hash shards as today.
+   - Release the accession arena once.
+   - Retain the existing file-backed `is_ff` cleanup exactly as it is.
+   - Make cleanup safe for maps created before any keys were loaded.
+
+6. DONE Make failure cleanup safe.
+   - Ensure partial arena allocations are released if taxonomy loading fails midway.
+   - Ensure a failed accession batch cannot leave map keys pointing into freed batch memory.
+   - Treat arena allocation failure as a normal loader failure with cleanup, never as a partially valid taxonomy.
+   - Audit every `goto exit` path in `unicorn_loadtaxonomy()` and the raw
+     accession loader so the map and its arena are released exactly once.
+
+7. DONE Add focused validation before benchmarking.
+   - Load a small plain-text fixture.
+   - Verify known accession-to-taxid lookups.
+   - Verify known taxid-to-name lookups.
+   - Include duplicate accession input to confirm current first-entry and duplicate-count semantics remain unchanged.
+   - Load and close repeatedly to catch ownership mistakes under ASan or Valgrind.
+   - Add a dedicated arena unit test for boundary crossing, a string larger
+     than the default block, and destruction of an empty arena.
+   - Keep performance assertions out of automated tests; timing depends on
+     hardware and memory pressure.
+
+8. Benchmark the production taxonomy using your existing [test_unicorntaxonomy.c](/home/jregalado/Projects/GeoGenetics/unicorn/testing/test_unicorntaxonomy.c).
+   - Keep separate timing for load and close.
+   - Add temporary close-phase timings for nodes, names, and accession map so the improvement is attributable.
+   - The expected major improvement is close time; raw parsing and hashing will still dominate a meaningful portion of load time.
+   - Record resident memory and duplicate count alongside timing, because
+     arena allocation trades immediate duplicate-key release for bulk release
+     at close.
+
+**Acceptance Criteria**
+
+- Plain-text accession and scientific-name lookups return the same values as
+  before the change.
+- Conflicting duplicate accessions retain the first mapping and preserve the
+  reported duplicate count.
+- The serialized `.khash` path still loads and closes without touching arena
+  ownership.
+- No per-entry `free()` loop remains for arena-owned names or raw accession
+  keys.
+- Repeated load/close validation is clean under an allocation checker.
+- The production benchmark demonstrates a substantial taxonomy-close speedup
+  without a correctness or unacceptable memory regression.
+
+**One deliberate tradeoff**
+
+Duplicate accession lines will consume arena space until close, whereas today their temporary strings are freed immediately. That is acceptable if duplicates are rare, which the loader already appears to assume. We should record duplicate count and arena bytes during the benchmark; if duplicates are unexpectedly common, we can add a second-pass duplicate optimization later without compromising the core design.
+
+The queue over-reservation in `_loaddqueue()` is a separate loader-memory issue. I would keep it out of the first arena change, then address it in a small follow-up once teardown is fast and benchmarked.
