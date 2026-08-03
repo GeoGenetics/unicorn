@@ -46,7 +46,7 @@ endif
 HTSINCDIR = $(HTS_PREFIX)/include
 HTSLIBDIR = $(HTS_PREFIX)/lib
 
-.PHONY: clean all test test-taxonomy test-taxonomy-valgrind
+.PHONY: clean all test test-taxonomy test-taxonomy-valgrind test-damage
 
 %.o:%.c src/version.h
 	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
@@ -84,6 +84,9 @@ test-taxonomy: $(TEST_BIN)
 
 test-taxonomy-valgrind: $(TEST_BIN)
 	@for test in $(TEST_BIN); do valgrind --error-exitcode=1 --leak-check=full ./$$test; done
+
+test-damage: src/tests/test_damage_rollup
+	./src/tests/test_damage_rollup
 
 test: test-taxonomy
 	cksum=$$(./unicorn refstats -b data/test.bam 2> /dev/null | cksum | awk '{print $$1}' ); \

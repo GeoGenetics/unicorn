@@ -27,6 +27,7 @@ SOFTWARE.
 */
 #define _XOPEN_SOURCE 700
 #include <ctype.h>
+#include <float.h>
 #include "unicorn_internal.h"
 #include "unicorn_damage.h"
 
@@ -58,6 +59,10 @@ typedef struct pipeline {
 
 #define UNICORN_LCA_MMM_BASES 4
 #define UNICORN_LCA_MMM_ROWS (UNICORN_LCA_MMM_BASES * UNICORN_LCA_MMM_BASES)
+
+_Static_assert(sizeof(float) == 4, "V2 damage output requires 32-bit floats");
+_Static_assert(FLT_RADIX == 2 && FLT_MANT_DIG == 24,
+               "V2 damage output requires IEEE-754 binary32 floats");
 
 static inline size_t _mmm_cells(uint8_t mmm)
 {
@@ -123,6 +128,34 @@ static char *_base64_encode_bytes(const uint8_t *src, size_t nsrc)
   }
   dst[j] = '\0';
   return dst;
+}
+
+static void _float32_to_le_bytes(float value, uint8_t bytes[4])
+{
+  uint32_t bits;
+  memcpy(&bits, &value, sizeof(bits));
+  bytes[0] = (uint8_t)(bits & 0xffu);
+  bytes[1] = (uint8_t)((bits >> 8) & 0xffu);
+  bytes[2] = (uint8_t)((bits >> 16) & 0xffu);
+  bytes[3] = (uint8_t)((bits >> 24) & 0xffu);
+}
+
+static char *_base64_encode_direct_mmm(const float *mmm, uint8_t positions)
+{
+  size_t cells = _mmm_cells(positions);
+  size_t nbytes = cells * sizeof(float);
+  uint8_t *bytes;
+  char *encoded;
+  if (!cells) return _base64_encode_bytes(NULL, 0);
+  if (!mmm) return NULL;
+  bytes = malloc(nbytes);
+  if (!bytes) return NULL;
+  for (size_t i = 0; i < cells; i++) {
+    _float32_to_le_bytes(mmm[i], &bytes[i * sizeof(float)]);
+  }
+  encoded = _base64_encode_bytes(bytes, nbytes);
+  free(bytes);
+  return encoded;
 }
 
 static void _taxamap_destroy_with_values(damagemap_t *taxamap)
@@ -428,28 +461,36 @@ static void _taxamap_add_alignment_counts(damagemap_t *taxamap,
   free(ref2q);
 }
 
-static void _write_mmm_output(FILE *fp,
-	                            const damagemap_t *taxamap,
-															const utax_t *utax,
-															uint8_t mmm)
+static uint8_t _write_bdamage_v2_output(FILE *fp,
+                                        const damagemap_t *taxamap,
+                                        const utax_t *utax,
+                                        uint8_t mmm)
 {
   khint_t k;
-  const size_t nbytes = _mmm_cells(mmm) * sizeof(float);
-  char header[64];
   uint8_t i;
-  if (!fp || !taxamap || !utax || !mmm) return;
-  snprintf(header, sizeof(header), "mmm_%u", (unsigned)mmm);
-  fprintf(fp, "#taxid\tcount\tname\tCTfreq\tGAfreq\tA\tq\tc\tphi\tZfit\tfitCT0\tfitGA0\tnll");
-  for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) fprintf(fp, "\tK5_%u\tN5_%u\tK3_%u\tN3_%u\tDx5_%u\tDx3_%u", i, i, i, i, i, i);
-  fprintf(fp, "\t%s\n", header);
+  if (!fp || !taxamap || !utax) return 1;
+  if (fprintf(fp,
+              "#taxid\tdirect_count\tsubtree_count\tname\tCTfreq\tGAfreq\tA\tq\tc\tphi\tZfit\tfitCT0\tfitGA0\tnll") < 0) {
+    return 1;
+  }
+  for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) {
+    if (fprintf(fp,
+                "\tK5_%u\tN5_%u\tK3_%u\tN3_%u\tDx5_%u\tDx3_%u",
+                i, i, i, i, i, i) < 0) {
+      return 1;
+    }
+  }
+  if (fprintf(fp, "\tmmm_positions\tdirect_mmm_base64\n") < 0) return 1;
   kh_foreach(taxamap, k) {
     const taxa_t t = kh_val(taxamap, k);
     const char *name = utax_getname(utax, t.taxid);
-    char *encoded = _base64_encode_bytes((const uint8_t *)t.mmm, nbytes);
-    fprintf(fp,
-            "%u\t%lu\t\"%s\"\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.6f",
+    char *encoded = _base64_encode_direct_mmm(t.mmm, mmm);
+    if (!encoded) return 1;
+    if (fprintf(fp,
+            "%u\t%" PRIu64 "\t%" PRIu64 "\t\"%s\"\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.6f",
             t.taxid,
             t.count,
+            t.subtree_count,
             name ? name : "NA",
             t.CTfreq,
             t.GAfreq,
@@ -460,14 +501,24 @@ static void _write_mmm_output(FILE *fp,
             t.Zfit,
             t.fitCT0,
             t.fitGA0,
-            t.nll);
-    for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) {
-      fprintf(fp, "\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g",
-              t.K5[i], t.N5[i], t.K3[i], t.N3[i], t.Dx5[i], t.Dx3[i]);
+            t.nll) < 0) {
+      free(encoded);
+      return 1;
     }
-    fprintf(fp, "\t%s\n", encoded ? encoded : "");
+    for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) {
+      if (fprintf(fp, "\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g",
+                  t.K5[i], t.N5[i], t.K3[i], t.N3[i], t.Dx5[i], t.Dx3[i]) < 0) {
+        free(encoded);
+        return 1;
+      }
+    }
+    if (fprintf(fp, "\t%u\t%s\n", (unsigned)mmm, encoded) < 0) {
+      free(encoded);
+      return 1;
+    }
     free(encoded);
   }
+  return fflush(fp) != 0 || ferror(fp) != 0;
 }
 
 static void _aln_loadbyqname(step_t *s,
@@ -745,19 +796,29 @@ static void *_lca_pipeline(void *data, int step, void *in)
 
 int unicorn_lcacompute(unicorn_t *u,
 	                     char *keeptaxa,
-											 utax_t *utax,
-											 uint64_t *nalns,
-											 uint64_t *nreads,
-											 char *outprefix,
-											 uint8_t mmm)
+	                     utax_t *utax,
+	                     uint64_t *nalns,
+	                     uint64_t *nreads,
+	                     char *outprefix,
+	                     uint8_t mmm)
 {
   pipeline_t p = {0};
   uint32q_t keepq;
+  FILE *lcafp = NULL;
+  FILE *taxafp = NULL;
+  int ret = 0;
   (void)keeptaxa;
+  if (!u || !utax || !nalns || !nreads || !outprefix) return 1;
+  *nalns = 0;
+  *nreads = 0;
   kv_init(keepq);
   char BUFF[256] = {0};
   snprintf(BUFF,256, "%s.lca.txt", outprefix);
-  FILE *lcafp = fopen(BUFF, "w");
+  lcafp = fopen(BUFF, "w");
+  if (!lcafp) {
+    ret = 1;
+    goto done;
+  }
   memset(BUFF, 0, 256);
   p.u = u;
   p.utax = utax;
@@ -767,58 +828,37 @@ int unicorn_lcacompute(unicorn_t *u,
   p.forpool = kt_forpool_init(u->nthreads);
   p.ofp = lcafp;
   p.taxamap = damagemap_init();
-  if (!p.forpool) return 9;
+  if (!p.forpool || !p.taxamap) {
+    ret = 9;
+    goto done;
+  }
   kt_pipeline(3, _lca_pipeline, &p, 3);
   *nalns = p.nalns;
   *nreads = p.nreads;
-  //Damage estimatiopn proceeds here
-  unicorn_computedamage(p.taxamap, p.utax, p.mmm, u->nthreads);
-  //TODO move to function
-  if (p.taxamap && p.utax) {
-    snprintf(BUFF,256, "%s.bdamage.txt", outprefix);
-    FILE *taxafp = fopen(BUFF, "w");
-    khint_t k;
-    uint8_t i;
-    fprintf(taxafp, "#taxid\tcount\tname\tCTfreq\tGAfreq\tA\tq\tc\tphi\tZfit\tfitCT0\tfitGA0\tnll");
-    for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) fprintf(taxafp, "\tK5_%u\tN5_%u\tK3_%u\tN3_%u\tDx5_%u\tDx3_%u", i, i, i, i, i, i);
-    fprintf(taxafp, "\n");
-    kh_foreach(p.taxamap, k) {
-      taxa_t t = kh_val(p.taxamap, k);
-      const char *name = utax_getname(p.utax, t.taxid);
-      fprintf(taxafp, "%u\t%lu\t\"%s\"\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.6f",
-              t.taxid,
-              t.count,
-              name ? name : "NA",
-              t.CTfreq,
-              t.GAfreq,
-              t.A,
-              t.q,
-              t.c,
-              t.phi,
-              t.Zfit,
-              t.fitCT0,
-              t.fitGA0,
-              t.nll);
-      for (i = 0; i < UNICORN_DAMAGE_OUTPOS; i++) {
-        fprintf(taxafp, "\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g\t%.8g",
-                t.K5[i], t.N5[i], t.K3[i], t.N3[i], t.Dx5[i], t.Dx3[i]);
-      }
-      fprintf(taxafp, "\n");
-    }
-    fclose(taxafp);
-    if (p.mmm) {
-      memset(BUFF, 0, 256);
-      snprintf(BUFF,256, "%s.mmm.txt", outprefix);
-      FILE *mmmfp = fopen(BUFF, "w");
-      if (mmmfp) {
-        _write_mmm_output(mmmfp, p.taxamap, p.utax, p.mmm);
-        fclose(mmmfp);
-      }
-    }
+  if (unicorn_computedamage(p.taxamap, p.utax, p.mmm, u->nthreads)) {
+    ret = 1;
+    goto done;
   }
-  fclose(lcafp);
-  kt_forpool_destroy(p.forpool);
+  snprintf(BUFF,256, "%s.bdamage.txt", outprefix);
+  taxafp = fopen(BUFF, "w");
+  if (!taxafp) {
+    ret = 1;
+    goto done;
+  }
+  if (_write_bdamage_v2_output(taxafp, p.taxamap, p.utax, p.mmm)) {
+    ret = 1;
+  }
+  if (fclose(taxafp) != 0) {
+    ret = 1;
+  }
+  taxafp = NULL;
+
+done:
+  if (taxafp && fclose(taxafp) != 0) ret = 1;
+  if (lcafp && fclose(lcafp) != 0) ret = 1;
+  if (p.forpool) kt_forpool_destroy(p.forpool);
   _taxamap_destroy_with_values(p.taxamap);
   free(p.last_q);
-  return 0;
+  kv_destroy(keepq);
+  return ret;
 }
