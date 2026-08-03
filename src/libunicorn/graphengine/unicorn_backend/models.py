@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from unicorn_backend.damage_contract import (
-    BDAMAGE_COUNT_SCOPE,
+    BDAMAGE_DIRECT_COUNT_SCOPE,
     BDAMAGE_DAMAGE_SCOPE,
+    BDAMAGE_SUBTREE_COUNT_SCOPE,
 )
 
 
@@ -109,6 +110,8 @@ class DamagePosition:
 @dataclass(frozen=True, slots=True)
 class DamageProfile:
     taxid: int
+    direct_count: int
+    subtree_count: int
     ct_frequency: float
     ga_frequency: float
     amplitude: float
@@ -125,7 +128,11 @@ class DamageProfile:
 
     @property
     def count_scope(self) -> str:
-        return BDAMAGE_COUNT_SCOPE
+        return BDAMAGE_DIRECT_COUNT_SCOPE
+
+    @property
+    def subtree_count_scope(self) -> str:
+        return BDAMAGE_SUBTREE_COUNT_SCOPE
 
     @property
     def damage_scope(self) -> str:
@@ -134,7 +141,10 @@ class DamageProfile:
     def to_payload(self) -> Dict[str, Any]:
         return {
             "taxid": self.taxid,
+            "direct_count": self.direct_count,
+            "subtree_count": self.subtree_count,
             "count_scope": self.count_scope,
+            "subtree_count_scope": self.subtree_count_scope,
             "damage_scope": self.damage_scope,
             "ct_frequency": _json_safe_float(self.ct_frequency),
             "ga_frequency": _json_safe_float(self.ga_frequency),
@@ -188,7 +198,7 @@ class DatasetModel:
             "taxa": self.damage_taxa,
             "valid_taxa": self.valid_damage_taxa,
             "invalid_taxa": self.invalid_damage_taxa,
-            "count_scope": BDAMAGE_COUNT_SCOPE,
+            "count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
             "damage_scope": BDAMAGE_DAMAGE_SCOPE,
         }
 

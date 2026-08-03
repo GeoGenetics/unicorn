@@ -13,6 +13,7 @@
   - [refstats](#refstats)
   - [taxstats](#taxstats)
   - [alnfilt](#alnfilt)
+  - [lca output](docs/unicorn_lca.md)
 - [Output](#output-columns)
 - [Taxonomy Files](#taxonomy-files)
 - [Input Notes](#input-notes)

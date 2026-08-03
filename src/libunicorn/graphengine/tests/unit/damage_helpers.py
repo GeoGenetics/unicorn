@@ -13,13 +13,17 @@ from unicorn_backend.damage_contract import (
 
 def damage_row(
     taxid: int,
-    count: int,
+    direct_count: int,
     name: str,
+    subtree_count: int | None = None,
     **overrides: Any,
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "taxid": taxid,
-        "count": count,
+        "direct_count": direct_count,
+        "subtree_count": (
+            direct_count if subtree_count is None else subtree_count
+        ),
         "name": name,
         "CTfreq": 0.10,
         "GAfreq": 0.08,
@@ -31,6 +35,8 @@ def damage_row(
         "fitCT0": 0.10,
         "fitGA0": 0.09,
         "nll": 10.0,
+        "mmm_positions": 0,
+        "direct_mmm_base64": "",
     }
     for position in range(BDAMAGE_POSITION_COUNT):
         row.update(

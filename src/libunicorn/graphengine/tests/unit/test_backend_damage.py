@@ -29,7 +29,7 @@ from unicorn_backend.store import GraphEngineStore
 def damage_store(tmp_path: Path) -> GraphEngineStore:
     (tmp_path / "sample_a.bdamage.txt").write_text(
         wide_bdamage_text([
-            damage_row(10, 5, "Clade A"),
+            damage_row(10, 5, "Clade A", subtree_count=8),
             damage_row(11, 3, "Species A", nll="nan"),
         ]),
         encoding="utf-8",
@@ -121,6 +121,7 @@ def test_damage_node_returns_valid_and_missing_dataset_profiles(
     valid, missing = response["datasets"]
     assert valid["dataset"] == "sample_a.bdamage.txt"
     assert valid["direct_count"] == 5
+    assert valid["subtree_count"] == 8
     assert valid["profile_present"] is True
     assert valid["profile_status"] == "valid"
     assert valid["fit_valid"] is True
@@ -131,6 +132,7 @@ def test_damage_node_returns_valid_and_missing_dataset_profiles(
     assert missing == {
         "dataset": "sample_b.bdamage.txt",
         "direct_count": 0,
+        "subtree_count": None,
         "profile_present": False,
         "profile_status": "missing",
         "fit_valid": None,

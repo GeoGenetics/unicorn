@@ -1,16 +1,17 @@
-# Unicorn bdamage input contract
+# Historical Unicorn bdamage V1 input contract
 
-Graphengine supports one damage dataset format:
+This document describes the retired `unicorn_bdamage_v1` format. Graphengine
+no longer accepts V1 input. The active V2 contract is
+[damage_input_contract_v2.md](damage_input_contract_v2.md); regenerate older
+datasets with the current `unicorn lca` command.
+
+The historical V1 format was:
 
 ```text
 unicorn_bdamage_v1
 ```
 
-This contract describes the current wide `.bdamage.txt` output written by
-`unicorn lca`. The producer does not currently write a schema-version field,
-so Graphengine identifies V1 only after validating the complete header.
-
-Legacy three-column `.bdamage.txt` files are not part of this contract.
+The remaining details are retained only as migration history.
 
 ## Header
 
@@ -134,4 +135,3 @@ unicorn_backend/damage_contract.py
 
 Parser, model, service, route, and test code must import those constants rather
 than defining independent header lists.
-

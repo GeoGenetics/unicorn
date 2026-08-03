@@ -6,7 +6,7 @@ import math
 from typing import Any, Dict, List, Optional
 
 from unicorn_backend.damage_contract import (
-    BDAMAGE_COUNT_SCOPE,
+    BDAMAGE_DIRECT_COUNT_SCOPE,
     BDAMAGE_DAMAGE_SCOPE,
 )
 from unicorn_backend.models import (
@@ -103,7 +103,7 @@ def damage_selected_payload(
     ]
     return {
         "ok": True,
-        "count_scope": BDAMAGE_COUNT_SCOPE,
+        "count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
         "damage_scope": BDAMAGE_DAMAGE_SCOPE,
         "nodes": [
             _node_payload(
@@ -127,7 +127,7 @@ def _node_payload(
     payload = {
         "taxid": taxid,
         "name": name,
-        "count_scope": BDAMAGE_COUNT_SCOPE,
+        "count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
         "damage_scope": BDAMAGE_DAMAGE_SCOPE,
         "datasets": [
             _dataset_profile_payload(dataset, taxid)
@@ -187,6 +187,7 @@ def _dataset_profile_payload(
     if profile is None:
         base.update(
             {
+                "subtree_count": None,
                 "profile_status": "missing",
                 "fit_valid": None,
                 "missing_fields": [],
@@ -198,6 +199,8 @@ def _dataset_profile_payload(
 
     base.update(
         {
+            "direct_count": profile.direct_count,
+            "subtree_count": profile.subtree_count,
             "profile_status": (
                 "valid" if profile.fit_valid else "invalid"
             ),

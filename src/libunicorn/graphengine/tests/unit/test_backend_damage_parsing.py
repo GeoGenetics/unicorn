@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import csv
 from io import StringIO
 import json
@@ -63,7 +64,7 @@ def _assert_parse_error(
 
 def _reorder_columns(text: str) -> str:
     rows = list(csv.reader(StringIO(text), delimiter="\t"))
-    order = [2, 0, 1, *range(3, BDAMAGE_COLUMN_COUNT)]
+    order = [3, 0, 1, 2, *range(4, BDAMAGE_COLUMN_COUNT)]
     output = StringIO(newline="")
     writer = csv.writer(output, delimiter="\t", lineterminator="\n")
     for row in rows:
@@ -81,6 +82,7 @@ def test_wide_damage_file_parses_counts_names_and_profiles(
                 10,
                 7,
                 "Quoted\tClade",
+                subtree_count=23,
                 K5_0=1.75,
                 N5_0=8.25,
             ),
@@ -99,25 +101,26 @@ def test_wide_damage_file_parses_counts_names_and_profiles(
     profile = dataset.damage_by_taxid[10]
     assert profile.count_scope == "direct"
     assert profile.damage_scope == "subtree"
+    assert profile.direct_count == 7
+    assert profile.subtree_count == 23
     assert profile.positions[0].k5 == 1.75
     assert profile.positions[0].n5 == 8.25
 
 
-def test_damage_columns_are_resolved_by_header_name(
+def test_damage_columns_must_follow_the_frozen_v2_order(
     tmp_path: Path,
 ) -> None:
-    dataset = _load_text(
+    detail = _assert_parse_error(
         tmp_path,
         _reorder_columns(
             wide_bdamage_text([
-                damage_row(10, 7, "Clade A", A=0.125),
+                damage_row(10, 7, "Clade A"),
             ])
         ),
+        "unsupported_bdamage_schema",
     )
 
-    assert dataset.counts_map == {10: 7}
-    assert dataset.names_map == {10: "Clade A"}
-    assert dataset.damage_by_taxid[10].amplitude == 0.125
+    assert "column order" in detail["message"]
 
 
 def test_nan_is_retained_as_missing_and_serialized_as_null(
@@ -220,7 +223,10 @@ def test_changed_or_duplicate_header_is_rejected(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("overrides", "column"),
     [
-        ({"count": "3.5"}, "count"),
+        ({"direct_count": "3.5"}, "direct_count"),
+        ({"subtree_count": "3.5"}, "subtree_count"),
+        ({"mmm_positions": "3.5"}, "mmm_positions"),
+        ({"mmm_positions": 256}, "mmm_positions"),
         ({"A": "not-a-number"}, "A"),
         ({"nll": "inf"}, "nll"),
     ],
@@ -252,13 +258,89 @@ def test_duplicate_taxid_is_rejected(tmp_path: Path) -> None:
     assert detail["taxid"] == 10
 
 
-def test_legacy_three_column_file_is_rejected(tmp_path: Path) -> None:
+def test_pre_v2_file_is_rejected_with_regeneration_guidance(
+    tmp_path: Path,
+) -> None:
     detail = _assert_parse_error(
         tmp_path,
         '#taxid\tcount\tname\n10\t7\t"Clade A"\n',
         "unsupported_bdamage_schema",
     )
     assert "Regenerate" in detail["message"]
+
+
+def test_subtree_count_must_include_the_direct_count(tmp_path: Path) -> None:
+    detail = _assert_parse_error(
+        tmp_path,
+        wide_bdamage_text([
+            damage_row(10, 7, "Clade A", subtree_count=6),
+        ]),
+        "invalid_bdamage_value",
+    )
+
+    assert detail["direct_count"] == 7
+    assert detail["subtree_count"] == 6
+
+
+@pytest.mark.parametrize(
+    ("positions", "encoded", "expected_bytes"),
+    [
+        (0, "AQ==", None),
+        (0, " ", None),
+        (1, "not base64", None),
+        (1, base64.b64encode(b"short").decode("ascii"), 128),
+    ],
+)
+def test_direct_mmm_envelope_is_validated_and_not_retained(
+    tmp_path: Path,
+    positions: int,
+    encoded: str,
+    expected_bytes: int | None,
+) -> None:
+    detail = _assert_parse_error(
+        tmp_path,
+        wide_bdamage_text([
+            damage_row(
+                10,
+                7,
+                "Clade A",
+                mmm_positions=positions,
+                direct_mmm_base64=encoded,
+            ),
+        ]),
+        "invalid_bdamage_matrix",
+    )
+
+    assert detail["column"] == "direct_mmm_base64"
+    if expected_bytes is not None:
+        assert detail["expected_bytes"] == expected_bytes
+
+
+def test_valid_direct_mmm_envelope_is_not_stored_in_damage_profile(
+    tmp_path: Path,
+) -> None:
+    dataset = _load_text(
+        tmp_path,
+        wide_bdamage_text([
+            damage_row(
+                10,
+                7,
+                "Clade A",
+                subtree_count=19,
+                mmm_positions=1,
+                direct_mmm_base64=base64.b64encode(
+                    bytes(128)
+                ).decode("ascii"),
+            ),
+        ]),
+    )
+
+    profile = dataset.damage_by_taxid[10]
+    assert dataset.counts_map == {10: 7}
+    assert dataset.total_reads == 7
+    assert profile.direct_count == 7
+    assert profile.subtree_count == 19
+    assert "direct_mmm_base64" not in profile.to_payload()
 
 
 def test_count_totals_remain_direct_count_sums(tmp_path: Path) -> None:
@@ -301,22 +383,11 @@ def test_damage_change_invalidates_cached_dataset(tmp_path: Path) -> None:
     assert refreshed.counts_map == initial.counts_map
 
 
-def test_real_43_column_producer_fixture_loads_without_loss() -> None:
+def test_real_pre_v2_producer_fixture_is_rejected() -> None:
     store = _store(PRODUCER_FIXTURE.parent)
-    dataset = store.get_or_load_dataset(PRODUCER_FIXTURE)
+    with pytest.raises(HTTPException) as caught:
+        store.get_or_load_dataset(PRODUCER_FIXTURE)
 
-    assert dataset.damage_schema == BDAMAGE_SCHEMA_VERSION
-    assert dataset.total_taxa == 16080
-    assert dataset.damage_taxa == dataset.total_taxa
-    assert dataset.total_reads == sum(dataset.counts_map.values())
-
-    mapped = dataset.damage_by_taxid[28727]
-    assert dataset.counts_map[28727] == 12
-    assert dataset.names_map[28727] == "Cyanocitta cristata"
-    assert mapped.amplitude == pytest.approx(0.074218735)
-    assert mapped.positions[0].n3 == 5
-
-    missing_zfit = dataset.damage_by_taxid[2283408]
-    assert missing_zfit.missing_fields == ("Zfit",)
-    assert missing_zfit.fit_valid is True
-    json.dumps(missing_zfit.to_payload(), allow_nan=False)
+    assert caught.value.status_code == 400
+    assert caught.value.detail["code"] == "unsupported_bdamage_schema"
+    assert "Regenerate" in caught.value.detail["message"]

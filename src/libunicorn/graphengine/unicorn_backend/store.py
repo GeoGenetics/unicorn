@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
 import logging
 import math
@@ -14,11 +16,17 @@ from fastapi import HTTPException
 from unicorn_backend.config import BackendConfig
 from unicorn_backend.damage_contract import (
     BDAMAGE_COLUMNS,
+    BDAMAGE_DIRECT_COUNT_COLUMN,
+    BDAMAGE_DIRECT_MMM_COLUMN,
     BDAMAGE_FIT_COLUMNS,
     BDAMAGE_HEADER_COLUMNS,
+    BDAMAGE_MAX_MMM_POSITIONS,
+    BDAMAGE_MMM_BYTES_PER_POSITION,
+    BDAMAGE_MMM_POSITIONS_COLUMN,
     BDAMAGE_POSITION_COLUMNS,
     BDAMAGE_POSITION_COUNT,
     BDAMAGE_SCHEMA_VERSION,
+    BDAMAGE_SUBTREE_COUNT_COLUMN,
 )
 from unicorn_backend.models import (
     DamagePosition,
@@ -122,6 +130,7 @@ def _parse_non_negative_integer(
     column: str,
     raw_value: str,
     line: int,
+    maximum: Optional[int] = None,
 ) -> int:
     try:
         value = int(raw_value.strip())
@@ -136,18 +145,85 @@ def _parse_non_negative_integer(
             column=column,
             value=raw_value,
         )
-    if value < 0:
+    if value < 0 or (maximum is not None and value > maximum):
+        range_description = (
+            f"an integer from 0 through {maximum}"
+            if maximum is not None
+            else "a non-negative integer"
+        )
         _raise_bdamage_error(
             path,
             code="invalid_bdamage_value",
             message=(
-                f"Column {column!r} must contain a non-negative integer."
+                f"Column {column!r} must contain {range_description}."
             ),
             line=line,
             column=column,
             value=raw_value,
         )
     return value
+
+
+def _validate_direct_mmm_base64(
+    path: Path,
+    *,
+    raw_value: str,
+    positions: int,
+    line: int,
+) -> None:
+    value = raw_value
+    if positions == 0:
+        if value:
+            _raise_bdamage_error(
+                path,
+                code="invalid_bdamage_matrix",
+                message=(
+                    "Column 'direct_mmm_base64' must be empty when "
+                    "'mmm_positions' is zero."
+                ),
+                line=line,
+                column=BDAMAGE_DIRECT_MMM_COLUMN,
+            )
+        return
+
+    if not value:
+        _raise_bdamage_error(
+            path,
+            code="invalid_bdamage_matrix",
+            message=(
+                "Column 'direct_mmm_base64' must contain Base64 data when "
+                "'mmm_positions' is positive."
+            ),
+            line=line,
+            column=BDAMAGE_DIRECT_MMM_COLUMN,
+        )
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (binascii.Error, ValueError):
+        _raise_bdamage_error(
+            path,
+            code="invalid_bdamage_matrix",
+            message=(
+                "Column 'direct_mmm_base64' must contain standard Base64 "
+                "data without embedded whitespace."
+            ),
+            line=line,
+            column=BDAMAGE_DIRECT_MMM_COLUMN,
+        )
+    expected_bytes = positions * BDAMAGE_MMM_BYTES_PER_POSITION
+    if len(decoded) != expected_bytes:
+        _raise_bdamage_error(
+            path,
+            code="invalid_bdamage_matrix",
+            message=(
+                "Column 'direct_mmm_base64' decoded to an unexpected matrix "
+                "byte length."
+            ),
+            line=line,
+            column=BDAMAGE_DIRECT_MMM_COLUMN,
+            expected_bytes=expected_bytes,
+            actual_bytes=len(decoded),
+        )
 
 
 def _parse_damage_float(
@@ -261,7 +337,7 @@ class GraphEngineStore:
                         code="unsupported_bdamage_schema",
                         message=(
                             "Damage dataset is empty and does not contain "
-                            "the required 43-column header."
+                            "the required V2 46-column header."
                         ),
                     )
 
@@ -275,7 +351,7 @@ class GraphEngineStore:
                         code="unsupported_bdamage_schema",
                         message=(
                             "Damage dataset header must identify taxids "
-                            "with the V1 '#taxid' column."
+                            "with the V2 '#taxid' column."
                         ),
                         line=reader.line_num,
                         required_column="#taxid",
@@ -306,19 +382,18 @@ class GraphEngineStore:
                     for column in normalized_header
                     if column not in BDAMAGE_COLUMNS
                 ]
-                legacy_header = normalized_header == [
-                    "taxid",
-                    "count",
-                    "name",
-                ]
-                if legacy_header:
+                is_pre_v2_header = (
+                    "count" in normalized_header
+                    and BDAMAGE_DIRECT_COUNT_COLUMN not in normalized_header
+                )
+                if is_pre_v2_header:
                     _raise_bdamage_error(
                         path,
                         code="unsupported_bdamage_schema",
                         message=(
-                            "Legacy three-column .bdamage.txt files are not "
-                            "supported. Regenerate this dataset with the "
-                            "current unicorn lca command."
+                            "Pre-V2 .bdamage.txt files are not supported. "
+                            "Regenerate this dataset with the current "
+                            "unicorn lca command."
                         ),
                         line=reader.line_num,
                         required_columns=list(BDAMAGE_HEADER_COLUMNS),
@@ -329,7 +404,7 @@ class GraphEngineStore:
                         code="unsupported_bdamage_schema",
                         message=(
                             "Damage dataset header contains columns outside "
-                            "the supported Unicorn V1 schema."
+                            "the supported Unicorn V2 schema."
                         ),
                         line=reader.line_num,
                         unknown_columns=unknown,
@@ -339,18 +414,18 @@ class GraphEngineStore:
                         path,
                         code="missing_bdamage_columns",
                         message=(
-                            "Damage dataset is missing required V1 columns."
+                            "Damage dataset is missing required V2 columns."
                         ),
                         line=reader.line_num,
                         missing_columns=missing,
                     )
-                if len(normalized_header) != len(BDAMAGE_COLUMNS):
+                if normalized_header != list(BDAMAGE_COLUMNS):
                     _raise_bdamage_error(
                         path,
                         code="unsupported_bdamage_schema",
                         message=(
                             "Damage dataset header does not match the "
-                            "supported Unicorn V1 schema."
+                            "supported Unicorn V2 schema and column order."
                         ),
                         line=reader.line_num,
                     )
@@ -381,10 +456,49 @@ class GraphEngineStore:
                         raw_value=row[column_index["taxid"]],
                         line=reader.line_num,
                     )
-                    count = _parse_non_negative_integer(
+                    direct_count = _parse_non_negative_integer(
                         path,
-                        column="count",
-                        raw_value=row[column_index["count"]],
+                        column=BDAMAGE_DIRECT_COUNT_COLUMN,
+                        raw_value=row[
+                            column_index[BDAMAGE_DIRECT_COUNT_COLUMN]
+                        ],
+                        line=reader.line_num,
+                    )
+                    subtree_count = _parse_non_negative_integer(
+                        path,
+                        column=BDAMAGE_SUBTREE_COUNT_COLUMN,
+                        raw_value=row[
+                            column_index[BDAMAGE_SUBTREE_COUNT_COLUMN]
+                        ],
+                        line=reader.line_num,
+                    )
+                    if subtree_count < direct_count:
+                        _raise_bdamage_error(
+                            path,
+                            code="invalid_bdamage_value",
+                            message=(
+                                "Column 'subtree_count' must be greater than "
+                                "or equal to 'direct_count'."
+                            ),
+                            line=reader.line_num,
+                            direct_count=direct_count,
+                            subtree_count=subtree_count,
+                        )
+                    mmm_positions = _parse_non_negative_integer(
+                        path,
+                        column=BDAMAGE_MMM_POSITIONS_COLUMN,
+                        raw_value=row[
+                            column_index[BDAMAGE_MMM_POSITIONS_COLUMN]
+                        ],
+                        line=reader.line_num,
+                        maximum=BDAMAGE_MAX_MMM_POSITIONS,
+                    )
+                    _validate_direct_mmm_base64(
+                        path,
+                        raw_value=row[
+                            column_index[BDAMAGE_DIRECT_MMM_COLUMN]
+                        ],
+                        positions=mmm_positions,
                         line=reader.line_num,
                     )
                     if taxid in damage_by_taxid:
@@ -452,6 +566,8 @@ class GraphEngineStore:
                     )
                     damage_by_taxid[taxid] = DamageProfile(
                         taxid=taxid,
+                        direct_count=direct_count,
+                        subtree_count=subtree_count,
                         ct_frequency=values["CTfreq"],
                         ga_frequency=values["GAfreq"],
                         amplitude=values["A"],
@@ -467,17 +583,17 @@ class GraphEngineStore:
                         missing_fields=missing_fields,
                     )
 
-                    counts_map[taxid] = count
+                    counts_map[taxid] = direct_count
                     if clean_name != "NA":
                         names_map[taxid] = clean_name
                     counts_payload.append(
                         {
                             "taxid": taxid,
-                            "count": count,
+                            "count": direct_count,
                             "name": clean_name,
                         }
                     )
-                    total_reads += count
+                    total_reads += direct_count
         except PermissionError:
             _raise_filesystem_http_error(
                 path,

@@ -285,13 +285,14 @@ curl http://127.0.0.1:8000/datasets
 
 ### Supported damage format
 
-Graphengine supports the current 43-column wide `.bdamage.txt` output from
-`unicorn lca`. The required schema and scientific scope are documented in
-[docs/damage_input_contract.md](docs/damage_input_contract.md).
+Graphengine supports the current fixed 46-column V2 `.bdamage.txt` output
+from `unicorn lca`. The required schema and scientific scope are documented
+in [docs/damage_input_contract_v2.md](docs/damage_input_contract_v2.md).
 
-Legacy three-column files are intentionally unsupported. They fail with the
-structured error `unsupported_bdamage_schema` and should be regenerated with
-the current `unicorn lca`; Graphengine does not silently reinterpret them.
+Pre-V2 and legacy three-column files are intentionally unsupported. They fail
+with the structured error `unsupported_bdamage_schema` and should be
+regenerated with the current `unicorn lca`; Graphengine does not silently
+reinterpret them.
 
 To inspect damage after rendering:
 
@@ -304,9 +305,10 @@ To inspect damage after rendering:
 5. Use `Export normalized TSV` in either view to export one long-form row per
    taxon, dataset, and terminal position.
 
-The popup keeps two scopes explicit:
+The popup keeps the producer scopes explicit:
 
-- read counts are direct assignments to the selected taxid;
+- `direct_count` is direct assignment to the selected taxid;
+- `subtree_count` is the selected taxid plus represented descendants;
 - damage evidence is cumulative over the selected taxid and descendants.
 
 Dataset labels and colors come from the same active metadata resolver used by
