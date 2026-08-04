@@ -1,0 +1,229 @@
+# Unicorn .bdamage V2 Migration Plan
+
+STATE - STARTED 03/08/2026
+
+## Objective
+
+Make `.bdamage.txt` the single LCA and damage output artifact.
+
+V2 must make taxonomic scope explicit:
+
+- direct read assignments remain available for tree construction;
+- subtree read assignments are emitted beside them;
+- fitted damage and `K/N/Dx` values remain subtree-scoped;
+- the encoded direct mismatch matrix currently emitted in `.mmm.txt` moves
+  into `.bdamage.txt`;
+- `unicorn lca` stops producing a separate `.mmm.txt` file.
+
+No Graphengine implementation work begins until the producer changes below
+are complete and its V2 output has been inspected.
+
+## Frozen V2 File Contract
+
+Each V2 row has these leading columns:
+
+```text
+#taxid  direct_count  subtree_count  name  CTfreq  ...  mmm_positions  direct_mmm_base64
+```
+
+The complete fixed header is the existing V1 wide header with these changes:
+
+1. Rename `count` to `direct_count`.
+2. Insert `subtree_count` after `direct_count`.
+3. Append `mmm_positions` and `direct_mmm_base64` after all existing
+   `K5/N5/K3/N3/Dx5/Dx3` position columns.
+
+Semantic rules:
+
+- `direct_count` is the number of reads whose LCA is exactly the row taxid.
+- `subtree_count` is the sum of direct counts for the row taxid and every
+  descendant taxid represented in the LCA result.
+- `CTfreq`, `GAfreq`, fitted parameters, and `K/N/Dx` values are computed
+  from cumulative mismatch evidence for the row taxid and descendants.
+- `direct_mmm_base64` remains direct raw mismatch evidence for the exact row
+  taxid. Its name makes that intentionally different scope explicit.
+- `mmm_positions` is the effective `--mmm` length. It is `0` when no raw
+  mismatch matrix is available; in that case `direct_mmm_base64` is empty.
+
+Raw-matrix encoding:
+
+- `direct_mmm_base64` is standard Base64 with no embedded whitespace.
+- Before Base64 encoding, values are serialized as IEEE-754 binary32 values
+  in little-endian byte order.
+- Cell order is the existing internal order: 5-prime side, then 3-prime
+  side; within each side, position order; within each position,
+  `ref_base * 4 + query_base` in `A, C, G, T` order.
+- For `mmm_positions = P > 0`, decoded data must contain exactly
+  `2 * P * 16` float32 values, or `128 * P` bytes.
+
+V2 is intentionally incompatible with V1 and legacy three-column files.
+Existing files must be regenerated with the updated `unicorn lca`.
+
+## Producer Work First
+
+### 1. Add Explicit Cumulative Count State
+
+STATE - DONE
+
+- Add `subtree_count` to `taxa_t` in `src/libunicorn/unicorn_damage.h`.
+- Continue using the existing `count` member internally as the direct count
+  during LCA assignment, or rename it internally only if every caller is
+  updated in the same change.
+- Initialize the new field when a taxon is first touched.
+- Extend the existing descendant rollup used by `unicorn_computedamage()` so
+  one traversal accumulates both:
+  - the cumulative mismatch matrix used for fitting;
+  - the cumulative direct-read count used for `subtree_count`.
+- Do not add a second count-only descendant traversal. The current damage
+  rollup already performs the necessary ancestry test.
+- Preserve inclusive semantics: a taxon contributes to its own
+  `subtree_count`.
+
+### 2. Consolidate V2 Output in the LCA Producer
+
+STATE - DONE
+
+- Replace the duplicated `.bdamage.txt` and `.mmm.txt` row writers in
+  `src/libunicorn/unicorn_lca.c` with one V2 `.bdamage.txt` writer.
+- Emit `direct_count` and `subtree_count` for every output row.
+- Emit all existing fitted fields and first-five-position columns unchanged
+  in meaning.
+- Move the raw direct `mmm` payload into `direct_mmm_base64` in that same
+  row.
+- Replace direct memory Base64 encoding with an explicit portable float32
+  little-endian serialization helper before Base64 encoding.
+- Emit `mmm_positions = 0` and an empty matrix field if raw matrix output is
+  disabled.
+- Remove the separate `<outprefix>.mmm.txt` output path and its redundant
+  writer once the V2 writer contains all information.
+- Keep `.lca.txt` behavior unchanged.
+- Treat failure to open or write the V2 output as a command error rather than
+  silently continuing with incomplete output.
+
+### 3. Producer Validation
+
+STATE - DONE
+
+- Add or extend focused C tests using a small taxonomy/read fixture that has
+  both a parent taxon and directly assigned descendants.
+- Verify, for at least one parent row:
+  - `direct_count` equals exact-LCA assignments;
+  - `subtree_count` equals direct plus descendant assignments;
+  - `subtree_count >= direct_count`;
+  - cumulative `K/N` values agree with the subtree evidence.
+- Verify a taxon with no descendants has equal direct and subtree counts.
+- Verify `direct_mmm_base64` decodes to the expected byte length and direct
+  matrix values for a known `--mmm` value.
+- Verify `--mmm 0` writes `mmm_positions = 0` and an empty matrix field.
+- Verify `.mmm.txt` is no longer created.
+- Run the existing libunicorn build and focused LCA/damage tests before
+  touching Graphengine.
+
+### 4. Producer Migration Notes
+
+STATE - DONE
+
+- Add concise command/output documentation for V2 near the LCA command
+  documentation when the producer is complete.
+- Document that V1 and legacy `.bdamage.txt` inputs are obsolete.
+- Do not use this migration to change separate known LCA/damage issues:
+  - ancestor taxa with zero direct reads still have no row;
+  - alignments without `MD` can have counts but no damage evidence;
+  - reverse-strand mismatch handling needs its own audit;
+  - no-data fit validity and optimizer behavior are separate work items;
+  - row ordering remains a separate determinism issue.
+
+## Graphengine Work After Producer Validation
+
+### 5. Freeze the Graphengine V2 Contract
+
+STATE - DONE
+
+Implementation note: the active contract constants now describe V2. The V1
+schema is intentionally unsupported and is recognized only to produce a
+clear regeneration error.
+
+- Replace the current `unicorn_bdamage_v1` schema constants in
+  `src/libunicorn/graphengine/unicorn_backend/damage_contract.py` with V2.
+- Define the fixed 46-column header:
+  - `#taxid`, `direct_count`, `subtree_count`, `name`;
+  - existing 10 fit columns;
+  - existing 30 first-five position columns;
+  - `mmm_positions`, `direct_mmm_base64`.
+- Keep the parser strict: reject V1 and legacy files with a clear
+  `regenerate with the current unicorn lca` message.
+
+### 6. Update the Backend Data Model and Parser
+
+STATE - DONE
+
+- Parse `direct_count` into `DatasetModel.counts_map`; this remains the sole
+  count source used to construct Graphengine's induced tree.
+- Parse `subtree_count` into `DamageProfile` and expose it only for damage
+  profile payloads, tables, and exports.
+- Preserve `total_reads` as the sum of `direct_count`; never sum subtree
+  counts across rows.
+- Validate `mmm_positions` as a non-negative bounded integer.
+- Validate `direct_mmm_base64` against the fixed decoded byte length when
+  `mmm_positions > 0`; require it to be empty when positions are zero.
+- Do not retain decoded matrices, or the Base64 strings, in the long-lived
+  backend dataset model during this migration. Graphengine does not yet
+  visualize raw matrix cells.
+- Preserve current handling of non-finite fit values and profile validity.
+
+### 7. Update Damage Payloads and Frontend Labels
+
+STATE - DONE
+
+- Return both `direct_count` and `subtree_count` for every
+  taxon-by-dataset damage profile.
+- Update the damage popup, selected-node table, and TSV export to label both
+  scopes precisely.
+- Remove the current wording that implies only direct counts are available.
+- Keep tree rendering, count matrices, barplots, and PCoA based on direct
+  counts plus Graphengine's existing backend-derived subtree aggregation.
+- Do not decode or plot `direct_mmm_base64` in this pass.
+
+### 8. Update Documentation and Fixtures
+
+STATE - DONE
+
+- Rewrite `src/libunicorn/graphengine/docs/damage_input_contract.md` for V2,
+  including both count columns and raw matrix encoding details.
+- Update backend/API documentation where damage payload fields are described.
+- Replace all 43-column `.bdamage.txt` test fixtures with valid 46-column V2
+  fixtures.
+- Add one intentionally stale V1 fixture and assert that it fails cleanly.
+- Add malformed V2 fixtures for:
+  - missing `subtree_count`;
+  - `subtree_count < direct_count`;
+  - invalid Base64;
+  - incorrect decoded matrix length;
+  - non-empty matrix data with `mmm_positions = 0`.
+
+### 9. Regression and Migration Gate
+
+STATE - IN PROGRESS
+
+- Run focused producer tests and inspect one real V2 output file.
+- Run Graphengine backend/unit tests for schema validation and damage payloads.
+- Run Graphengine E2E damage tests, including single-node visualization,
+  selected-node table, and export.
+- Manually confirm that a V2 file renders the tree from `direct_count` while
+  the damage view displays both direct and subtree counts.
+- Confirm that every V2 `subtree_count` agrees with the backend-derived,
+  per-dataset cumulative total in the active taxonomy; reject the first
+  mismatch with `inconsistent_bdamage_subtree_count` and guidance to use the
+  producer taxonomy or regenerate the dataset.
+- Manually confirm that a V1 file fails with the regeneration message.
+- Confirm no `.mmm.txt` file is emitted by the updated LCA command.
+
+## Definition of Done
+
+- `unicorn lca` produces one V2 `.bdamage.txt` artifact and no `.mmm.txt`.
+- Each V2 row explicitly records direct and subtree read counts.
+- Cumulative damage fields are no longer visually compared only with a
+  direct-only count.
+- Graphengine accepts only validated V2 damage files, uses direct counts for
+  tree construction, and exposes both count scopes in damage views.
+- All affected producer, backend, and frontend tests pass.
