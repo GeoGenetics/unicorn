@@ -71,8 +71,6 @@
     const mode = els.countMode.value;
     const maxValue = Math.max(1, ...nodes.map((n) => mode === "direct" ? n.direct : n.total));
 
-    els.svg.setAttribute("width", width);
-    els.svg.setAttribute("height", height);
     els.svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     treeViewport.setBaseDimensions(width, height);
     els.svg.innerHTML = "";

@@ -20,6 +20,17 @@
   function setBaseDimensions(width, height) {
     viewport.baseWidth = Math.max(0, Number(width) || 0);
     viewport.baseHeight = Math.max(0, Number(height) || 0);
+    applyDisplayDimensions();
+  }
+
+  function applyDisplayDimensions() {
+    if (!els.svg || !viewport.baseWidth || !viewport.baseHeight) return;
+    const zoom = Math.min(
+      viewport.maxZoom,
+      Math.max(viewport.minZoom, Number(viewport.zoom) || 1),
+    );
+    els.svg.setAttribute("width", String(viewport.baseWidth * zoom));
+    els.svg.setAttribute("height", String(viewport.baseHeight * zoom));
   }
 
   function getState() {
@@ -80,6 +91,7 @@
     init,
     setTooltipHider,
     setBaseDimensions,
+    applyDisplayDimensions,
     getState,
   };
 })(window);
