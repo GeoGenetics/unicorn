@@ -1081,6 +1081,40 @@ class GraphEngineStore:
             key=lambda child: (-child.total, child.name)
         )
 
+    def _validate_damage_subtree_counts(
+        self,
+        selection: SelectionModel,
+        taxonomy: TaxonomyModel,
+        nodes_by_taxid: Dict[int, TreeNodeModel],
+    ) -> None:
+        """Require declared V2 subtree totals to match the induced tree."""
+        for dataset_index, dataset in enumerate(selection.datasets):
+            for taxid, profile in dataset.damage_by_taxid.items():
+                node = nodes_by_taxid.get(taxid)
+                if node is None:
+                    # A row outside the active taxonomy cannot be checked by
+                    # this tree, and is already reported as a missing taxid.
+                    continue
+                derived_subtree_count = node.total_by_source[dataset_index]
+                if profile.subtree_count == derived_subtree_count:
+                    continue
+                _raise_bdamage_error(
+                    self.config.upload_dir / dataset.fileinfo.name,
+                    code="inconsistent_bdamage_subtree_count",
+                    message=(
+                        "Declared V2 'subtree_count' does not match the "
+                        "backend-derived sum of direct counts for this "
+                        "taxid and its represented descendants. Use the "
+                        "same nodes.dmp used by unicorn lca, or regenerate "
+                        "the dataset with the current unicorn lca command."
+                    ),
+                    taxid=taxid,
+                    direct_count=profile.direct_count,
+                    declared_subtree_count=profile.subtree_count,
+                    derived_subtree_count=derived_subtree_count,
+                    nodes_file=taxonomy.nodes_fileinfo.name,
+                )
+
     def build_tree_model(
         self,
         selection: SelectionModel,
@@ -1184,6 +1218,11 @@ class GraphEngineStore:
             )
 
         self._compute_totals(root, 0)
+        self._validate_damage_subtree_counts(
+            selection,
+            taxonomy,
+            objects,
+        )
         tree = TreeModel(
             root=root,
             missing_taxids=sorted(missing_taxids),

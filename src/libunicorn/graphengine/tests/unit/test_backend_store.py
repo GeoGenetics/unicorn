@@ -30,7 +30,7 @@ def store_fixture(tmp_path: Path) -> tuple[GraphEngineStore, Path, Path]:
     dataset = tmp_path / "sample.bdamage.txt"
     dataset.write_text(
         wide_bdamage_text([
-            damage_row(10, 7, "Clade A"),
+            damage_row(10, 7, "Clade A", subtree_count=10),
             damage_row(11, 3, "Species A"),
         ]),
         encoding="utf-8",
@@ -91,7 +91,13 @@ def test_dataset_change_invalidates_selection_and_tree_caches(
 
     dataset_path.write_text(
         wide_bdamage_text([
-            damage_row(10, 50, "Clade A", A=0.25),
+            damage_row(
+                10,
+                50,
+                "Clade A",
+                subtree_count=80,
+                A=0.25,
+            ),
             damage_row(11, 30, "Species A"),
         ]),
         encoding="utf-8",
@@ -112,6 +118,32 @@ def test_dataset_change_invalidates_selection_and_tree_caches(
     )
     assert refreshed_tree is not tree
     assert refreshed_tree.root.total == 80
+
+
+def test_tree_rejects_inconsistent_v2_subtree_count(
+    store_fixture: tuple[GraphEngineStore, Path, Path],
+) -> None:
+    store, dataset_path, _ = store_fixture
+    dataset_path.write_text(
+        wide_bdamage_text([
+            damage_row(10, 7, "Clade A", subtree_count=7),
+            damage_row(11, 3, "Species A"),
+        ]),
+        encoding="utf-8",
+    )
+
+    selection = store.build_selection([dataset_path.name])
+    taxonomy = store.get_or_load_taxonomy()
+    with pytest.raises(HTTPException) as caught:
+        store.build_tree_model(selection, taxonomy)
+
+    assert caught.value.status_code == 400
+    assert caught.value.detail["code"] == (
+        "inconsistent_bdamage_subtree_count"
+    )
+    assert caught.value.detail["taxid"] == 10
+    assert caught.value.detail["declared_subtree_count"] == 7
+    assert caught.value.detail["derived_subtree_count"] == 10
 
 
 def test_taxonomy_loading_optional_names_and_tree_cache(

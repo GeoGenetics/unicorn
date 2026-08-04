@@ -38,7 +38,7 @@ def backend_fixture(
     dataset_b = tmp_path / "sample_b.bdamage.txt"
     dataset_a.write_text(
         wide_bdamage_text([
-            damage_row(10, 5, "Clade A"),
+            damage_row(10, 5, "Clade A", subtree_count=8),
             damage_row(11, 3, "Species A"),
             damage_row(20, 2, "Species B"),
         ]),
@@ -46,7 +46,7 @@ def backend_fixture(
     )
     dataset_b.write_text(
         wide_bdamage_text([
-            damage_row(10, 1, "Clade A"),
+            damage_row(10, 1, "Clade A", subtree_count=8),
             damage_row(11, 7, "Species A"),
             damage_row(20, 4, "Species B"),
         ]),

@@ -5,8 +5,9 @@ These small `.bdamage.txt` files are immutable test inputs using the current
 their taxids, names, and direct counts preserve the original E2E datasets.
 
 The historic V1 fixtures did not contain cumulative count data. Their V2
-replacements therefore set `subtree_count` equal to `direct_count`; this keeps
-them valid structural fixtures without inventing descendant assignments.
+replacements preserve direct counts and derive `subtree_count` from those
+counts plus `testing/nodes.dmp`. This keeps the fixture profiles consistent
+with the same per-dataset cumulative totals Graphengine derives for the tree.
 
 `example_v2.bdamage.txt` is the parser/upload fixture. Unit tests may load it
 directly, but E2E setup deliberately does not seed it as a third runtime

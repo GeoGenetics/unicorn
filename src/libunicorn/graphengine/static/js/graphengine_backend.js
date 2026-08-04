@@ -724,8 +724,31 @@
       throw error;
     }
     if (!response.ok) {
-      addClientLog("error", "datasets", "Backend datasets request failed.", `HTTP ${response.status}`);
-      throw new Error(`Backend datasets request failed with HTTP ${response.status}`);
+      const payload = await response.json().catch(() => ({}));
+      const detail = payload?.detail;
+      const message = typeof detail === "string"
+        ? detail
+        : typeof detail?.message === "string"
+          ? detail.message
+          : `Backend datasets request failed with HTTP ${response.status}`;
+      const errorCode = typeof detail?.code === "string"
+        ? detail.code
+        : null;
+      const filename = typeof detail?.filename === "string"
+        ? detail.filename
+        : null;
+      const diagnostic = [
+        errorCode,
+        filename ? `file ${filename}` : null,
+        message,
+      ].filter(Boolean).join(" | ");
+      addClientLog(
+        "error",
+        "datasets",
+        "Backend datasets request failed.",
+        diagnostic,
+      );
+      throw new Error(message);
     }
 
     const payload = await response.json();

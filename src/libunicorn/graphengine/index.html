@@ -45,7 +45,7 @@
                   <span>Host</span>
                   <input id="remoteHost" type="text" placeholder="remote-server.example.org">
                 </label>
-                <button id="connectBtn" class="primary" type="button">Test Tunnel</button>
+                <button id="connectBtn" class="primary" type="button">Connect Backend</button>
                 <button id="uploadBtn" class="secondary" type="button">Upload Loaded Files</button>
                 <div id="connectionState" class="connection-state offline">Not connected</div>
                 <div class="command-block">
@@ -55,7 +55,7 @@
                   </div>
                   <pre id="tunnelCommand" class="tunnel-command">ssh -L 8001:localhost:8001 youruser@remote-server</pre>
                 </div>
-                <small id="tunnelHint" class="hint">Start the graphengine backend and connect this UI to it. If the backend runs on another machine, open the SSH tunnel first, then use <strong>Test Tunnel</strong> to verify the backend HTTP endpoint.</small>
+                <small id="tunnelHint" class="hint">Start the graphengine backend and connect this UI to it. If the backend runs on another machine, open the SSH tunnel first, then use <strong>Connect Backend</strong> to verify the backend HTTP endpoint.</small>
                 <section id="remoteDatasetsPanel" class="remote-datasets" aria-label="Backend datasets" hidden>
                   <div class="remote-datasets-head">
                     <h3>Backend Datasets</h3>
@@ -355,7 +355,7 @@
     <script src="static/js/graphengine_dom.js?v=20260730a"></script>
     <script src="static/js/graphengine_metadata.js?v=20260701a"></script>
     <script src="static/js/graphengine_tree_model.js?v=20260701a"></script>
-    <script src="static/js/graphengine_backend.js?v=20260730b"></script>
+    <script src="static/js/graphengine_backend.js?v=20260804a"></script>
     <script src="static/js/graphengine_tree_render.js?v=20260701a"></script>
     <script src="static/js/graphengine_ui.js?v=20260701a"></script>
     <script src="static/js/graphengine_selection.js?v=20260701a"></script>

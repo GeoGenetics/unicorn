@@ -41,7 +41,12 @@ invalid; case-insensitive `nan` represents missing numeric damage values.
 
 Graphengine uses `direct_count` as the only source for induced-tree
 construction and total-read aggregation. It retains `subtree_count` for
-damage profiles, damage tables, and exports only.
+damage profiles, damage tables, and exports only. When the row taxid exists
+in the active taxonomy, Graphengine also verifies that the declared
+`subtree_count` matches the per-dataset total derived from those direct
+assignments. A mismatch fails rendering with
+`inconsistent_bdamage_subtree_count`. Use the same `nodes.dmp` supplied to
+`unicorn lca`, or regenerate the dataset with the current command.
 
 ## Raw Matrix Encoding
 

@@ -1,3 +1,5 @@
+import csv
+from io import StringIO
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
@@ -37,6 +39,58 @@ def _select_viridiplantae(page: Page) -> None:
     expect(page.locator("#damageBtn")).to_be_enabled(
         timeout=STEP_TIMEOUT_MS,
     )
+
+
+def _remove_profile_and_recompute_subtree_counts(
+    dataset_path: Path,
+    nodes_path: Path,
+    taxid_to_remove: int,
+) -> None:
+    """Keep the temporary V2 fixture internally consistent after removal."""
+    with dataset_path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        fieldnames = reader.fieldnames
+        assert fieldnames is not None
+        rows = [
+            row
+            for row in reader
+            if int(row["#taxid"]) != taxid_to_remove
+        ]
+
+    parents: dict[int, int] = {}
+    for line in nodes_path.read_text(encoding="utf-8").splitlines():
+        fields = [field.strip() for field in line.split("|")]
+        if len(fields) < 2:
+            continue
+        parents[int(fields[0])] = int(fields[1])
+
+    subtree_counts: dict[int, int] = {}
+    for row in rows:
+        taxid = int(row["#taxid"])
+        direct_count = int(row["direct_count"])
+        visited: set[int] = set()
+        while taxid not in visited:
+            visited.add(taxid)
+            subtree_counts[taxid] = subtree_counts.get(taxid, 0) + direct_count
+            parent_taxid = parents.get(taxid)
+            if parent_taxid is None or parent_taxid == taxid:
+                break
+            taxid = parent_taxid
+
+    for row in rows:
+        taxid = int(row["#taxid"])
+        row["subtree_count"] = str(subtree_counts[taxid])
+
+    output = StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=fieldnames,
+        delimiter="\t",
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    dataset_path.write_text(output.getvalue(), encoding="utf-8")
 
 
 def _open_damage_popup(
@@ -156,19 +210,18 @@ def test_selected_node_opens_damage_visualization(
 ) -> None:
     _select_viridiplantae(rendered_page)
 
-    log_step("Removing one taxid profile to exercise mixed valid/missing state")
+    log_step(
+        "Removing one taxid profile and rebuilding V2 subtree counts "
+        "to exercise mixed valid/missing state"
+    )
     dataset_path = (
         Path(services["upload_dir"])
         / "Lib_sim1_collapsed.alnfilt.bdamage.txt"
     )
-    lines = dataset_path.read_text(encoding="utf-8").splitlines()
-    dataset_path.write_text(
-        "\n".join(
-            line
-            for line in lines
-            if line.startswith("#") or line.split("\t", 1)[0] != "33090"
-        ) + "\n",
-        encoding="utf-8",
+    _remove_profile_and_recompute_subtree_counts(
+        dataset_path,
+        Path(services["upload_dir"]) / "nodes.dmp",
+        33090,
     )
 
     popup, response = _open_damage_popup(rendered_page)
