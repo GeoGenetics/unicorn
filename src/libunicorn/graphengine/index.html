@@ -313,6 +313,12 @@
 
       <section class="workspace">
         <div id="status" class="status">Connect to the graphengine backend, upload or select datasets, and render a tree to begin.</div>
+        <div id="treeViewportToolbar" class="tree-viewport-toolbar" aria-label="Tree zoom controls">
+          <button id="treeZoomOut" class="secondary compact-btn tree-zoom-btn" type="button" aria-label="Zoom out tree" title="Zoom out tree" disabled>-</button>
+          <output id="treeZoomValue" class="tree-zoom-value" aria-live="polite" aria-label="Tree zoom">100%</output>
+          <button id="treeZoomReset" class="secondary compact-btn tree-zoom-reset" type="button" title="Reset tree zoom to 100%" disabled>Reset</button>
+          <button id="treeZoomIn" class="secondary compact-btn tree-zoom-btn" type="button" aria-label="Zoom in tree" title="Zoom in tree" disabled>+</button>
+        </div>
         <div id="chartWrap" class="chart-wrap">
           <svg id="treeSvg" role="img" aria-label="Taxonomic LCA tree"></svg>
           <div id="tooltip" class="tooltip" hidden></div>
@@ -356,7 +362,7 @@
     <script src="static/js/graphengine_metadata.js?v=20260701a"></script>
     <script src="static/js/graphengine_tree_model.js?v=20260701a"></script>
     <script src="static/js/graphengine_backend.js?v=20260804a"></script>
-    <script src="static/js/graphengine_tree_viewport.js?v=20260804b"></script>
+    <script src="static/js/graphengine_tree_viewport.js?v=20260804c"></script>
     <script src="static/js/graphengine_tree_render.js?v=20260701a"></script>
     <script src="static/js/graphengine_ui.js?v=20260701a"></script>
     <script src="static/js/graphengine_selection.js?v=20260701a"></script>

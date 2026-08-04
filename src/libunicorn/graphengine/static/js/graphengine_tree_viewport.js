@@ -12,6 +12,7 @@
   const viewport = state.treeViewport;
   const WHEEL_ZOOM_SENSITIVITY = 0.001;
   const WHEEL_LINE_PIXELS = 16;
+  const BUTTON_ZOOM_FACTOR = 1.25;
   let hideTooltip = () => {};
   let initialized = false;
   let wheelFrame = null;
@@ -28,11 +29,15 @@
   }
 
   function applyDisplayDimensions() {
-    if (!els.svg || !viewport.baseWidth || !viewport.baseHeight) return;
+    if (!els.svg || !viewport.baseWidth || !viewport.baseHeight) {
+      updateControls();
+      return;
+    }
     const zoom = clampZoom(viewport.zoom);
     viewport.zoom = zoom;
     els.svg.setAttribute("width", String(viewport.baseWidth * zoom));
     els.svg.setAttribute("height", String(viewport.baseHeight * zoom));
+    updateControls();
   }
 
   function clampZoom(value) {
@@ -79,12 +84,36 @@
     pendingWheelZoom = null;
     if (!request || !els.svg || !els.chartWrap) return;
 
+    setZoom(request.zoom, request);
+  }
+
+  function getViewportCenter() {
+    if (!els.chartWrap) return null;
+    const bounds = els.chartWrap.getBoundingClientRect();
+    return {
+      clientX: bounds.left + (bounds.width / 2),
+      clientY: bounds.top + (bounds.height / 2),
+    };
+  }
+
+  function setZoom(value, anchor = null) {
+    const zoom = clampZoom(value);
+    if (!viewport.baseWidth || !viewport.baseHeight || !els.svg || !els.chartWrap) {
+      viewport.zoom = zoom;
+      updateControls();
+      return;
+    }
+
     const chartBounds = els.chartWrap.getBoundingClientRect();
     const svgBounds = els.svg.getBoundingClientRect();
-    if (!svgBounds.width || !svgBounds.height) return;
+    if (!anchor || !svgBounds.width || !svgBounds.height) {
+      viewport.zoom = zoom;
+      applyDisplayDimensions();
+      return;
+    }
 
-    const pointerX = request.clientX - chartBounds.left;
-    const pointerY = request.clientY - chartBounds.top;
+    const pointerX = anchor.clientX - chartBounds.left;
+    const pointerY = anchor.clientY - chartBounds.top;
     const logicalX = (
       els.chartWrap.scrollLeft + pointerX
     ) / (svgBounds.width / viewport.baseWidth);
@@ -92,7 +121,7 @@
       els.chartWrap.scrollTop + pointerY
     ) / (svgBounds.height / viewport.baseHeight);
 
-    viewport.zoom = request.zoom;
+    viewport.zoom = zoom;
     applyDisplayDimensions();
 
     const scaledBounds = els.svg.getBoundingClientRect();
@@ -102,6 +131,35 @@
     els.chartWrap.scrollTop = (
       logicalY * (scaledBounds.height / viewport.baseHeight)
     ) - pointerY;
+  }
+
+  function zoomIn() {
+    setZoom(viewport.zoom * BUTTON_ZOOM_FACTOR, getViewportCenter());
+  }
+
+  function zoomOut() {
+    setZoom(viewport.zoom / BUTTON_ZOOM_FACTOR, getViewportCenter());
+  }
+
+  function resetZoom() {
+    setZoom(1, getViewportCenter());
+  }
+
+  function updateControls() {
+    const hasTree = viewport.baseWidth > 0 && viewport.baseHeight > 0;
+    const zoom = clampZoom(viewport.zoom);
+    if (els.treeZoomValue) {
+      els.treeZoomValue.textContent = `${Math.round(zoom * 100)}%`;
+    }
+    if (els.treeZoomOut) {
+      els.treeZoomOut.disabled = !hasTree || zoom <= viewport.minZoom;
+    }
+    if (els.treeZoomIn) {
+      els.treeZoomIn.disabled = !hasTree || zoom >= viewport.maxZoom;
+    }
+    if (els.treeZoomReset) {
+      els.treeZoomReset.disabled = !hasTree || Math.abs(zoom - 1) < 0.0001;
+    }
   }
 
   function getState() {
@@ -120,6 +178,10 @@
     let moved = false;
 
     els.chartWrap.addEventListener("wheel", queueWheelZoom, { passive: false });
+    els.treeZoomOut?.addEventListener("click", zoomOut);
+    els.treeZoomReset?.addEventListener("click", resetZoom);
+    els.treeZoomIn?.addEventListener("click", zoomIn);
+    updateControls();
 
     els.chartWrap.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -166,6 +228,10 @@
     setBaseDimensions,
     applyDisplayDimensions,
     clampZoom,
+    setZoom,
+    zoomIn,
+    zoomOut,
+    resetZoom,
     getState,
   };
 })(window);

@@ -1158,6 +1158,44 @@ button {
   font-weight: 700;
 }
 
+.tree-viewport-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 42px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 253, 247, 0.84);
+}
+
+.tree-zoom-btn,
+.tree-zoom-reset {
+  min-width: 34px;
+  min-height: 30px;
+  padding: 4px 8px;
+}
+
+.tree-zoom-btn {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.tree-zoom-reset {
+  font-size: 11px;
+}
+
+.tree-zoom-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
 .chart-wrap {
   position: relative;
   flex: 1 1 auto;
