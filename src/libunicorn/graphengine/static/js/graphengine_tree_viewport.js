@@ -10,8 +10,12 @@
   }
 
   const viewport = state.treeViewport;
+  const WHEEL_ZOOM_SENSITIVITY = 0.001;
+  const WHEEL_LINE_PIXELS = 16;
   let hideTooltip = () => {};
   let initialized = false;
+  let wheelFrame = null;
+  let pendingWheelZoom = null;
 
   function setTooltipHider(callback) {
     hideTooltip = typeof callback === "function" ? callback : () => {};
@@ -25,12 +29,79 @@
 
   function applyDisplayDimensions() {
     if (!els.svg || !viewport.baseWidth || !viewport.baseHeight) return;
-    const zoom = Math.min(
-      viewport.maxZoom,
-      Math.max(viewport.minZoom, Number(viewport.zoom) || 1),
-    );
+    const zoom = clampZoom(viewport.zoom);
+    viewport.zoom = zoom;
     els.svg.setAttribute("width", String(viewport.baseWidth * zoom));
     els.svg.setAttribute("height", String(viewport.baseHeight * zoom));
+  }
+
+  function clampZoom(value) {
+    return Math.min(
+      viewport.maxZoom,
+      Math.max(viewport.minZoom, Number(value) || 1),
+    );
+  }
+
+  function normalizeWheelDelta(event) {
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      return event.deltaY * WHEEL_LINE_PIXELS;
+    }
+    if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      return event.deltaY * Math.max(els.chartWrap.clientHeight, 1);
+    }
+    return event.deltaY;
+  }
+
+  function queueWheelZoom(event) {
+    if (!viewport.baseWidth || !viewport.baseHeight || !els.svg) return;
+    const delta = normalizeWheelDelta(event);
+    if (!Number.isFinite(delta) || delta === 0) return;
+
+    event.preventDefault();
+    hideTooltip();
+
+    const currentZoom = pendingWheelZoom?.zoom ?? viewport.zoom;
+    const zoom = clampZoom(
+      currentZoom * Math.exp(-delta * WHEEL_ZOOM_SENSITIVITY),
+    );
+    pendingWheelZoom = {
+      zoom,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+    if (wheelFrame !== null) return;
+    wheelFrame = requestAnimationFrame(applyQueuedWheelZoom);
+  }
+
+  function applyQueuedWheelZoom() {
+    wheelFrame = null;
+    const request = pendingWheelZoom;
+    pendingWheelZoom = null;
+    if (!request || !els.svg || !els.chartWrap) return;
+
+    const chartBounds = els.chartWrap.getBoundingClientRect();
+    const svgBounds = els.svg.getBoundingClientRect();
+    if (!svgBounds.width || !svgBounds.height) return;
+
+    const pointerX = request.clientX - chartBounds.left;
+    const pointerY = request.clientY - chartBounds.top;
+    const logicalX = (
+      els.chartWrap.scrollLeft + pointerX
+    ) / (svgBounds.width / viewport.baseWidth);
+    const logicalY = (
+      els.chartWrap.scrollTop + pointerY
+    ) / (svgBounds.height / viewport.baseHeight);
+
+    viewport.zoom = request.zoom;
+    applyDisplayDimensions();
+
+    const scaledBounds = els.svg.getBoundingClientRect();
+    els.chartWrap.scrollLeft = (
+      logicalX * (scaledBounds.width / viewport.baseWidth)
+    ) - pointerX;
+    els.chartWrap.scrollTop = (
+      logicalY * (scaledBounds.height / viewport.baseHeight)
+    ) - pointerY;
   }
 
   function getState() {
@@ -47,6 +118,8 @@
     let startLeft = 0;
     let startTop = 0;
     let moved = false;
+
+    els.chartWrap.addEventListener("wheel", queueWheelZoom, { passive: false });
 
     els.chartWrap.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -92,6 +165,7 @@
     setTooltipHider,
     setBaseDimensions,
     applyDisplayDimensions,
+    clampZoom,
     getState,
   };
 })(window);
