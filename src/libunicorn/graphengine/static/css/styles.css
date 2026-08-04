@@ -1211,7 +1211,7 @@ button {
 
 #treeSvg {
   display: block;
-  min-width: 100%;
+  min-width: 0;
 }
 
 .edge {
