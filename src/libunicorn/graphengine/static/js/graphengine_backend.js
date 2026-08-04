@@ -20,6 +20,10 @@
     return namespace.ui || null;
   }
 
+  function resetTreeViewportSafe() {
+    namespace.treeViewport?.resetZoom?.();
+  }
+
   function getMinReadsValueSafe() {
     return typeof getUi()?.getMinReadsValue === "function"
       ? getUi().getMinReadsValue()
@@ -401,6 +405,7 @@
       return;
     }
 
+    resetTreeViewportSafe();
     applyRemoteVisiblePayload(payload);
     state.centerOnNextRender = true;
     addClientLog("success", "tree", `Loaded backend tree with ${Number(payload.direct_taxa || 0).toLocaleString()} direct taxa.`);

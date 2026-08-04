@@ -215,11 +215,10 @@
 
   function centerNode(node) {
     if (!node || !els.chartWrap) return;
-    const rootX = node.x || 0;
-    const rootY = node.y || 0;
+    const position = treeViewport.toDisplayCoordinates(node.x, node.y);
     els.chartWrap.scrollTo({
-      left: Math.max(0, rootX - 80),
-      top: Math.max(0, rootY - (els.chartWrap.clientHeight / 2)),
+      left: Math.max(0, position.x - 80),
+      top: Math.max(0, position.y - (els.chartWrap.clientHeight / 2)),
       behavior: "auto",
     });
   }

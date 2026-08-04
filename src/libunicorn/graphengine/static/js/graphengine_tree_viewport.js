@@ -142,7 +142,24 @@
   }
 
   function resetZoom() {
+    hideTooltip();
+    if (wheelFrame !== null) {
+      cancelAnimationFrame(wheelFrame);
+      wheelFrame = null;
+      pendingWheelZoom = null;
+    }
     setZoom(1, getViewportCenter());
+  }
+
+  function toDisplayCoordinates(x, y) {
+    if (!els.svg || !viewport.baseWidth || !viewport.baseHeight) {
+      return { x: Number(x) || 0, y: Number(y) || 0 };
+    }
+    const bounds = els.svg.getBoundingClientRect();
+    return {
+      x: (Number(x) || 0) * (bounds.width / viewport.baseWidth),
+      y: (Number(y) || 0) * (bounds.height / viewport.baseHeight),
+    };
   }
 
   function updateControls() {
@@ -232,6 +249,7 @@
     zoomIn,
     zoomOut,
     resetZoom,
+    toDisplayCoordinates,
     getState,
   };
 })(window);
