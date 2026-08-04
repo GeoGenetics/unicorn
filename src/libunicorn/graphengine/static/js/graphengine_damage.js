@@ -375,7 +375,8 @@
           <span class="status ${statusClass}">${escapeHtml(status)}</span>
         </header>
         <div class="dataset-facts">
-          <div><span>Direct reads</span><strong>${escapeHtml(formatInteger(dataset.direct_count))}</strong></div>
+          <div><span>Direct assignments</span><strong>${escapeHtml(formatInteger(dataset.direct_count))}</strong></div>
+          <div><span>Subtree assignments</span><strong>${escapeHtml(formatInteger(dataset.subtree_count))}</strong></div>
           ${metadataDetail(display)}
         </div>
         ${dataset.profile_present ? `
@@ -412,11 +413,12 @@
       html: `
         <section class="summary" id="damageSummary">
           <div class="scope-row">
-            <span class="scope direct">Counts: direct assignments</span>
-            <span class="scope cumulative">Damage: taxid plus descendants</span>
+            <span class="scope direct">Direct count: exact-LCA assignments</span>
+            <span class="scope cumulative">Subtree count: taxid plus descendants</span>
+            <span class="scope cumulative">Damage metrics: subtree evidence</span>
           </div>
           <p class="scope-warning">
-            Read counts are direct assignments to this node. Damage evidence is cumulative over this taxid and all descendants.
+            Each dataset profile includes both producer count scopes. Direct assignments build the tree; subtree assignments and damage evidence cover this taxid plus represented descendants.
           </p>
           <div class="status-summary">
             <span><strong>${counts.valid}</strong> valid</span>
@@ -462,7 +464,9 @@
       "metadata_field",
       "metadata_value",
       "direct_count",
-      "count_scope",
+      "direct_count_scope",
+      "subtree_count",
+      "subtree_count_scope",
       "damage_scope",
       "profile_status",
       "fit_valid",
@@ -531,7 +535,9 @@
             display.metadataField,
             display.missing ? "__missing__" : display.metadataValue,
             dataset.direct_count,
-            node.count_scope || payload.count_scope,
+            node.direct_count_scope || payload.direct_count_scope,
+            dataset.subtree_count,
+            node.subtree_count_scope || payload.subtree_count_scope,
             node.damage_scope || payload.damage_scope,
             dataset.profile_status,
             dataset.fit_valid,
@@ -923,6 +929,7 @@
               </div>
             </td>
             <td class="numeric">${escapeHtml(formatInteger(dataset.direct_count))}</td>
+            <td class="numeric">${escapeHtml(formatInteger(dataset.subtree_count))}</td>
             <td>${escapeHtml(profileStatusLabel(dataset))}</td>
             <td class="numeric">${escapeHtml(formatParameter(dataset.observed?.ct_frequency))}</td>
             <td class="numeric">${escapeHtml(formatParameter(dataset.observed?.ga_frequency))}</td>
@@ -1110,14 +1117,15 @@
     </header>
     <main>
       <div class="scope-shell">
-        <span class="badge direct">Counts: direct assignments</span>
-        <span class="badge cumulative">Damage: taxid plus descendants</span>
+        <span class="badge direct">Direct count: exact-LCA assignments</span>
+        <span class="badge cumulative">Subtree count: taxid plus descendants</span>
+        <span class="badge cumulative">Damage metrics: subtree evidence</span>
         <span class="badge">${profileCounts.valid} valid</span>
         <span class="badge">${profileCounts.invalid} invalid</span>
         <span class="badge">${profileCounts.missing} missing</span>
       </div>
       <p class="scope-note">
-        Each row keeps one taxon and dataset separate. Read counts are direct assignments; damage evidence is cumulative over that taxid and descendants.
+        Each row keeps one taxon and dataset separate. Direct assignments build the tree. Subtree assignments and damage evidence cover that taxid plus represented descendants.
       </p>
       <div class="table-shell">
         <table id="damageSelectedTable">
@@ -1125,7 +1133,8 @@
             <tr>
               <th>Taxon</th>
               <th>Dataset / metadata label</th>
-              <th>Direct reads</th>
+              <th>Direct assignments</th>
+              <th>Subtree assignments</th>
               <th>Profile</th>
               <th>CTfreq</th>
               <th>GAfreq</th>

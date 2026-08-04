@@ -20,13 +20,22 @@ from unicorn_backend.store import GraphEngineStore
 
 
 GRAPHENGINE_DIR = Path(__file__).resolve().parents[2]
-PRODUCER_FIXTURE = (
+V2_FIXTURE = (
     GRAPHENGINE_DIR
     / "tests"
     / "fixtures"
     / "datasets"
-    / "example43.bdamage.txt"
+    / "example_v2.bdamage.txt"
 )
+STALE_V1_FIXTURE = (
+    GRAPHENGINE_DIR
+    / "tests"
+    / "fixtures"
+    / "datasets"
+    / "invalid"
+    / "stale_v1.bdamage.txt"
+)
+MALFORMED_FIXTURE_DIR = STALE_V1_FIXTURE.parent
 
 
 def _store(tmp_path: Path) -> GraphEngineStore:
@@ -99,7 +108,8 @@ def test_wide_damage_file_parses_counts_names_and_profiles(
     assert dataset.valid_damage_taxa == 2
     assert dataset.invalid_damage_taxa == 0
     profile = dataset.damage_by_taxid[10]
-    assert profile.count_scope == "direct"
+    assert profile.direct_count_scope == "direct"
+    assert profile.subtree_count_scope == "subtree"
     assert profile.damage_scope == "subtree"
     assert profile.direct_count == 7
     assert profile.subtree_count == 23
@@ -383,11 +393,68 @@ def test_damage_change_invalidates_cached_dataset(tmp_path: Path) -> None:
     assert refreshed.counts_map == initial.counts_map
 
 
-def test_real_pre_v2_producer_fixture_is_rejected() -> None:
-    store = _store(PRODUCER_FIXTURE.parent)
+def test_real_v2_fixture_parses_with_direct_count_tree_semantics() -> None:
+    store = _store(V2_FIXTURE.parent)
+    dataset = store.get_or_load_dataset(V2_FIXTURE)
+
+    assert dataset.damage_schema == BDAMAGE_SCHEMA_VERSION
+    assert dataset.counts_map
+    assert dataset.total_reads == sum(dataset.counts_map.values())
+    assert dataset.damage_by_taxid
+
+
+def test_stale_v1_fixture_is_rejected_with_regeneration_guidance() -> None:
+    store = _store(STALE_V1_FIXTURE.parent)
     with pytest.raises(HTTPException) as caught:
-        store.get_or_load_dataset(PRODUCER_FIXTURE)
+        store.get_or_load_dataset(STALE_V1_FIXTURE)
 
     assert caught.value.status_code == 400
     assert caught.value.detail["code"] == "unsupported_bdamage_schema"
     assert "Regenerate" in caught.value.detail["message"]
+
+
+@pytest.mark.parametrize(
+    ("filename", "code", "column"),
+    [
+        (
+            "missing_subtree_count.bdamage.txt",
+            "missing_bdamage_columns",
+            None,
+        ),
+        (
+            "subtree_less_than_direct.bdamage.txt",
+            "invalid_bdamage_value",
+            None,
+        ),
+        (
+            "invalid_direct_mmm_base64.bdamage.txt",
+            "invalid_bdamage_matrix",
+            "direct_mmm_base64",
+        ),
+        (
+            "incorrect_direct_mmm_length.bdamage.txt",
+            "invalid_bdamage_matrix",
+            "direct_mmm_base64",
+        ),
+        (
+            "matrix_data_with_zero_positions.bdamage.txt",
+            "invalid_bdamage_matrix",
+            "direct_mmm_base64",
+        ),
+    ],
+)
+def test_malformed_v2_fixtures_are_rejected_cleanly(
+    filename: str,
+    code: str,
+    column: str | None,
+) -> None:
+    path = MALFORMED_FIXTURE_DIR / filename
+    store = _store(path.parent)
+    with pytest.raises(HTTPException) as caught:
+        store.get_or_load_dataset(path)
+
+    detail = caught.value.detail
+    assert caught.value.status_code == 400
+    assert detail["code"] == code
+    if column is not None:
+        assert detail["column"] == column

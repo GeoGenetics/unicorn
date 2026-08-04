@@ -89,7 +89,8 @@ def test_dataset_summary_exposes_compact_damage_capability(
         "taxa": 2,
         "valid_taxa": 1,
         "invalid_taxa": 1,
-        "count_scope": "direct",
+        "direct_count_scope": "direct",
+        "subtree_count_scope": "subtree",
         "damage_scope": "subtree",
     }
     assert "damage" not in dataset.to_render_payload()
@@ -112,7 +113,8 @@ def test_damage_node_returns_valid_and_missing_dataset_profiles(
 
     assert response["taxid"] == 10
     assert response["name"] == "Clade A"
-    assert response["count_scope"] == "direct"
+    assert response["direct_count_scope"] == "direct"
+    assert response["subtree_count_scope"] == "subtree"
     assert response["damage_scope"] == "subtree"
     assert response["request_context"]["dataset_names"] == [
         "sample_a.bdamage.txt",
@@ -180,7 +182,8 @@ def test_damage_selected_returns_compact_multi_node_payload(
         names_file=None,
     )
 
-    assert response["count_scope"] == "direct"
+    assert response["direct_count_scope"] == "direct"
+    assert response["subtree_count_scope"] == "subtree"
     assert response["damage_scope"] == "subtree"
     assert response["request_context"]["taxids"] == [10, 11]
     assert [

@@ -110,10 +110,10 @@ def test_valid_wide_damage_upload_renders(
 ) -> None:
     fixture = (
         e2e_conftest.DATASET_FIXTURE_DIR
-        / "example43.bdamage.txt"
+        / "example_v2.bdamage.txt"
     )
 
-    log_step("Uploading the producer-generated 43-column damage fixture")
+    log_step("Uploading the producer-compatible V2 damage fixture")
     metadata_free_connected_page.locator(
         "#lcaInputs .lca-file-input"
     ).first.set_input_files(str(fixture))
@@ -175,7 +175,8 @@ def test_selected_node_opens_damage_visualization(
     assert response.status == 200
     response_payload = response.json()
     assert response_payload["taxid"] == 33090
-    assert response_payload["count_scope"] == "direct"
+    assert response_payload["direct_count_scope"] == "direct"
+    assert response_payload["subtree_count_scope"] == "subtree"
     assert response_payload["damage_scope"] == "subtree"
     assert sorted(
         dataset["profile_status"]
@@ -184,11 +185,15 @@ def test_selected_node_opens_damage_visualization(
 
     expect(popup).to_have_title("Unicorn Damage Profile")
     expect(popup.locator("#damageSummary")).to_contain_text(
-        "Damage evidence is cumulative",
+        "Damage metrics: subtree evidence",
         timeout=STEP_TIMEOUT_MS,
     )
     expect(popup.locator("#damageSummary")).to_contain_text(
-        "Direct reads",
+        "Direct assignments",
+        timeout=STEP_TIMEOUT_MS,
+    )
+    expect(popup.locator("#damageSummary")).to_contain_text(
+        "Subtree assignments",
         timeout=STEP_TIMEOUT_MS,
     )
     expect(popup.locator(".dataset-card")).to_have_count(2)
@@ -255,7 +260,8 @@ def test_multiple_selected_nodes_open_table_and_export(
         2759,
         33090,
     }
-    assert response_payload["count_scope"] == "direct"
+    assert response_payload["direct_count_scope"] == "direct"
+    assert response_payload["subtree_count_scope"] == "subtree"
     assert response_payload["damage_scope"] == "subtree"
 
     expect(popup).to_have_title("Unicorn Selected Damage")
@@ -280,7 +286,10 @@ def test_multiple_selected_nodes_open_table_and_export(
     assert header.startswith(
         "taxid\tname\tdataset\tdataset_label\tmetadata_field"
     )
-    assert "\tcount_scope\tdamage_scope\t" in header
+    assert (
+        "\tdirect_count\tdirect_count_scope\tsubtree_count"
+        "\tsubtree_count_scope\tdamage_scope\t"
+    ) in header
     assert len(rows) == 20
     assert any(row.startswith("2759\tEukaryota\t") for row in rows)
     assert any(row.startswith("33090\tViridiplantae\t") for row in rows)

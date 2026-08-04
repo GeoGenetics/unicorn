@@ -242,7 +242,8 @@ Response fields:
 - `ok`
 - `taxid`
 - `name`
-- `count_scope`
+- `direct_count_scope`
+- `subtree_count_scope`
 - `damage_scope`
 - `datasets`
 - `request_context`
@@ -250,6 +251,7 @@ Response fields:
 Per-dataset fields:
 - `dataset`
 - `direct_count`
+- `subtree_count`
 - `profile_present`
 - `profile_status`
   - `valid`, `invalid`, or `missing`
@@ -259,11 +261,14 @@ Per-dataset fields:
 - `fit`
 
 Notes:
-- `direct_count` applies only to the exact taxid
-- observed and fitted damage applies to the taxid plus descendant evidence
+- `direct_count` is exact-LCA assignment to the row taxid
+- `subtree_count`, observed damage, and fitted damage apply to the row taxid
+  plus represented descendant evidence
 - profiles and fitted parameters remain separate per dataset
 - missing profiles are represented explicitly and never converted to zeros
 - non-finite producer values are returned as JSON `null`
+- raw `direct_mmm_base64` values are validated during ingestion but are not
+  retained or returned by this endpoint
 - dataset summaries expose only compact damage capability counts; tree,
   report, and render payloads never include the full profile map
 
@@ -282,7 +287,8 @@ JSON request:
 
 Response fields:
 - `ok`
-- `count_scope`
+- `direct_count_scope`
+- `subtree_count_scope`
 - `damage_scope`
 - `nodes`
 - `request_context`

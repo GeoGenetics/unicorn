@@ -287,7 +287,7 @@ curl http://127.0.0.1:8000/datasets
 
 Graphengine supports the current fixed 46-column V2 `.bdamage.txt` output
 from `unicorn lca`. The required schema and scientific scope are documented
-in [docs/damage_input_contract_v2.md](docs/damage_input_contract_v2.md).
+in [docs/damage_input_contract.md](docs/damage_input_contract.md).
 
 Pre-V2 and legacy three-column files are intentionally unsupported. They fail
 with the structured error `unsupported_bdamage_schema` and should be

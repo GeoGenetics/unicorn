@@ -71,7 +71,8 @@ def test_dataset_payloads_preserve_counts_and_optional_metadata() -> None:
         "taxa": 0,
         "valid_taxa": 0,
         "invalid_taxa": 0,
-        "count_scope": "direct",
+        "direct_count_scope": "direct",
+        "subtree_count_scope": "subtree",
         "damage_scope": "subtree",
     }
     assert "damage" not in render_payload

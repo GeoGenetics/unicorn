@@ -1,12 +1,20 @@
 # Graphengine Dataset Fixtures
 
 These small `.bdamage.txt` files are immutable test inputs using the current
-43-column `unicorn_bdamage_v1` schema. Their damage values are synthetic;
+46-column `unicorn_bdamage_v2` schema. Their damage values are synthetic;
 their taxids, names, and direct counts preserve the original E2E datasets.
 
-`example43.bdamage.txt` is a producer-generated parser fixture. Unit tests may
-load it directly, but E2E setup deliberately does not seed it as a third
-runtime sample.
+The historic V1 fixtures did not contain cumulative count data. Their V2
+replacements therefore set `subtree_count` equal to `direct_count`; this keeps
+them valid structural fixtures without inventing descendant assignments.
+
+`example_v2.bdamage.txt` is the parser/upload fixture. Unit tests may load it
+directly, but E2E setup deliberately does not seed it as a third runtime
+sample.
+
+`invalid/` contains deliberately malformed inputs. They are never seeded into
+an E2E backend. `stale_v1.bdamage.txt` verifies the V1 regeneration error;
+the remaining files verify V2 field and raw-matrix validation.
 
 E2E fixtures copy them into a fresh temporary backend upload directory for
 each test. The backend must never modify files in this directory directly.

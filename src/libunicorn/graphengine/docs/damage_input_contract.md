@@ -1,137 +1,77 @@
-# Historical Unicorn bdamage V1 input contract
+# Unicorn bdamage V2 Input Contract
 
-This document describes the retired `unicorn_bdamage_v1` format. Graphengine
-no longer accepts V1 input. The active V2 contract is
-[damage_input_contract_v2.md](damage_input_contract_v2.md); regenerate older
-datasets with the current `unicorn lca` command.
-
-The historical V1 format was:
-
-```text
-unicorn_bdamage_v1
-```
-
-The remaining details are retained only as migration history.
+This is the active Graphengine input contract for `unicorn_bdamage_v2`. It
+matches the current `unicorn lca` producer output. Graphengine rejects V1 and
+legacy three-column damage files with regeneration guidance.
 
 ## Header
 
-The file is tab-separated, contains one header row, and has exactly 43
-columns:
+V2 is tab-separated, has one header row, and has exactly 46 columns in this
+order:
 
 ```text
-#taxid	count	name	CTfreq	GAfreq	A	q	c	phi	Zfit	fitCT0	fitGA0	nll	K5_0	N5_0	K3_0	N3_0	Dx5_0	Dx3_0	K5_1	N5_1	K3_1	N3_1	Dx5_1	Dx3_1	K5_2	N5_2	K3_2	N3_2	Dx5_2	Dx3_2	K5_3	N5_3	K3_3	N3_3	Dx5_3	Dx3_3	K5_4	N5_4	K3_4	N3_4	Dx5_4	Dx3_4
+#taxid direct_count subtree_count name
+CTfreq GAfreq A q c phi Zfit fitCT0 fitGA0 nll
+K5_0 N5_0 K3_0 N3_0 Dx5_0 Dx3_0
+K5_1 N5_1 K3_1 N3_1 Dx5_1 Dx3_1
+K5_2 N5_2 K3_2 N3_2 Dx5_2 Dx3_2
+K5_3 N5_3 K3_3 N3_3 Dx5_3 Dx3_3
+K5_4 N5_4 K3_4 N3_4 Dx5_4 Dx3_4
+mmm_positions direct_mmm_base64
 ```
 
-The in-memory field name for `#taxid` is `taxid`. All other field names are
-preserved.
+The parser requires this complete ordered field set and rejects duplicate,
+unknown, reordered, V1, and legacy three-column headers.
 
-Header validation is exact:
+## Field Types And Scope
 
-- every V1 column must be present;
-- duplicate columns are invalid;
-- unknown columns are invalid;
-- column order may be resolved by name by the parser, but the complete V1
-  field set must match.
+- Integer fields: `taxid`, `direct_count`, `subtree_count`, `mmm_positions`.
+- Floating-point fields: all fit and `K5/N5/K3/N3/Dx5/Dx3` position columns.
+- Text fields: `name`, `direct_mmm_base64`.
 
-A changed producer header is a new or unsupported schema, not an implicit V1
-extension.
+`taxid`, both count fields, and `mmm_positions` must be non-negative.
+`subtree_count` must be greater than or equal to `direct_count`. Infinity is
+invalid; case-insensitive `nan` represents missing numeric damage values.
 
-## Row contract
+- `direct_count` is the number of reads whose LCA is exactly the row taxid.
+- `subtree_count` is the direct count for the row taxid plus represented
+  descendants.
+- Observed damage, fitted fields, and `K/N/Dx` values are subtree-scoped.
+- `direct_mmm_base64` is direct raw mismatch evidence for the exact row taxid.
 
-Each non-empty data row represents one taxid:
+Graphengine uses `direct_count` as the only source for induced-tree
+construction and total-read aggregation. It retains `subtree_count` for
+damage profiles, damage tables, and exports only.
 
-- `taxid` is a non-negative integer;
-- `count` is a non-negative integer;
-- `name` is a quoted or unquoted text value;
-- all remaining fields are floating-point values;
-- case-insensitive `nan` represents missing numeric information;
-- K and N fields may be fractional;
-- duplicate taxids are invalid;
-- row order is unspecified.
+## Raw Matrix Encoding
 
-Malformed finite values are invalid. Infinity is not a supported input value.
+`direct_mmm_base64` is standard Base64 encoding of little-endian IEEE-754
+binary32 values. For `P = mmm_positions`, it contains exactly `32 * P`
+values, or `128 * P` decoded bytes.
 
-## Scope semantics
+The matrix order is 5-prime positions followed by 3-prime positions. Within
+each position, cells use `ref_base * 4 + query_base` with base order
+`A, C, G, T`.
 
-The row contains values with two different taxonomic scopes:
+If `mmm_positions` is zero, `direct_mmm_base64` must be empty. If it is
+positive, the payload must be valid Base64 and decode to the exact expected
+length. Graphengine validates this envelope at ingestion, then discards the
+decoded bytes and does not retain the Base64 value in the long-lived dataset
+model.
 
-```text
-count_scope = direct
-damage_scope = subtree
-```
+## Migration
 
-`count` is the number of reads assigned directly to the exact row taxid.
+V1 wide files and legacy three-column files are intentionally unsupported.
+Regenerate them with the current `unicorn lca`; Graphengine does not infer
+`subtree_count` or raw mismatch matrices from a V1 file.
 
-Damage observations and fitted parameters are computed from mismatch evidence
-for the row taxid and all descendant taxids rolled up by `unicorn lca`.
+## Runtime Ownership
 
-Graphengine must not present `count` and damage as if they had the same scope.
-
-## Fit fields
-
-- `CTfreq`: observed 5-prime C-to-T frequency at position zero.
-- `GAfreq`: observed 3-prime G-to-A frequency at position zero.
-- `A`: fitted terminal damage amplitude above background.
-- `q`: fitted damage decay parameter.
-- `c`: fitted background mismatch probability.
-- `phi`: fitted beta-binomial concentration parameter.
-- `Zfit`: producer-provided fit statistic for the damage amplitude.
-- `fitCT0`: fitted 5-prime probability at position zero.
-- `fitGA0`: fitted 3-prime probability at position zero.
-- `nll`: fitted negative log likelihood.
-
-Graphengine preserves producer values. It does not refit or reinterpret the
-model during input parsing.
-
-## Position fields
-
-Positions zero through four each contain:
-
-- `K5_x`: weighted 5-prime C-to-T observations.
-- `N5_x`: weighted 5-prime reference-C opportunities.
-- `K3_x`: weighted 3-prime G-to-A observations.
-- `N3_x`: weighted 3-prime reference-G opportunities.
-- `Dx5_x`: fitted 5-prime damage probability.
-- `Dx3_x`: fitted 3-prime damage probability.
-
-The producer may fit more positions according to `--mmm`, but V1 exposes only
-the first five positions in `.bdamage.txt`.
-
-## Missing and invalid values
-
-Graphengine must distinguish:
-
-- no profile for a taxid;
-- a profile with missing evidence;
-- a profile with an invalid fit;
-- a valid fit whose estimated value is zero.
-
-Internal models may retain NaN as a missing-value representation. External
-JSON payloads must convert non-finite values to `null` and must never emit
-`NaN` or `Infinity` tokens.
-
-## Rejection policy
-
-The parser introduced after this contract should use structured errors:
-
-```text
-unsupported_bdamage_schema
-missing_bdamage_columns
-invalid_bdamage_value
-duplicate_bdamage_taxid
-```
-
-Legacy three-column files must fail with `unsupported_bdamage_schema` and an
-actionable message directing the user to regenerate them with the current
-`unicorn lca`.
-
-## Machine-readable ownership
-
-The authoritative runtime constants are in:
+The frozen machine-readable V2 constants live in:
 
 ```text
 unicorn_backend/damage_contract.py
 ```
 
-Parser, model, service, route, and test code must import those constants rather
-than defining independent header lists.
+Parser, model, service, route, fixture, and test code import those constants
+rather than restating the schema.

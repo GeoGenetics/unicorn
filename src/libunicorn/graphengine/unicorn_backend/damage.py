@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from unicorn_backend.damage_contract import (
     BDAMAGE_DIRECT_COUNT_SCOPE,
     BDAMAGE_DAMAGE_SCOPE,
+    BDAMAGE_SUBTREE_COUNT_SCOPE,
 )
 from unicorn_backend.models import (
     DamageProfile,
@@ -103,7 +104,8 @@ def damage_selected_payload(
     ]
     return {
         "ok": True,
-        "count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
+        "direct_count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
+        "subtree_count_scope": BDAMAGE_SUBTREE_COUNT_SCOPE,
         "damage_scope": BDAMAGE_DAMAGE_SCOPE,
         "nodes": [
             _node_payload(
@@ -127,7 +129,8 @@ def _node_payload(
     payload = {
         "taxid": taxid,
         "name": name,
-        "count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
+        "direct_count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
+        "subtree_count_scope": BDAMAGE_SUBTREE_COUNT_SCOPE,
         "damage_scope": BDAMAGE_DAMAGE_SCOPE,
         "datasets": [
             _dataset_profile_payload(dataset, taxid)

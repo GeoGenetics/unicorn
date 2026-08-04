@@ -127,7 +127,7 @@ class DamageProfile:
     missing_fields: Tuple[str, ...]
 
     @property
-    def count_scope(self) -> str:
+    def direct_count_scope(self) -> str:
         return BDAMAGE_DIRECT_COUNT_SCOPE
 
     @property
@@ -143,7 +143,7 @@ class DamageProfile:
             "taxid": self.taxid,
             "direct_count": self.direct_count,
             "subtree_count": self.subtree_count,
-            "count_scope": self.count_scope,
+            "direct_count_scope": self.direct_count_scope,
             "subtree_count_scope": self.subtree_count_scope,
             "damage_scope": self.damage_scope,
             "ct_frequency": _json_safe_float(self.ct_frequency),
@@ -198,7 +198,8 @@ class DatasetModel:
             "taxa": self.damage_taxa,
             "valid_taxa": self.valid_damage_taxa,
             "invalid_taxa": self.invalid_damage_taxa,
-            "count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
+            "direct_count_scope": BDAMAGE_DIRECT_COUNT_SCOPE,
+            "subtree_count_scope": BDAMAGE_SUBTREE_COUNT_SCOPE,
             "damage_scope": BDAMAGE_DAMAGE_SCOPE,
         }
 

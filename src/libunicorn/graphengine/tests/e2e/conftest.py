@@ -24,7 +24,7 @@ BACKEND_SCRIPT = GRAPHENGINE_DIR / "server_app.py"
 DATASET_FIXTURE_DIR = GRAPHENGINE_DIR / "tests" / "fixtures" / "datasets"
 TEST_TAXONOMY_DIR_ENV = "UNICORN_GRAPHENGINE_TEST_TAXONOMY_DIR"
 PARSER_ONLY_DATASET_FIXTURES = {
-    "example43.bdamage.txt",
+    "example_v2.bdamage.txt",
 }
 
 
