@@ -6,9 +6,10 @@
   const els = namespace.els;
   const core = namespace.core;
   const treeModel = namespace.treeModel;
+  const treeViewport = namespace.treeViewport;
 
-  if (!state || !els || !core || !treeModel) {
-    throw new Error("Unicorn graphengine tree render expected state, DOM, core, and tree model modules to load first.");
+  if (!state || !els || !core || !treeModel || !treeViewport) {
+    throw new Error("Unicorn graphengine tree render expected state, DOM, core, tree model, and tree viewport modules to load first.");
   }
 
   const {
@@ -73,6 +74,7 @@
     els.svg.setAttribute("width", width);
     els.svg.setAttribute("height", height);
     els.svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    treeViewport.setBaseDimensions(width, height);
     els.svg.innerHTML = "";
 
     const edgeLayer = core.svgEl("g", { class: "edges" });
@@ -343,14 +345,7 @@
     els.selectedCount.textContent = state.selected.size.toLocaleString();
   }
 
-  function initChartPan() {
-    let pointerId = null;
-    let startX = 0;
-    let startY = 0;
-    let startLeft = 0;
-    let startTop = 0;
-    let moved = false;
-
+  function initChartSelectionClear() {
     els.chartWrap.addEventListener("click", (event) => {
       if (performance.now() < state.suppressClicksUntil) return;
       if (!(event.ctrlKey || event.metaKey)) return;
@@ -360,45 +355,9 @@
       state.selected.clear();
       redraw();
     });
-
-    els.chartWrap.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      if (event.target.closest(".tooltip")) return;
-      pointerId = event.pointerId;
-      startX = event.clientX;
-      startY = event.clientY;
-      startLeft = els.chartWrap.scrollLeft;
-      startTop = els.chartWrap.scrollTop;
-      moved = false;
-    });
-
-    window.addEventListener("pointermove", (event) => {
-      if (pointerId !== event.pointerId) return;
-      const dx = event.clientX - startX;
-      const dy = event.clientY - startY;
-      if (!moved && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
-        moved = true;
-        hideTooltip();
-        els.chartWrap.classList.add("dragging");
-        document.body.style.userSelect = "none";
-      }
-      if (!moved) return;
-      els.chartWrap.scrollLeft = startLeft - dx;
-      els.chartWrap.scrollTop = startTop - dy;
-    });
-
-    const stopPan = (event) => {
-      if (pointerId !== event.pointerId) return;
-      if (moved) state.suppressClicksUntil = performance.now() + 120;
-      pointerId = null;
-      moved = false;
-      els.chartWrap.classList.remove("dragging");
-      document.body.style.userSelect = "";
-    };
-
-    window.addEventListener("pointerup", stopPan);
-    window.addEventListener("pointercancel", stopPan);
   }
+
+  treeViewport.setTooltipHider(hideTooltip);
 
   namespace.treeRender = {
     redraw,
@@ -420,7 +379,7 @@
     showBackendTooltip,
     hideTooltip,
     renderSummary,
-    initChartPan,
+    initChartSelectionClear,
   };
 
   Object.assign(globalObject, namespace.treeRender);
