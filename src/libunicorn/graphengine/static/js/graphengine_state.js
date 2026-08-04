@@ -3,7 +3,18 @@
 (function initUnicornGraphEngineState(globalObject) {
   const namespace = globalObject.UnicornGraphEngine = globalObject.UnicornGraphEngine || {};
 
+  function createTreeViewportState() {
+    return {
+      zoom: 1,
+      minZoom: 0.25,
+      maxZoom: 4,
+      baseWidth: 0,
+      baseHeight: 0,
+    };
+  }
+
   if (namespace.state) {
+    namespace.state.treeViewport = namespace.state.treeViewport || createTreeViewportState();
     globalObject.state = namespace.state;
     globalObject.unicornGraphState = namespace.state;
     return;
@@ -44,6 +55,7 @@
     tooltipPoint: null,
     suppressClicksUntil: 0,
     minReadsActual: 0,
+    treeViewport: createTreeViewportState(),
   };
 
   globalObject.state = namespace.state;

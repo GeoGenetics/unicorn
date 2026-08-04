@@ -5,17 +5,11 @@
   const state = namespace.state;
   const els = namespace.els;
 
-  if (!state || !els) {
+  if (!state || !state.treeViewport || !els) {
     throw new Error("Unicorn graphengine tree viewport expected state and DOM modules to load first.");
   }
 
-  const viewport = {
-    zoom: 1,
-    minZoom: 0.25,
-    maxZoom: 4,
-    baseWidth: 0,
-    baseHeight: 0,
-  };
+  const viewport = state.treeViewport;
   let hideTooltip = () => {};
   let initialized = false;
 
