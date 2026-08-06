@@ -25,6 +25,7 @@ KSRC=src/klib/kthread.c
 KOBJ=src/klib/klib.o
 TEST_SRC=$(wildcard src/tests/*.c)
 TEST_BIN=$(TEST_SRC:.c=)
+MISC_BIN=src/misc/pathcounts
 LDFLAGS += -L$(HTSLIBDIR) -Wl,-rpath,$(HTSLIBDIR)
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
 GENESIS ?= src/genesis
@@ -46,7 +47,7 @@ endif
 HTSINCDIR = $(HTS_PREFIX)/include
 HTSLIBDIR = $(HTS_PREFIX)/lib
 
-.PHONY: clean all test test-taxonomy test-taxonomy-valgrind test-damage
+.PHONY: clean all test test-taxonomy test-taxonomy-valgrind test-damage pathcounts
 
 %.o:%.c src/version.h
 	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
@@ -79,6 +80,11 @@ src/version.h: src/version.h.in
 $(TEST_BIN): %: %.c libunicorn
 	$(CC) -o $@ $< libunicorn.a $(CFLAGS) $(LDFLAGS) -lhts -lz -lm -lpthread
 
+$(MISC_BIN): src/misc/pathcounts.c libunicorn
+	$(CC) -o $@ $< libunicorn.a $(CFLAGS) $(LDFLAGS) -lhts -lz -lm -lpthread
+
+pathcounts: $(MISC_BIN)
+
 test-taxonomy: $(TEST_BIN)
 	@for test in $(TEST_BIN); do ./$$test; done
 
@@ -93,4 +99,4 @@ test: test-taxonomy
 	[ $$cksum -eq 996842798 ] || (exit 1)
 
 clean:
-	rm -f $(OBJ) src/version.h libunicorn.a unicorn unicorn.h $(KOBJ) $(TEST_BIN) data/out.bam data/out.stats.txt
+	rm -f $(OBJ) src/version.h libunicorn.a unicorn unicorn.h $(KOBJ) $(TEST_BIN) $(MISC_BIN) data/out.bam data/out.stats.txt

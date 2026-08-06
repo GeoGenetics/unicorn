@@ -47,6 +47,12 @@ static int test_taxonomy_lookup(void)
           "known accession lookup failed");
     CHECK(utax_gettaxid(utax, "ACC_MISSING", &absent) == UINT32_MAX && absent,
           "missing accession lookup did not report absent");
+    CHECK(utax_gettaxid(utax, "ACC_BAD_SUFFIX", &absent) == UINT32_MAX && absent,
+          "non-numeric accession taxid was retained");
+    CHECK(utax_gettaxid(utax, "ACC_OVERFLOW", &absent) == UINT32_MAX && absent,
+          "overflowing accession taxid was retained");
+    CHECK(utax_gettaxid(utax, "ACC_NEGATIVE", &absent) == UINT32_MAX && absent,
+          "negative accession taxid was retained");
     CHECK(strcmp(utax_getname(utax, 2), "Alpha beta") == 0,
           "known taxid-to-name lookup failed");
     CHECK(!utax_getname(utax, 999), "missing taxid lookup returned a name");

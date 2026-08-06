@@ -110,19 +110,24 @@ static void _destroynodes(nodes_t *nodes)
   if (!nodes) return;
   if (nodes->map) uint2tup_destroy(nodes->map);
   if (nodes->levelmap) chr2int_destroy(nodes->levelmap);
+  if (nodes->rankmap) chr2chr_destroy(nodes->rankmap);
+  _strarena_destroy(&nodes->rank_arena);
   nodes->map = NULL;
   nodes->levelmap = NULL;
+  nodes->rankmap = NULL;
 }
 
 static nodes_t _loadnodemap(const char *fname, int *_ret)
 {
 	*_ret = -1;
 	int absent;
-	nodes_t nodes = {0,0};
+	nodes_t nodes = {0};
 	gzFile fp = Z_NULL;
 	nodes.map = uint2tup_init();
 	nodes.levelmap = chr2int_init();
-	if (!nodes.map || !nodes.levelmap) { *_ret = 4; goto fail; }
+	nodes.rankmap = chr2chr_init();
+	_strarena_init(&nodes.rank_arena, 0);
+	if (!nodes.map || !nodes.levelmap || !nodes.rankmap) { *_ret = 4; goto fail; }
 	fp = gzopen(fname, "r");
 	if (!fp) {
 		*_ret = 2;
@@ -152,10 +157,27 @@ static nodes_t _loadnodemap(const char *fname, int *_ret)
 		taxid  = strtoul(toks[0], NULL, 10);
 		parent = strtoul(toks[1], NULL, 10);
 		uint32_t level;
+		const char *rank;
 		j = chr2int_get(nodes.levelmap, toks[2]);
-		if (j == kh_end(nodes.levelmap)) level = 0;
-		else level = kh_val(nodes.levelmap, j);
-		utuple_t tup = {parent, NULL, level};
+		if (j != kh_end(nodes.levelmap)) {
+			level = kh_val(nodes.levelmap, j);
+			rank = unicornranks[level];
+		} else if (kh_eq_str(toks[2], "no rank")) {
+			level = 0;
+			rank = "no rank";
+		} else {
+			j = chr2chr_get(nodes.rankmap, toks[2]);
+			if (j == kh_end(nodes.rankmap)) {
+				char *copy = _strarena_strdup(&nodes.rank_arena, toks[2]);
+				if (!copy) { *_ret = 4; goto fail; }
+				j = chr2chr_put(nodes.rankmap, copy, &absent);
+				if (!absent) { *_ret = 4; goto fail; }
+				kh_val(nodes.rankmap, j) = copy;
+			}
+			level = 0;
+			rank = kh_val(nodes.rankmap, j);
+		}
+		utuple_t tup = {parent, rank, level};
 		k = uint2tup_put(nodes.map, taxid, &absent);
 		kh_val(nodes.map, k) = tup;
 	}
@@ -609,6 +631,34 @@ const char *utax_getname(const utax_t *utax, uint32_t taxid)
 	khint_t k = int2chr_get(map, taxid);
 	if (k == kh_end(map)) return NULL; // Not found
 	return kh_val(map, k); // Return name
+}
+
+uint32_t utax_getparent(const utax_t *utax, uint32_t taxid, int *absent)
+{
+	uint2tup_t *map;
+	khint_t k;
+
+	if (absent) *absent = 1;
+	if (!utax || !absent) return UINT32_MAX;
+	map = utax->nodes.map;
+	if (!map) return UINT32_MAX;
+	k = uint2tup_get(map, taxid);
+	if (k == kh_end(map)) return UINT32_MAX;
+	*absent = 0;
+	return kh_val(map, k).taxid;
+}
+
+const char *utax_getrank(const utax_t *utax, uint32_t taxid)
+{
+	uint2tup_t *map;
+	khint_t k;
+
+	if (!utax) return NULL;
+	map = utax->nodes.map;
+	if (!map) return NULL;
+	k = uint2tup_get(map, taxid);
+	if (k == kh_end(map)) return NULL;
+	return kh_val(map, k).rank;
 }
 
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret)

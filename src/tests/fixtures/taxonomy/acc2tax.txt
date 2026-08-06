@@ -2,3 +2,7 @@ accession	accession.version	taxid
 source_a	ACC_ALPHA	2
 source_b	ACC_BETA	3
 source_a	ACC_ALPHA	3
+source_bad_suffix	ACC_BAD_SUFFIX	3not_a_taxid
+source_overflow	ACC_OVERFLOW	4294967296
+source_negative	ACC_NEGATIVE	-1
+source_incomplete	ACC_INCOMPLETE

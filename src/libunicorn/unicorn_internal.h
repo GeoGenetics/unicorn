@@ -497,6 +497,9 @@ KHASHL_MAP_INIT(static, int2chr_t, int2chr,
 KHASHL_MAP_INIT(static, chr2int_t, chr2int,
                 const char *, uint32_t,
                 kh_hash_str, kh_eq_str)
+KHASHL_MAP_INIT(static, chr2chr_t, chr2chr,
+                const char *, const char *,
+                kh_hash_str, kh_eq_str)
 
 /*
   Append-only string storage for pointers retained by hash maps. Blocks are
@@ -577,6 +580,8 @@ KHASHL_MAP_INIT(static, chr2set_t, chr2set,
 typedef struct nodes_t {
   uint2tup_t *map;
   chr2int_t *levelmap;
+  chr2chr_t *rankmap;
+  strarena_t rank_arena;
 } nodes_t;
 
 typedef struct utax_t {
@@ -594,6 +599,10 @@ typedef struct utax_t {
 uint32_t utax_gettaxid(const utax_t *utax, const char *acc, int *absent);
 
 const char *utax_getname(const utax_t *utax, uint32_t taxid);
+
+uint32_t utax_getparent(const utax_t *utax, uint32_t taxid, int *absent);
+
+const char *utax_getrank(const utax_t *utax, uint32_t taxid);
 
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret);
 
