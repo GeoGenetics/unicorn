@@ -1,0 +1,197 @@
+# Tree Viewport Zoom Plan
+
+STATUS - STARTED
+
+## Objective
+
+Make large Graphengine trees comfortable to inspect by adding smooth,
+pointer-centred wheel zoom to the existing tree viewport.
+
+The feature is frontend-only. It must not change the backend tree contract,
+tree topology, node selection semantics, count semantics, reports, plots, or
+metadata behavior.
+
+## Current Baseline
+
+- `#chartWrap` is a scrollable viewport containing `#treeSvg`.
+- `graphengine_tree_render.js` computes the SVG layout and currently owns
+  left-button drag panning by adjusting `chartWrap.scrollLeft` and
+  `chartWrap.scrollTop`.
+- The SVG uses a stable logical `viewBox`; changing the display size can zoom
+  the whole tree without rebuilding every SVG node.
+
+## Frozen Interaction Contract
+
+- Wheel input while the pointer is over the tree zooms the tree smoothly.
+- Zoom is centred on the pointer location: the graph point under the pointer
+  remains under the pointer after scaling.
+- Left-button drag continues to pan using the existing scroll viewport.
+- Normal click still toggles node collapse/expansion.
+- Ctrl/Cmd-click still toggles node selection.
+- Double-click still focuses a node.
+- Tooltips continue to work; an active tooltip is hidden when viewport motion
+  begins.
+- Zoom must not trigger a tree redraw, a backend request, or a change to
+  selected/expanded/focused taxids.
+- Initial limits: 25% minimum zoom and 400% maximum zoom.
+- Zoom persists across local visual redraws such as selection, count-view
+  mode, and expand/collapse actions.
+- A fresh explicit `Render Tree` starts at 100% zoom.
+
+## Step 1: Add Dedicated Viewport Ownership
+
+STATUS - COMPLETE
+
+Create `static/js/graphengine_tree_viewport.js`.
+
+This module owns:
+
+- viewport zoom state and bounds;
+- base SVG display dimensions supplied by the renderer;
+- wheel handling and pointer-centred scale calculation;
+- drag-to-pan behavior currently in `graphengine_tree_render.js`;
+- reset and fit/zoom controls;
+- hiding the tooltip during pan or zoom.
+
+The module must not own tree layout, SVG node creation, selection, backend
+state, or graph semantics.
+
+Move only viewport event handling out of `graphengine_tree_render.js`; keep
+that module responsible for layout and SVG content.
+
+## Step 2: Add Minimal Viewport State
+
+STATUS - COMPLETE
+
+Add a small `treeViewport` state block in `graphengine_state.js`:
+
+```text
+zoom
+minZoom
+maxZoom
+baseWidth
+baseHeight
+```
+
+Keep this state local to the browser session. It must not enter backend
+request contexts, reports, metadata state, or Agent graph scope.
+
+## Step 3: Make Render Dimensions Zoom-Aware
+
+STATE - COMPLETE
+
+Change the renderer-to-viewport boundary so tree rendering supplies logical
+layout dimensions, for example:
+
+```text
+treeViewport.setBaseDimensions(width, height)
+```
+
+The viewport module applies the current zoom by updating only the displayed
+SVG width and height. The SVG `viewBox` remains in unscaled logical tree
+coordinates.
+
+This preserves crisp vector drawing and native scroll bounds while avoiding
+per-node DOM work during wheel input.
+
+Do not use a per-node transform and do not rerun tree layout while zooming.
+
+## Step 4: Implement Smooth Pointer-Centred Wheel Zoom
+
+STATE - COMPLETE
+
+Attach a non-passive `wheel` listener to `#chartWrap`.
+
+- Convert wheel delta to a multiplicative zoom factor so mouse wheels and
+  trackpads feel consistent.
+- Clamp the next zoom to the frozen bounds.
+- Before scaling, calculate the logical graph point below the pointer.
+- After scaling, adjust `scrollLeft` and `scrollTop` so that same graph point
+  remains below the pointer.
+- Batch display-size updates with `requestAnimationFrame`.
+- Prevent default scrolling only while the tree viewport receives the zoom
+  gesture.
+
+The first implementation should use conservative sensitivity and make the
+factor a named constant for later tuning against large real datasets.
+
+## Step 5: Add Accessible Recovery Controls
+
+STATE - COMPLETE
+
+Add a compact viewport toolbar adjacent to the tree containing:
+
+- Zoom out button.
+- Current zoom label, for example `100%`.
+- Reset button returning to 100%.
+- Zoom in button.
+
+Buttons must use the exact same viewport methods as wheel input. The label
+should expose the current value for E2E tests and make the feature usable
+without a mouse wheel.
+
+Keep controls visually quiet so the graph remains the primary workspace.
+
+## Step 6: Define Reset and Redraw Behavior
+
+STATE - COMPLETE
+
+- `Render Tree` resets zoom to 100% before displaying a newly fetched root
+  tree.
+- Tree redraws caused by count mode, metadata colors, selection, focus, or
+  expand/collapse preserve current zoom.
+- Resetting zoom does not alter scroll/selection/tree state beyond placing
+  the viewport at a valid scroll position.
+- Existing explicit root-centering behavior remains compatible with a 100%
+  fresh render.
+
+## Step 7: Keep CSS and Module Loading Explicit
+
+STATE - COMPLETE
+
+- Update `index.html` with the toolbar markup.
+- Load `graphengine_tree_viewport.js` after state/DOM/core dependencies and
+  before `graphengine_tree_render.js`.
+- Update `static/css/styles.css` for the compact toolbar, zoom label, and
+  SVG dimensions.
+- Ensure the SVG can shrink below the viewport when zoomed out without
+  preventing the user from panning when it is larger than the viewport.
+
+## Step 8: Add E2E Coverage
+
+STATE - IN PROGRESS
+
+Create `tests/e2e/test_tree_zoom.py`.
+
+Required checks:
+
+- render a normal fixture tree;
+- wheel up over the tree and verify the visible zoom label increases;
+- wheel down and verify the label decreases;
+- confirm the SVG display dimensions change while its logical `viewBox`
+  remains stable;
+- confirm no backend tree endpoint is requested for a wheel gesture;
+- confirm drag panning still changes viewport scroll position after zooming;
+- confirm selection/collapse behavior remains usable after zooming;
+- confirm reset returns the label to 100%.
+
+Existing E2E tests for rendering, selection, reports, barplot, PCoA, damage,
+metadata, and Agent behavior remain the regression gate.
+
+## Manual Acceptance Check
+
+- Load a large multi-sample backend tree.
+- Expand Eukaryota or another large clade.
+- Zoom into a dense group with the mouse wheel.
+- Pan with left-button drag.
+- Select nodes at a rank, then build a count matrix, barplot, and PCoA.
+- Confirm the viewport remains responsive and no tree data is refetched while
+  navigating.
+
+## Definition of Done
+
+- Large trees support smooth wheel zoom and existing drag pan.
+- Zoom is pointer-centred, bounded, and recoverable with controls.
+- Zoom causes no backend traffic and no semantic graph-state change.
+- Existing tree interactions remain intact.
+- New viewport E2E coverage passes with the full existing regression suite.
