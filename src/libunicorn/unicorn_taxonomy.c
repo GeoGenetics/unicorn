@@ -1,4 +1,5 @@
 #define _XOPEN_SOURCE 700
+#include <errno.h>
 #include <zlib.h>
 #include <stdatomic.h>
 #include "unicorn_internal.h"
@@ -40,6 +41,7 @@ typedef struct accmappipe_t {
     emap_chr2int_t *map;
     uint8_t nthreads;
     uint32_t ndup; //Number uf duplicate entries in acc2taxid files
+    _Atomic uint64_t nskipped; //Malformed plain-text accession rows
     _Atomic uint8_t failed;
 } accmappipe_t;
 
@@ -75,17 +77,26 @@ static inline void strip(char *line)
 
 static inline uint8_t _parse_acc2tax_line(char *line, char **key, uint32_t *val)
 {
-    char *tab1, *tab2;
+    char *saveptr = NULL;
+    char *accession;
+    char *version;
+    char *taxidstr;
+    char *end = NULL;
+    unsigned long parsed;
+
     if (!line || !key || !val) return 0;
-    tab1 = strchr(line, '\t');
-    if (!tab1) return 0;
-    *tab1++ = '\0';
-    tab2 = strchr(tab1, '\t');
-    if (!tab2) return 0;
-    *tab2++ = '\0';
-    while (*tab2 == ' ' || *tab2 == '\t') tab2++;
-    *key = tab1;
-    *val = (uint32_t)strtoul(tab2, NULL, 10);
+    accession = strtok_r(line, "\t\n \r", &saveptr);
+    version = strtok_r(NULL, "\t\n \r", &saveptr);
+    taxidstr = strtok_r(NULL, "\t\n \r", &saveptr);
+    if (!accession || !version || !taxidstr || taxidstr[0] == '-') return 0;
+
+    errno = 0;
+    parsed = strtoul(taxidstr, &end, 10);
+    if (errno == ERANGE || end == taxidstr || *end != '\0' || parsed > UINT32_MAX)
+        return 0;
+
+    *key = version;
+    *val = (uint32_t)parsed;
     return 1;
 }
 
@@ -257,12 +268,14 @@ static void _destroy_dataq(tdataq_t *dataq, uint8_t bits)
 static tdataq_t *_loaddqueue(kstream_t *ks,
                              emap_chr2int_t *map,
                              uint32_t *_nacc,
+                             uint64_t *_nskipped,
                              uint8_t *_failed)
 {
 	uint32_t nacc = 0;
+	uint64_t nskipped = 0;
 	tdataq_t *dataq = NULL;
 	kstring_t kstr = {0};
-	if (!ks || !map || !_nacc || !_failed) return NULL;
+	if (!ks || !map || !_nacc || !_nskipped || !_failed) return NULL;
 	*_failed = 0;
 	uint8_t bits = map->bits;
 	uint32_t nqueues = 1U << bits;
@@ -276,12 +289,15 @@ static tdataq_t *_loaddqueue(kstream_t *ks,
 	uint32_t val;
 	uint8_t low;
 	while ( (ks_getuntil(ks, '\n', &kstr, 0)) >= 0 ) {
-		if (kstr.l == 0)
-			break;
-    if (!_parse_acc2tax_line(kstr.s, &key, &val)) {
-      kstr.l = 0;
-      continue;
-    }
+		if (kstr.l == 0) {
+			kstr.l = 0;
+			continue;
+		}
+		if (!_parse_acc2tax_line(kstr.s, &key, &val)) {
+			nskipped++;
+			kstr.l = 0;
+			continue;
+		}
 		low = kh_hash_str(key) & (nqueues - 1U);
 		char *copy = _strarena_strdup(&map->key_arena, key);
 		if (!copy) goto fail;
@@ -293,6 +309,7 @@ static tdataq_t *_loaddqueue(kstream_t *ks,
 	}
 	free(kstr.s);
 		*_nacc = nacc;
+		*_nskipped = nskipped;
 		return dataq;
 
 fail:
@@ -300,6 +317,7 @@ fail:
 	_destroy_dataq(dataq, bits);
 	*_failed = 1;
 	*_nacc = 0;
+	*_nskipped = 0;
 	return NULL;
 }
 
@@ -309,12 +327,14 @@ static void *_accmapP(void *shared, int step, void *in)
   if      ( 0 == step) { //Load data into queues
     if (atomic_load(&p->failed)) return NULL;
     uint32_t nacc = 0;
+		uint64_t nskipped = 0;
 		uint8_t failed = 0;
-		tdataq_t *dataq = _loaddqueue(p->ks, p->map, &nacc, &failed);
+		tdataq_t *dataq = _loaddqueue(p->ks, p->map, &nacc, &nskipped, &failed);
     if (failed) {
       atomic_store(&p->failed, 1);
       return NULL;
     }
+		atomic_fetch_add(&p->nskipped, nskipped);
     if (nacc) {
         accmapstep_t *stepd = calloc(1, sizeof(accmapstep_t));
         if (!stepd) {
@@ -362,6 +382,7 @@ static emap_chr2int_t *_csvload(BGZF *fp, uint8_t nthreads)
 	if (!map) return NULL;
   accmappipe_t p = {0};
   atomic_init(&p.failed, 0);
+	atomic_init(&p.nskipped, 0);
   void *forpool = NULL;
 	kstring_t kstr = {0};
   kstream_t *ks = NULL;
@@ -381,6 +402,10 @@ static emap_chr2int_t *_csvload(BGZF *fp, uint8_t nthreads)
 	kt_forpool_destroy(forpool);
 	free(kstr.s);
   ks_destroy(ks);
+	if (VERBOSE && atomic_load(&p.nskipped)) {
+		fprintf(stderr, "[libunicorn::%s] Skipped %" PRIu64 " malformed accession rows\n",
+		        __func__, atomic_load(&p.nskipped));
+	}
 	return map;
 
 fail:
