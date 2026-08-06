@@ -52,9 +52,10 @@ static void usage(FILE *stream, const char *program)
 {
   fprintf(stream,
           "Usage: %s --bdamage FILE --nodes FILE --names FILE --taxid TAXID "
-          "--counts direct|cumulative [--ranks rank_a,rank_b]\n"
+          "--counts direct|cumulative [--ranks rank_a,rank_b] [--nohead] [--rev]\n"
           "\n"
           "Print TAXID and every parent through root as one tab-separated count row.\n"
+          "Columns run from TAXID to root by default; --rev prints root to TAXID.\n"
           "The taxonomy is loaded without an accession-to-taxid map.\n",
           program);
 }
@@ -303,16 +304,23 @@ static int collect_path_counts(const utax_t *taxonomy,
   return 1;
 }
 
-static void print_path_counts(const path_counts_t *path)
+static void print_path_counts(const path_counts_t *path, int nohead, int reverse)
 {
-  for (size_t i = 0; i < path->size; i++) {
-    if (i) putchar('\t');
-    fputs(path->entries[i].rank, stdout);
+  size_t printed = 0;
+
+  if (!nohead) {
+    for (size_t offset = 0; offset < path->size; offset++) {
+      size_t index = reverse ? path->size - offset - 1U : offset;
+      if (printed++) putchar('\t');
+      fputs(path->entries[index].rank, stdout);
+    }
+    putchar('\n');
   }
-  putchar('\n');
-  for (size_t i = 0; i < path->size; i++) {
-    if (i) putchar('\t');
-    printf("%" PRIu64, path->entries[i].count);
+  printed = 0;
+  for (size_t offset = 0; offset < path->size; offset++) {
+    size_t index = reverse ? path->size - offset - 1U : offset;
+    if (printed++) putchar('\t');
+    printf("%" PRIu64, path->entries[index].count);
   }
   putchar('\n');
 }
@@ -326,6 +334,8 @@ int main(int argc, char **argv)
     {"taxid", required_argument, NULL, 't'},
     {"counts", required_argument, NULL, 'c'},
     {"ranks", required_argument, NULL, 'r'},
+    {"nohead", no_argument, NULL, 'H'},
+    {"rev", no_argument, NULL, 'R'},
     {"help", no_argument, NULL, 'h'},
     {NULL, 0, NULL, 0},
   };
@@ -339,13 +349,15 @@ int main(int argc, char **argv)
   uint64_t parsed_taxid;
   uint32_t taxid = 0;
   int has_taxid = 0;
+  int nohead = 0;
+  int reverse = 0;
   count_mode_t mode;
   utax_t *taxonomy;
   int taxonomy_status = 0;
   int option;
   int status = EXIT_FAILURE;
 
-  while ((option = getopt_long(argc, argv, "b:n:a:t:c:r:h", long_options, NULL)) != -1) {
+  while ((option = getopt_long(argc, argv, "b:n:a:t:c:r:HRh", long_options, NULL)) != -1) {
     switch (option) {
       case 'b': bdamage_path = optarg; break;
       case 'n': nodes_path = optarg; break;
@@ -360,6 +372,8 @@ int main(int argc, char **argv)
         break;
       case 'c': count_mode = optarg; break;
       case 'r': ranks = optarg; break;
+      case 'H': nohead = 1; break;
+      case 'R': reverse = 1; break;
       case 'h': usage(stdout, argv[0]); return EXIT_SUCCESS;
       default: usage(stderr, argv[0]); return EXIT_FAILURE;
     }
@@ -385,7 +399,7 @@ int main(int argc, char **argv)
   status = collect_path_counts(taxonomy, &counts, taxid, mode, ranks, &path)
              ? EXIT_FAILURE
              : EXIT_SUCCESS;
-  if (status == EXIT_SUCCESS) print_path_counts(&path);
+  if (status == EXIT_SUCCESS) print_path_counts(&path, nohead, reverse);
   unicorn_closetaxonomy(taxonomy);
 
 done:
