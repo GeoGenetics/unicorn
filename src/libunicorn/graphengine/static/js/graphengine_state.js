@@ -15,6 +15,8 @@
 
   if (namespace.state) {
     namespace.state.treeViewport = namespace.state.treeViewport || createTreeViewportState();
+    namespace.state.remote.activeExpandedTaxids = namespace.state.remote.activeExpandedTaxids || new Set();
+    namespace.state.remote.treeRefreshGeneration = Number(namespace.state.remote.treeRefreshGeneration || 0);
     globalObject.state = namespace.state;
     globalObject.unicornGraphState = namespace.state;
     return;
@@ -34,7 +36,10 @@
       metadataFieldSelection: [],
       metadataVisualizationMode: "none",
       metadataValueColors: {},
+      // Requested expansion survives temporary filtering; active expansion is response state.
       expandedTaxids: new Set(),
+      activeExpandedTaxids: new Set(),
+      treeRefreshGeneration: 0,
       serverTreeActive: false,
       totalReads: 0,
       directTaxa: 0,

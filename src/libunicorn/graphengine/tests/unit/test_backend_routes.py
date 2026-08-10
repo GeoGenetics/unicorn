@@ -112,6 +112,7 @@ def backend_fixture(
         render_data=partial(core_routes.render_data, store=store),
         tree_model=partial(core_routes.tree_model, store=store),
         root_view=partial(tree_routes.root_view, store=store),
+        tree_view=partial(tree_routes.tree_view, store=store),
         expand_node=partial(tree_routes.expand_node, store=store),
         node_tooltip=partial(tree_routes.node_tooltip, store=store),
         uncollapse_to_tips=partial(
@@ -372,6 +373,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
             "tree",
             "missing_taxids",
             "expanded_taxids",
+            "requested_expanded_taxids",
             "min_reads",
             "total_reads",
             "direct_taxa",
@@ -384,6 +386,17 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
     assert root["tree"]["total"] == 22
     assert [child["taxid"] for child in root["tree"]["children"]] == [10, 20]
     assert root["expanded_taxids"] == []
+    assert root["requested_expanded_taxids"] == []
+
+    posted = backend_fixture.api.tree_view({
+        "files": backend_fixture.dataset_names,
+        "nodes_file": None,
+        "names_file": None,
+        "min_reads": 0,
+        "expanded_taxids": [10],
+    })
+    assert posted["expanded_taxids"] == [10]
+    assert posted["requested_expanded_taxids"] == [10]
 
     expanded = backend_fixture.api.expand_node(
         taxid=10,
@@ -394,6 +407,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
         expanded=None,
     )
     assert expanded["expanded_taxids"] == [10]
+    assert expanded["requested_expanded_taxids"] == [10]
     clade = next(
         child for child in expanded["tree"]["children"]
         if child["taxid"] == 10
@@ -449,6 +463,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
         "expanded_taxids": [],
     })
     assert uncollapsed["expanded_taxids"] == [10]
+    assert uncollapsed["requested_expanded_taxids"] == [10]
 
 
 def test_get_and_post_report_contracts_match(

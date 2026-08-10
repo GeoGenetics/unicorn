@@ -165,6 +165,35 @@ def test_visible_tree_preserves_root_and_filters_descendants(
     assert root_only["children"] == []
 
 
+def test_requested_expansion_survives_temporary_threshold_filtering(
+    tree_context: tuple[SelectionModel, TaxonomyModel, TreeModel],
+) -> None:
+    selection, taxonomy, tree = tree_context
+
+    high_threshold = visible_tree_response(
+        _ResponseStore(),
+        selection,
+        taxonomy,
+        tree,
+        min_reads=70,
+        expanded_taxids={10},
+    )
+    assert high_threshold["expanded_taxids"] == []
+    assert high_threshold["requested_expanded_taxids"] == [10]
+
+    restored = visible_tree_response(
+        _ResponseStore(),
+        selection,
+        taxonomy,
+        tree,
+        min_reads=0,
+        expanded_taxids=set(high_threshold["requested_expanded_taxids"]),
+    )
+    assert restored["expanded_taxids"] == [10]
+    clade = next(child for child in restored["tree"]["children"] if child["taxid"] == 10)
+    assert [child["taxid"] for child in clade["children"]] == [11, 12]
+
+
 def test_filtering_lineage_and_dataset_breakdown(
     tree_context: tuple[SelectionModel, TaxonomyModel, TreeModel],
 ) -> None:
@@ -263,6 +292,7 @@ def test_visible_tree_response_preserves_backend_payload_shape(
 
     assert payload["ok"] is True
     assert payload["expanded_taxids"] == [10]
+    assert payload["requested_expanded_taxids"] == [10]
     assert payload["total_reads"] == 100
     assert payload["direct_taxa"] == 4
     assert payload["request_context"] == response_context(

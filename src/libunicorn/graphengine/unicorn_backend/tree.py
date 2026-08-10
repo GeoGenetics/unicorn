@@ -303,6 +303,7 @@ def visible_tree_response(
         "tree": visible_tree,
         "missing_taxids": tree.missing_taxids,
         "expanded_taxids": active_expanded_taxids,
+        "requested_expanded_taxids": sorted(expanded_taxids),
         "min_reads": min_reads,
         "total_reads": selection.total_reads,
         "direct_taxa": len(selection.direct_counts),

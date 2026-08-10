@@ -116,11 +116,8 @@
     syncMinReadsControl();
     if (globalObject.hasBackendTree()) {
       try {
-        const payload = await globalObject.fetchRemoteVisibleTree({
-          minReads: getMinReadsValue(),
-          expandedTaxids: Array.from(state.remote.expandedTaxids),
-        });
-        globalObject.applyRemoteVisiblePayload(payload);
+        const applied = await globalObject.refreshRemoteTreeForMinReads();
+        if (!applied) return;
         await globalObject.refreshCurrentReportIfNeeded();
         globalObject.redraw();
         return;
@@ -141,11 +138,8 @@
     syncMinReadsControl();
     if (globalObject.hasBackendTree()) {
       try {
-        const payload = await globalObject.fetchRemoteVisibleTree({
-          minReads: getMinReadsValue(),
-          expandedTaxids: Array.from(state.remote.expandedTaxids),
-        });
-        globalObject.applyRemoteVisiblePayload(payload);
+        const applied = await globalObject.refreshRemoteTreeForMinReads();
+        if (!applied) return;
         await globalObject.refreshCurrentReportIfNeeded();
         globalObject.redraw();
         return;

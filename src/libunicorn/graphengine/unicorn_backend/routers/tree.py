@@ -46,6 +46,12 @@ def create_tree_router(*, store: GraphEngineStore) -> APIRouter:
             store=store,
         )
 
+    @router.post("/tree-view")
+    def tree_view_route(
+        payload: Dict[str, Any] = Body(...),
+    ) -> Dict[str, Any]:
+        return tree_view(payload, store=store)
+
     @router.get("/expand-node")
     def expand_node_route(
         taxid: int = Query(...),
@@ -114,6 +120,42 @@ def root_view(
         tree,
         min_reads,
         requested_expanded_taxids,
+    )
+
+
+def tree_view(
+    payload: Dict[str, Any],
+    *,
+    store: GraphEngineStore,
+) -> Dict[str, Any]:
+    files_value = payload.get("files")
+    if files_value is not None and not isinstance(files_value, list):
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail(
+                "files must be an array when supplied.",
+                code="invalid_files",
+            ),
+        )
+    min_reads_value = payload.get("min_reads", 0)
+    try:
+        min_reads = max(0, int(min_reads_value))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail(
+                "min_reads must be an integer.",
+                code="invalid_min_reads",
+                min_reads=min_reads_value,
+            ),
+        )
+    return root_view(
+        files=files_value,
+        nodes_file=str(payload.get("nodes_file") or "") or None,
+        names_file=str(payload.get("names_file") or "") or None,
+        min_reads=min_reads,
+        expanded=normalize_taxids(payload.get("expanded_taxids")),
+        store=store,
     )
 
 

@@ -215,6 +215,7 @@
       state.remote.metadata = null;
       state.remote.requestContext = null;
       state.remote.expandedTaxids.clear();
+      state.remote.activeExpandedTaxids.clear();
       updateConnectionState(false, "Could not reach backend");
       els.remoteDatasetsPanel.hidden = true;
       renderRemoteDatasets();
@@ -386,6 +387,7 @@
     }
 
     state.remote.expandedTaxids.clear();
+    state.remote.activeExpandedTaxids.clear();
     addClientLog(
       "info",
       "tree",
@@ -467,11 +469,8 @@
     getUi()?.setMinReadsValue?.(getUi()?.valueFromSliderPosition?.(els.minReads.value));
     if (hasBackendTree()) {
       try {
-        const payload = await fetchRemoteVisibleTree({
-          minReads: getMinReadsValueSafe(),
-          expandedTaxids: Array.from(state.remote.expandedTaxids),
-        });
-        applyRemoteVisiblePayload(payload);
+        const applied = await refreshRemoteTreeForMinReads();
+        if (!applied) return;
         await globalObject.refreshCurrentReportIfNeeded();
         globalObject.redraw();
         return;
@@ -554,6 +553,50 @@
     return response.json();
   }
 
+  async function postRemoteVisibleTree(options = {}) {
+    const body = buildRemoteContextPayload(options);
+    addClientLog(
+      "info",
+      "tree",
+      "POST /tree-view",
+      `selected_datasets=${body.files.length.toLocaleString()} requested_expanded_taxids=${body.expanded_taxids.length.toLocaleString()}`,
+    );
+    let response;
+    try {
+      response = await fetch("http://localhost:8000/tree-view", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      addClientLog("error", "tree", "Remote tree-view fetch failed.", core.errorToDetail(error));
+      throw error;
+    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      addClientLog("error", "tree", "Remote tree-view request failed.", `HTTP ${response.status}`);
+      throw new Error(`Remote tree-view request failed with HTTP ${response.status}`);
+    }
+    addClientLog("success", "tree", "Remote tree-view request succeeded.");
+    return payload;
+  }
+
+  async function refreshRemoteTreeForMinReads() {
+    const generation = state.remote.treeRefreshGeneration + 1;
+    state.remote.treeRefreshGeneration = generation;
+    const payload = await postRemoteVisibleTree({
+      minReads: getMinReadsValueSafe(),
+      expandedTaxids: Array.from(state.remote.expandedTaxids),
+    });
+    if (generation !== state.remote.treeRefreshGeneration) {
+      return false;
+    }
+    applyRemoteVisiblePayload(payload);
+    return true;
+  }
+
   function buildRemoteContextPayload(options = {}) {
     const activeRequestContext = getActiveBackendRequestContext();
     const files = Array.isArray(options.datasetNames)
@@ -575,9 +618,7 @@
       min_reads: minReads,
       expanded_taxids: Array.isArray(options.expandedTaxids)
         ? options.expandedTaxids.map((value) => Number(value))
-        : activeRequestContext?.expanded_taxids?.length
-          ? activeRequestContext.expanded_taxids.map((value) => Number(value))
-          : Array.from(state.remote.expandedTaxids),
+        : Array.from(state.remote.expandedTaxids),
     };
   }
 
@@ -691,19 +732,26 @@
   }
 
   function applyRemoteVisiblePayload(payload) {
+    // Invalidates an in-flight threshold refresh before any newer tree state is shown.
+    state.remote.treeRefreshGeneration += 1;
     const datasets = Array.isArray(payload.datasets) ? payload.datasets : [];
     state.series = buildSeriesFromRemoteDatasets(datasets);
     state.tree = buildRemoteTree(payload.tree);
     state.missingTaxids = new Set(Array.isArray(payload.missing_taxids) ? payload.missing_taxids : []);
     updateActiveBackendRequestContext(payload?.request_context, { preserveExpandedTaxids: false });
     const activeRequestContext = getActiveBackendRequestContext();
-    state.remote.expandedTaxids = new Set(
-      Array.isArray(activeRequestContext?.expanded_taxids)
-        ? activeRequestContext.expanded_taxids.map((value) => Number(value))
-        : Array.isArray(payload.expanded_taxids)
-          ? payload.expanded_taxids.map((value) => Number(value))
+    state.remote.activeExpandedTaxids = new Set(
+      Array.isArray(payload.expanded_taxids)
+        ? payload.expanded_taxids.map((value) => Number(value))
+        : Array.isArray(activeRequestContext?.expanded_taxids)
+          ? activeRequestContext.expanded_taxids.map((value) => Number(value))
           : [],
     );
+    if (Array.isArray(payload.requested_expanded_taxids)) {
+      state.remote.expandedTaxids = new Set(
+        payload.requested_expanded_taxids.map((value) => Number(value)),
+      );
+    }
     state.remote.serverTreeActive = true;
     state.remote.totalReads = Number(payload.total_reads || 0);
     state.remote.directTaxa = Number(payload.direct_taxa || 0);
@@ -875,6 +923,7 @@
     state.remote.currentReport = null;
     state.remote.requestContext = null;
     state.remote.expandedTaxids.clear();
+    state.remote.activeExpandedTaxids.clear();
     state.selected.clear();
     state.focusTaxid = null;
     state.missingTaxids.clear();
@@ -1294,6 +1343,8 @@
     buildRemoteContextUrl,
     buildRemoteContextPayload,
     fetchRemoteVisibleTree,
+    postRemoteVisibleTree,
+    refreshRemoteTreeForMinReads,
     postRemoteUncollapseToTips,
     fetchRemoteNodeTooltip,
     fetchRemoteTableView,
