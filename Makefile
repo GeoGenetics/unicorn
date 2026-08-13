@@ -25,7 +25,7 @@ KSRC=src/klib/kthread.c
 KOBJ=src/klib/klib.o
 TEST_SRC=$(wildcard src/tests/*.c)
 TEST_BIN=$(TEST_SRC:.c=)
-MISC_BIN=src/misc/pathcounts src/misc/taxdescendants
+MISC_BIN=src/misc/getranknames src/misc/pathcounts src/misc/taxdescendants
 LDFLAGS += -L$(HTSLIBDIR) -Wl,-rpath,$(HTSLIBDIR)
 GIT_COMMIT := $(shell git rev-parse --short HEAD)
 GENESIS ?= src/genesis
@@ -47,7 +47,7 @@ endif
 HTSINCDIR = $(HTS_PREFIX)/include
 HTSLIBDIR = $(HTS_PREFIX)/lib
 
-.PHONY: clean all test test-taxonomy test-taxonomy-valgrind test-damage pathcounts taxdescendants
+.PHONY: clean all test test-taxonomy test-taxonomy-valgrind test-damage getranknames pathcounts taxdescendants
 
 %.o:%.c src/version.h
 	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
@@ -82,6 +82,8 @@ $(TEST_BIN): %: %.c libunicorn
 
 $(MISC_BIN): %: %.c libunicorn
 	$(CC) -o $@ $< libunicorn.a $(CFLAGS) $(LDFLAGS) -lhts -lz -lm -lpthread
+
+getranknames: src/misc/getranknames
 
 pathcounts: src/misc/pathcounts
 
