@@ -47,7 +47,22 @@ def resolve_selection_and_tree(
     files: Optional[List[str]],
     nodes_file: Optional[str],
     names_file: Optional[str],
+    taxonomy_only: bool = False,
 ) -> Tuple[SelectionModel, TaxonomyModel, TreeModel]:
+    if taxonomy_only:
+        taxonomy = store.get_or_load_taxonomy(
+            nodes_name=nodes_file,
+            names_name=names_file,
+        )
+        selection = SelectionModel(
+            dataset_names=(),
+            datasets=[],
+            direct_counts={},
+            names_map={},
+            total_reads=0,
+            total_taxa=0,
+        )
+        return selection, taxonomy, store.build_taxonomy_tree_model(taxonomy)
     available = store.list_files()
     requested = _normalize_requested_files(files)
     selected_names = (
@@ -85,6 +100,7 @@ def response_context(
         ),
         "min_reads": min_reads,
         "expanded_taxids": expanded_taxids,
+        "taxonomy_only": not selection.datasets,
     }
 
 
@@ -93,13 +109,20 @@ def node_passes_filter(
     tree: TreeModel,
     min_reads: int,
 ) -> bool:
-    return node is tree.root or node.total >= max(0, min_reads)
+    return (
+        tree.taxonomy_only
+        or node is tree.root
+        or node.total >= max(0, min_reads)
+    )
 
 
 def filtered_child_count(
     node: TreeNodeModel,
     min_reads: int,
+    tree: Optional[TreeModel] = None,
 ) -> int:
+    if tree is not None and tree.taxonomy_only:
+        return len(node.children)
     threshold = max(0, min_reads)
     return sum(
         1
@@ -222,7 +245,7 @@ def build_visible_tree_payload(
     expanded_taxids: set[int],
     min_reads: int,
 ) -> Tuple[Dict[str, Any], List[int]]:
-    threshold = max(0, min_reads)
+    threshold = 0 if tree.taxonomy_only else max(0, min_reads)
     active_expanded_taxids: set[int] = set()
 
     def build_node_payload(
@@ -307,6 +330,7 @@ def visible_tree_response(
         "min_reads": min_reads,
         "total_reads": selection.total_reads,
         "direct_taxa": len(selection.direct_counts),
+        "taxonomy_only": tree.taxonomy_only,
         "request_context": response_context(
             selection,
             taxonomy,

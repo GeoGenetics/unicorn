@@ -36,6 +36,7 @@ def create_tree_router(*, store: GraphEngineStore) -> APIRouter:
         names_file: Optional[str] = Query(default=None),
         min_reads: int = Query(default=0, ge=0),
         expanded: Optional[List[int]] = Query(default=None),
+        taxonomy_only: bool = Query(default=False),
     ) -> Dict[str, Any]:
         return root_view(
             files=files,
@@ -43,6 +44,7 @@ def create_tree_router(*, store: GraphEngineStore) -> APIRouter:
             names_file=names_file,
             min_reads=min_reads,
             expanded=expanded,
+            taxonomy_only=taxonomy_only,
             store=store,
         )
 
@@ -60,6 +62,7 @@ def create_tree_router(*, store: GraphEngineStore) -> APIRouter:
         names_file: Optional[str] = Query(default=None),
         min_reads: int = Query(default=0, ge=0),
         expanded: Optional[List[int]] = Query(default=None),
+        taxonomy_only: bool = Query(default=False),
     ) -> Dict[str, Any]:
         return expand_node(
             taxid=taxid,
@@ -68,6 +71,7 @@ def create_tree_router(*, store: GraphEngineStore) -> APIRouter:
             names_file=names_file,
             min_reads=min_reads,
             expanded=expanded,
+            taxonomy_only=taxonomy_only,
             store=store,
         )
 
@@ -78,6 +82,7 @@ def create_tree_router(*, store: GraphEngineStore) -> APIRouter:
         nodes_file: Optional[str] = Query(default=None),
         names_file: Optional[str] = Query(default=None),
         min_reads: int = Query(default=0, ge=0),
+        taxonomy_only: bool = Query(default=False),
     ) -> Dict[str, Any]:
         return node_tooltip(
             taxid=taxid,
@@ -85,6 +90,7 @@ def create_tree_router(*, store: GraphEngineStore) -> APIRouter:
             nodes_file=nodes_file,
             names_file=names_file,
             min_reads=min_reads,
+            taxonomy_only=taxonomy_only,
             store=store,
         )
 
@@ -104,6 +110,7 @@ def root_view(
     names_file: Optional[str],
     min_reads: int,
     expanded: Optional[List[int]],
+    taxonomy_only: bool = False,
     store: GraphEngineStore,
 ) -> Dict[str, Any]:
     selection, taxonomy, tree = _resolve_context(
@@ -111,6 +118,7 @@ def root_view(
         files,
         nodes_file,
         names_file,
+        taxonomy_only,
     )
     requested_expanded_taxids = set(normalize_taxids(expanded))
     return _visible_response(
@@ -155,6 +163,7 @@ def tree_view(
         names_file=str(payload.get("names_file") or "") or None,
         min_reads=min_reads,
         expanded=normalize_taxids(payload.get("expanded_taxids")),
+        taxonomy_only=bool(payload.get("taxonomy_only", False)),
         store=store,
     )
 
@@ -167,6 +176,7 @@ def expand_node(
     names_file: Optional[str],
     min_reads: int,
     expanded: Optional[List[int]],
+    taxonomy_only: bool = False,
     store: GraphEngineStore,
 ) -> Dict[str, Any]:
     selection, taxonomy, tree = _resolve_context(
@@ -174,6 +184,7 @@ def expand_node(
         files,
         nodes_file,
         names_file,
+        taxonomy_only,
     )
     request_context = response_context(
         selection,
@@ -206,6 +217,7 @@ def node_tooltip(
     nodes_file: Optional[str],
     names_file: Optional[str],
     min_reads: int,
+    taxonomy_only: bool = False,
     store: GraphEngineStore,
 ) -> Dict[str, Any]:
     selection, taxonomy, tree = _resolve_context(
@@ -213,6 +225,7 @@ def node_tooltip(
         files,
         nodes_file,
         names_file,
+        taxonomy_only,
     )
     request_context = response_context(
         selection,
@@ -237,7 +250,7 @@ def node_tooltip(
             "depth": node.depth,
             "direct": node.direct,
             "subtree": node.total,
-            "child_count": filtered_child_count(node, min_reads),
+            "child_count": filtered_child_count(node, min_reads, tree),
             "lineage": build_lineage(node, tree),
             "datasets": dataset_breakdown(selection, node),
         },
@@ -271,6 +284,7 @@ def uncollapse_to_tips(
     )
     nodes_file = str(payload.get("nodes_file") or "") or None
     names_file = str(payload.get("names_file") or "") or None
+    taxonomy_only = bool(payload.get("taxonomy_only", False))
     min_reads_value = payload.get("min_reads", 0)
     try:
         min_reads = max(0, int(min_reads_value))
@@ -297,6 +311,7 @@ def uncollapse_to_tips(
         files,
         nodes_file,
         names_file,
+        taxonomy_only,
     )
     request_context = response_context(
         selection,
@@ -343,6 +358,7 @@ def _resolve_context(
     files: Optional[List[str]],
     nodes_file: Optional[str],
     names_file: Optional[str],
+    taxonomy_only: bool = False,
 ):
     return run_tree_service(
         resolve_selection_and_tree,
@@ -350,6 +366,7 @@ def _resolve_context(
         files,
         nodes_file,
         names_file,
+        taxonomy_only,
     )
 
 

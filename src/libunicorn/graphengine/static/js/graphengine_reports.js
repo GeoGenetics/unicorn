@@ -76,6 +76,13 @@
   }
 
   function renderTopTable() {
+    if (state.remote.taxonomyOnly) {
+      clearSubtreeReportView({ preserveTableContext: false });
+      if (els.topTable) {
+        els.topTable.innerHTML = `<tr><td colspan="5">Count tables require one or more selected datasets.</td></tr>`;
+      }
+      return;
+    }
     if (state.remote.currentReport) {
       renderCurrentReportView();
       return;

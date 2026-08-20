@@ -341,6 +341,7 @@ class TreeModel:
         Optional[str],
         Optional[Tuple[int, float]],
     ]
+    taxonomy_only: bool = False
 
     def to_status_payload(self) -> Dict[str, Any]:
         return {

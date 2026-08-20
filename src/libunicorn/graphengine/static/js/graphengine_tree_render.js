@@ -51,7 +51,9 @@
     globalObject.syncBackendRuntimeUiState();
     const activeSeries = getVisibleSeriesSafe().length;
     const directTaxa = Number(state.remote.directTaxa || 0);
-    globalObject.setStatus(`Rendered ${visible.length.toLocaleString()} visible nodes from a backend tree with ${directTaxa.toLocaleString()} direct taxa across ${activeSeries.toLocaleString()} active dataset${activeSeries === 1 ? "" : "s"}.`);
+    globalObject.setStatus(state.remote.taxonomyOnly
+      ? `Rendered ${visible.length.toLocaleString()} visible taxonomy nodes without count datasets.`
+      : `Rendered ${visible.length.toLocaleString()} visible nodes from a backend tree with ${directTaxa.toLocaleString()} direct taxa across ${activeSeries.toLocaleString()} active dataset${activeSeries === 1 ? "" : "s"}.`);
   }
 
   function formatNodeCountSummary(node) {

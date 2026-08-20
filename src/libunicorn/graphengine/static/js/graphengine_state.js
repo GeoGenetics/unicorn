@@ -17,6 +17,7 @@
     namespace.state.treeViewport = namespace.state.treeViewport || createTreeViewportState();
     namespace.state.remote.activeExpandedTaxids = namespace.state.remote.activeExpandedTaxids || new Set();
     namespace.state.remote.treeRefreshGeneration = Number(namespace.state.remote.treeRefreshGeneration || 0);
+    namespace.state.remote.taxonomyOnly = Boolean(namespace.state.remote.taxonomyOnly);
     globalObject.state = namespace.state;
     globalObject.unicornGraphState = namespace.state;
     return;
@@ -40,6 +41,7 @@
       expandedTaxids: new Set(),
       activeExpandedTaxids: new Set(),
       treeRefreshGeneration: 0,
+      taxonomyOnly: false,
       serverTreeActive: false,
       totalReads: 0,
       directTaxa: 0,

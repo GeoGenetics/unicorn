@@ -374,6 +374,7 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
             "missing_taxids",
             "expanded_taxids",
             "requested_expanded_taxids",
+            "taxonomy_only",
             "min_reads",
             "total_reads",
             "direct_taxa",
@@ -387,6 +388,27 @@ def test_visible_tree_expansion_tooltip_and_table_contracts(
     assert [child["taxid"] for child in root["tree"]["children"]] == [10, 20]
     assert root["expanded_taxids"] == []
     assert root["requested_expanded_taxids"] == []
+    assert root["taxonomy_only"] is False
+
+    taxonomy_only = backend_fixture.api.tree_view({
+        "files": [],
+        "nodes_file": None,
+        "names_file": None,
+        "min_reads": 10_000,
+        "expanded_taxids": [10],
+        "taxonomy_only": True,
+    })
+    assert taxonomy_only["taxonomy_only"] is True
+    assert taxonomy_only["datasets"] == []
+    assert taxonomy_only["total_reads"] == 0
+    assert taxonomy_only["direct_taxa"] == 0
+    assert taxonomy_only["tree"]["taxid"] == 1
+    clade = next(
+        child
+        for child in taxonomy_only["tree"]["children"]
+        if child["taxid"] == 10
+    )
+    assert [child["taxid"] for child in clade["children"]] == [11]
 
     posted = backend_fixture.api.tree_view({
         "files": backend_fixture.dataset_names,

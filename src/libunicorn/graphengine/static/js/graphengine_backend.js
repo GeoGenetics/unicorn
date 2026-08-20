@@ -179,6 +179,7 @@
       expanded_taxids: Array.isArray(requestContext.expanded_taxids)
         ? requestContext.expanded_taxids.map((value) => Number(value))
         : [],
+      taxonomy_only: Boolean(requestContext.taxonomy_only),
     };
   }
 
@@ -216,6 +217,7 @@
       state.remote.requestContext = null;
       state.remote.expandedTaxids.clear();
       state.remote.activeExpandedTaxids.clear();
+      state.remote.taxonomyOnly = false;
       updateConnectionState(false, "Could not reach backend");
       els.remoteDatasetsPanel.hidden = true;
       renderRemoteDatasets();
@@ -379,20 +381,17 @@
     }
 
     const files = getSelectedRemoteDatasets();
-    if (!files.length) {
-      setStatus(state.remote.datasets.length
-        ? "No backend datasets are currently selected. Select one or more files in the Datasets panel."
-        : "No backend .bdamage datasets are available to render.");
-      return;
-    }
+    const taxonomyOnly = files.length === 0;
 
     state.remote.expandedTaxids.clear();
     state.remote.activeExpandedTaxids.clear();
     addClientLog(
       "info",
       "tree",
-      `Requesting backend root tree view for ${files.length.toLocaleString()} dataset${files.length === 1 ? "" : "s"}.`,
-      files.join("\n"),
+      taxonomyOnly
+        ? "Requesting taxonomy-only backend tree view."
+        : `Requesting backend root tree view for ${files.length.toLocaleString()} dataset${files.length === 1 ? "" : "s"}.`,
+      taxonomyOnly ? "No datasets selected." : files.join("\n"),
     );
     const payload = await fetchRemoteVisibleTree({
       datasetNames: files,
@@ -400,6 +399,7 @@
       namesFile: els.namesFile.files[0] ? els.namesFile.files[0].name : null,
       minReads: getMinReadsValueSafe(),
       expandedTaxids: [],
+      taxonomyOnly,
     });
     if (!payload.tree) {
       addClientLog("error", "tree", "The backend returned no tree payload.");
@@ -410,8 +410,16 @@
     resetTreeViewportSafe();
     applyRemoteVisiblePayload(payload);
     state.centerOnNextRender = true;
-    addClientLog("success", "tree", `Loaded backend tree with ${Number(payload.direct_taxa || 0).toLocaleString()} direct taxa.`);
-    setStatus(`Loaded backend tree for ${state.series.length.toLocaleString()} dataset${state.series.length === 1 ? "" : "s"} and ${state.remote.directTaxa.toLocaleString()} direct taxa.`);
+    addClientLog(
+      "success",
+      "tree",
+      taxonomyOnly
+        ? "Loaded taxonomy-only backend tree."
+        : `Loaded backend tree with ${Number(payload.direct_taxa || 0).toLocaleString()} direct taxa.`,
+    );
+    setStatus(taxonomyOnly
+      ? "Loaded taxonomy-only tree. Counts, reports, damage, and compute views require datasets."
+      : `Loaded backend tree for ${state.series.length.toLocaleString()} dataset${state.series.length === 1 ? "" : "s"} and ${state.remote.directTaxa.toLocaleString()} direct taxa.`);
     globalObject.redraw();
   }
 
@@ -505,6 +513,10 @@
     if (nodesFile) url.searchParams.set("nodes_file", nodesFile);
     if (namesFile) url.searchParams.set("names_file", namesFile);
     url.searchParams.set("min_reads", String(minReads));
+    const taxonomyOnly = options.taxonomyOnly != null
+      ? Boolean(options.taxonomyOnly)
+      : Boolean(activeRequestContext?.taxonomy_only || state.remote.taxonomyOnly);
+    if (taxonomyOnly) url.searchParams.set("taxonomy_only", "true");
     if (options.includeExpanded === true) {
       if (Array.isArray(options.expandedTaxids)) {
         for (const taxid of options.expandedTaxids) {
@@ -532,6 +544,7 @@
       nodesFile: options.nodesFile,
       namesFile: options.namesFile,
       minReads: options.minReads,
+      taxonomyOnly: options.taxonomyOnly,
       query: {
         ...(options.query && typeof options.query === "object" ? options.query : {}),
         ...(options.taxid != null ? { taxid: options.taxid } : {}),
@@ -589,6 +602,7 @@
     const payload = await postRemoteVisibleTree({
       minReads: getMinReadsValueSafe(),
       expandedTaxids: Array.from(state.remote.expandedTaxids),
+      taxonomyOnly: state.remote.taxonomyOnly,
     });
     if (generation !== state.remote.treeRefreshGeneration) {
       return false;
@@ -619,6 +633,9 @@
       expanded_taxids: Array.isArray(options.expandedTaxids)
         ? options.expandedTaxids.map((value) => Number(value))
         : Array.from(state.remote.expandedTaxids),
+      taxonomy_only: options.taxonomyOnly != null
+        ? Boolean(options.taxonomyOnly)
+        : Boolean(state.remote.taxonomyOnly),
     };
   }
 
@@ -753,6 +770,7 @@
       );
     }
     state.remote.serverTreeActive = true;
+    state.remote.taxonomyOnly = Boolean(payload.taxonomy_only);
     state.remote.totalReads = Number(payload.total_reads || 0);
     state.remote.directTaxa = Number(payload.direct_taxa || 0);
     syncMinReadsControlSafe();
@@ -924,6 +942,7 @@
     state.remote.requestContext = null;
     state.remote.expandedTaxids.clear();
     state.remote.activeExpandedTaxids.clear();
+    state.remote.taxonomyOnly = false;
     state.selected.clear();
     state.focusTaxid = null;
     state.missingTaxids.clear();
@@ -955,8 +974,10 @@
     }
     const datasetNames = getSelectedRemoteDatasets();
     if (!datasetNames.length) {
-      resetBackendTreeState();
-      setStatus("No backend datasets are selected. Choose one or more datasets to render a tree.");
+      if (!state.remote.taxonomyOnly) {
+        resetBackendTreeState();
+        setStatus("No backend datasets are selected. Render the taxonomy-only tree or select datasets for count-backed rendering.");
+      }
       return;
     }
     try {
@@ -969,6 +990,7 @@
       const payload = await fetchRemoteVisibleTree({
         datasetNames,
         expandedTaxids: Array.from(state.remote.expandedTaxids),
+        taxonomyOnly: false,
       });
       applyRemoteVisiblePayload(payload);
       reconcileTreeStateAfterDatasetChange();
@@ -989,21 +1011,12 @@
 
   function canRenderRemoteTree() {
     return state.remote.connected
-      && (getSelectedRemoteDatasets().length > 0 || getLocalRemoteDatasetUploadFiles().length > 0)
       && (hasLocalRemoteTaxonomyOverride() || hasRemoteBackendTaxonomy());
   }
 
   function remoteRenderUnavailableMessage() {
     if (!state.remote.connected) {
       return "Connect to the backend before rendering.";
-    }
-    if (!getSelectedRemoteDatasets().length) {
-      if (getLocalRemoteDatasetUploadFiles().length > 0) {
-        return "The backend is ready to upload your selected local datasets, but taxonomy must still be available locally or on the backend.";
-      }
-      return state.remote.datasets.length
-        ? "Select one or more backend datasets before rendering."
-        : "No backend .bdamage datasets are available to render.";
     }
     return "Backend taxonomy is not ready yet. Upload nodes.dmp from this UI, or place nodes.dmp in the backend uploads directory.";
   }
@@ -1022,7 +1035,10 @@
       if (selected > 0) {
         return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${selected.toLocaleString()} ${datasetLabel} ${selected === 1 ? "is" : "are"} selected, ${taxonomySource} is ready for rendering, and ${metadataReady}.`;
       }
-      return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${pendingUploads.toLocaleString()} local dataset${pendingUploads === 1 ? "" : "s"} ${pendingUploads === 1 ? "is" : "are"} queued for upload, ${taxonomySource} is ready for rendering, and ${metadataReady}.`;
+      if (pendingUploads > 0) {
+        return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${pendingUploads.toLocaleString()} local dataset${pendingUploads === 1 ? "" : "s"} ${pendingUploads === 1 ? "is" : "are"} queued for upload, ${taxonomySource} is ready for rendering, and ${metadataReady}.`;
+      }
+      return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable, ${taxonomySource} is ready for an empty taxonomy render, and ${metadataReady}.`;
     }
     if (pendingUploads > 0) {
       return `Tunnel check succeeded for ${user}@${host}. Local datasets are queued for upload, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree. Backend metadata status: ${metadataReady}.`;
@@ -1030,7 +1046,7 @@
     if (selected > 0) {
       return `Tunnel check succeeded for ${user}@${host}. Backend datasets are visible, but backend rendering is waiting for taxonomy. Upload nodes.dmp to enable Render Tree. Backend metadata status: ${metadataReady}.`;
     }
-    return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable; choose one or more datasets to enable Render Tree. Backend metadata status: ${metadataReady}.`;
+    return `Tunnel check succeeded for ${user}@${host}. Backend HTTP endpoint is reachable; taxonomy is ready for an empty taxonomy render, and ${metadataReady}.`;
   }
 
   function updateRemoteServerStatus(ping) {
@@ -1059,15 +1075,16 @@
 
   function syncBackendRuntimeUiState() {
     const backendTreeReady = hasBackendTree();
+    const countDataAvailable = backendTreeReady && !state.remote.taxonomyOnly;
     const hasSelection = state.selected.size > 0;
     const hasTargetRank = Boolean(String(els.selectToRankValue?.value || "").trim());
     els.renderBtn.disabled = !canRenderRemoteTree();
     els.centerBtn.disabled = !backendTreeReady;
-    els.toggleTableBtn.disabled = !backendTreeReady;
-    els.subtreeReportBtn.disabled = !backendTreeReady;
-    els.rankReportBtn.disabled = !backendTreeReady;
+    els.toggleTableBtn.disabled = !countDataAvailable;
+    els.subtreeReportBtn.disabled = !countDataAvailable;
+    els.rankReportBtn.disabled = !countDataAvailable;
     if (els.damageBtn) {
-      els.damageBtn.disabled = !backendTreeReady || !hasSelection;
+      els.damageBtn.disabled = !countDataAvailable || !hasSelection;
     }
     els.selectDescendantsBtn.disabled = !backendTreeReady || !hasSelection;
     if (els.selectToRankBtn) {
@@ -1078,7 +1095,7 @@
     }
     els.clearSelectionBtn.disabled = !backendTreeReady || !hasSelection;
     els.uncollapseBtn.disabled = !backendTreeReady || !hasSelection;
-    els.uncollapseTipsBtn.disabled = !backendTreeReady || !hasSelection;
+    els.uncollapseTipsBtn.disabled = !backendTreeReady || !hasSelection || state.remote.taxonomyOnly;
     namespace.agentUi?.syncAvailability?.();
   }
 

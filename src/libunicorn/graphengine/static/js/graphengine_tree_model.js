@@ -36,8 +36,10 @@
   }
 
   function collectVisible(node, parent, nodes, links, leaves, minReads) {
-    if (node !== state.tree && node.total <= 0) return false;
-    if (node !== state.tree && node.total < minReads) return false;
+    if (!state.remote.taxonomyOnly) {
+      if (node !== state.tree && node.total <= 0) return false;
+      if (node !== state.tree && node.total < minReads) return false;
+    }
     nodes.push(node);
     if (parent) links.push([parent, node]);
     let visibleChildren = 0;

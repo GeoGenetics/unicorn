@@ -1233,6 +1233,71 @@ class GraphEngineStore:
             self._tree_cache[tree_key] = tree
         return tree
 
+    def build_taxonomy_tree_model(
+        self,
+        taxonomy: TaxonomyModel,
+    ) -> TreeModel:
+        """Build a zero-count tree containing every node in one taxonomy."""
+        tree_key = ((), taxonomy.cache_key())
+        with self._lock:
+            cached = self._tree_cache.get(tree_key)
+            if cached and cached.taxonomy_only:
+                return cached
+
+        objects = {
+            taxid: TreeNodeModel(
+                taxid=taxid,
+                parent=raw.parent,
+                rank=raw.rank,
+                name=taxonomy.names_map.get(taxid, str(taxid)),
+                direct=0,
+                direct_by_source=[],
+                total=0,
+                total_by_source=[],
+            )
+            for taxid, raw in taxonomy.nodes_map.items()
+        }
+        roots: List[TreeNodeModel] = []
+        for node in objects.values():
+            parent = objects.get(node.parent)
+            if parent and parent.taxid != node.taxid:
+                parent.children.append(node)
+            else:
+                roots.append(node)
+
+        if len(roots) == 1:
+            root = roots[0]
+        else:
+            root = TreeNodeModel(
+                taxid=-1,
+                parent=None,
+                rank="synthetic root",
+                name="root",
+                direct=0,
+                direct_by_source=[],
+                total=0,
+                total_by_source=[],
+                children=roots,
+            )
+
+        stack = [(root, 0)]
+        while stack:
+            node, depth = stack.pop()
+            node.depth = depth
+            node.children.sort(key=lambda child: child.name)
+            stack.extend((child, depth + 1) for child in node.children)
+
+        tree = TreeModel(
+            root=root,
+            missing_taxids=[],
+            dataset_names=(),
+            taxonomy_key=taxonomy.cache_key(),
+            taxonomy_only=True,
+        )
+        with self._lock:
+            self._tree_cache[tree_key] = tree
+        return tree
+
     def cache_status(self) -> Dict[str, Any]:
         with self._lock:
             return {
