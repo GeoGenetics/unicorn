@@ -11,14 +11,15 @@
     const metadata = namespace.metadata;
     const treeViewport = namespace.treeViewport;
     const treeRender = namespace.treeRender;
+    const treeExport = namespace.treeExport;
     const ui = namespace.ui;
     const selection = namespace.selection;
     const damage = namespace.damage;
     const reports = namespace.reports;
     const agentUi = namespace.agentUi;
 
-    if (!state || !els || !backend || !metadata || !treeViewport || !treeRender || !ui || !selection || !damage || !reports || !agentUi) {
-      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree viewport, tree render, UI, selection, damage, reports, and Agent UI modules to load before boot.");
+    if (!state || !els || !backend || !metadata || !treeViewport || !treeRender || !treeExport || !ui || !selection || !damage || !reports || !agentUi) {
+      throw new Error("Unicorn graphengine boot expected state, DOM, backend, metadata, tree viewport, tree render, tree export, UI, selection, damage, reports, and Agent UI modules to load before boot.");
     }
 
     els.renderBtn.onclick = async (event) => {
@@ -103,6 +104,7 @@
     ui.initSidebarPanel();
     treeViewport.init();
     treeRender.initChartSelectionClear();
+    treeExport.init();
     ui.initRemotePanel();
     ui.initFileInputs();
     ui.initMinReadsControls();

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Unicorn LCA Graph Engine</title>
-    <link rel="stylesheet" href="static/css/styles.css?v=20260804a">
+    <link rel="stylesheet" href="static/css/styles.css?v=20260820b">
   </head>
   <body>
     <header class="topbar">
@@ -323,6 +323,9 @@
           <svg id="treeSvg" role="img" aria-label="Taxonomic LCA tree"></svg>
           <div id="tooltip" class="tooltip" hidden></div>
         </div>
+        <div id="treeExportMenu" class="tree-export-menu" role="menu" hidden>
+          <button id="treeExportSvgBtn" type="button" role="menuitem">Download tree as SVG</button>
+        </div>
       </section>
 
       <section id="tablePanel" class="table-panel hidden" aria-label="Top LCA placements" hidden>
@@ -358,17 +361,18 @@
     <!-- Dependency order is explicit: foundations first, feature modules next, boot last. -->
     <script src="static/js/graphengine_core.js?v=20260701a"></script>
     <script src="static/js/graphengine_state.js?v=20260820a"></script>
-    <script src="static/js/graphengine_dom.js?v=20260730a"></script>
+    <script src="static/js/graphengine_dom.js?v=20260820b"></script>
     <script src="static/js/graphengine_metadata.js?v=20260701a"></script>
     <script src="static/js/graphengine_tree_model.js?v=20260820a"></script>
     <script src="static/js/graphengine_backend.js?v=20260820a"></script>
     <script src="static/js/graphengine_tree_viewport.js?v=20260804d"></script>
     <script src="static/js/graphengine_tree_render.js?v=20260820a"></script>
+    <script src="static/js/graphengine_tree_export.js?v=20260820a"></script>
     <script src="static/js/graphengine_ui.js?v=20260810a"></script>
     <script src="static/js/graphengine_selection.js?v=20260701a"></script>
     <script src="static/js/graphengine_damage.js?v=20260730b"></script>
     <script src="static/js/graphengine_reports.js?v=20260820a"></script>
     <script src="static/js/graphengine_agent_ui.js?v=20260728b"></script>
-    <script src="static/js/graphengine_boot.js?v=20260730b"></script>
+    <script src="static/js/graphengine_boot.js?v=20260820b"></script>
   </body>
 </html>

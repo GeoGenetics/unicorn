@@ -101,6 +101,8 @@
     chartWrap: document.getElementById("chartWrap"),
     svg: document.getElementById("treeSvg"),
     tooltip: document.getElementById("tooltip"),
+    treeExportMenu: document.getElementById("treeExportMenu"),
+    treeExportSvgBtn: document.getElementById("treeExportSvgBtn"),
     readCount: document.getElementById("readCount"),
     taxonCount: document.getElementById("taxonCount"),
     visibleCount: document.getElementById("visibleCount"),

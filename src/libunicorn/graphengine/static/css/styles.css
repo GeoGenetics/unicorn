@@ -1214,6 +1214,37 @@ button {
   min-width: 0;
 }
 
+.tree-export-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 178px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fffdf7;
+  box-shadow: 0 8px 20px rgba(37, 48, 42, 0.2);
+}
+
+.tree-export-menu button {
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-export-menu button:hover,
+.tree-export-menu button:focus-visible {
+  background: #e9f0e5;
+  outline: none;
+}
+
 .edge {
   fill: none;
   stroke: rgba(91, 107, 95, 0.44);
