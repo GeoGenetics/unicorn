@@ -3,7 +3,14 @@
 
 sam_hdr_t *_scores2hdr(sam_hdr_t *hdr, alnscoreq_t q, int2int_t *tidmap)
 {
-  if ( !hdr || !q.n ) return NULL;
+  if ( !hdr ) return NULL;
+
+  // An empty input is a valid no-op for alnfilt.  There are no scores to
+  // remap, so preserve the input header and let the caller write an empty
+  // BAM with that header instead of returning NULL and leaving a truncated
+  // output file behind.
+  if ( !q.n ) return sam_hdr_dup(hdr);
+
   kstring_t kstr = {0};
 	sam_hdr_t *ohdr = sam_hdr_init();
   if (!ohdr) return NULL;
