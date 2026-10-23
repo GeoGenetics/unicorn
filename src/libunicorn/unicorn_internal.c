@@ -28,7 +28,7 @@ void unicorn_setverbose(void)
 KSORT_INIT(_surange, _urangeevent, _eventlt)
 KSORT_INIT(_suint32, uint32_t, ks_lt_generic)
 
-void unicorn_sorturange(uint32_t n, _urangeevent *a)
+void unicorn_sorturange(size_t n, _urangeevent *a)
 {
   if (n < 2) return; //Nothing to sort
   ks_introsort(_surange, n, a);
@@ -88,8 +88,13 @@ static void refmap_free(refmap_t *map)
     // Destroy read set for each reference
     kh_foreach(map, k) {
       refstat_t v = kh_val(map, k);
+      free(v.aRLEN.dense);
+      if (v.READSET) {
+        unicorn_mem_free(&unicorn_spill_threshold, v.aANI.a);
+        unicorn_mem_free(&unicorn_spill_threshold, v.aEVENT.a);
+      }
       if (v.READSET)
-        u64set_destroy(v.READSET);
+        unicorn_readset_free(v.READSET);
       if (v.camex)
         lint2int_destroy(v.camex);
     }
@@ -102,10 +107,10 @@ static void taxmap_free(taxmap_t *map)
   khint_t k;
   kh_foreach(map, k) {
     taxstat_t v = kh_val(map, k);
-    refmap_free(v.refmap);
+    taxrefmap_free(v.refmap);
     if (v.readset)
-      u64set_destroy(v.readset);
-    kv_destroy(v.a_ani);
+      unicorn_readset_free(v.readset);
+    unicorn_mem_free(&unicorn_spill_threshold, v.a_ani.a);
 		lint2int_destroy(v.camex);
   }
   taxmap_destroy(map);
@@ -146,7 +151,7 @@ unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
   stats->mapflg = flg;
   switch (flg) {
     case 1:  stats->__map   = refmap_init(); break; //per reference
-    case 2:  stats->__map   = taxmap_init(); break; //per taxid
+    case 2:  stats->__map   = taxmap_init2(&unicorn_spill_threshold); break; //per taxid
     default: stats->__map   = 0; break; //Default to no map;
   }
   stats->minnreads = minnreads;
@@ -518,6 +523,22 @@ void _fill_spatial_bins(ueventq_t events,
 * @param events - Event kvec queue
 * @param l      - Reference sequence length
 */
+/* Taxstats does not emit spatial entropy, Gini or truncated depth. Keep
+ * precisely the same coverage moments without constructing those histograms. */
+uint64_t _taxcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
+{
+  memset(covstats, 0, sizeof(*covstats));
+  if (!events.n || !l) return 0;
+  uint64_t depth = 0, squares = 0;
+  uint64_t covered = _getcovbases(events, &depth, &squares);
+  covstats->covbases = covered;
+  covstats->meancov = (double)depth / (double)l;
+  covstats->meanoncov = covered ? (double)depth / (double)covered : 0.0;
+  double msq = covered ? (double)squares / covered : 0.0;
+  covstats->varoncov = msq - covstats->meanoncov * covstats->meanoncov;
+  return depth;
+}
+
 uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
 {
   // Handle the edge case of no events
@@ -697,6 +718,7 @@ Originally idea from Bianca Desacnctis to use sdust to remove low complexity rea
 #define WMASK (WTOT - 1)
 double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount)
 {
+  if (l <= WLEN) return 0.0; // Fewer than two triplets cannot have repeated triplets.
   int32_t wCount0[WTOT], wSeq[64];
   if (window < WLEN) return -1; // window too small
   if (!wCount) wCount = wCount0 ;

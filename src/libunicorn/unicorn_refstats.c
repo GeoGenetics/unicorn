@@ -5,37 +5,76 @@
 
 #include "genesisC.h"
 
+static void *ref_array_reserve(void *data, size_t *capacity, size_t item_size)
+{
+  size_t next = *capacity ? *capacity * 2 : 2;
+  if (next < *capacity || next > SIZE_MAX / item_size) return NULL;
+  void *value = unicorn_mem_resize(&unicorn_spill_threshold, data, next * item_size);
+  if (!value) return NULL;
+  *capacity = next;
+  return value;
+}
+#define REF_PUSH(type, vector, item, failure) do { \
+  if ((vector).n == (vector).m) { \
+    void *value = ref_array_reserve((vector).a, &(vector).m, sizeof(type)); \
+    if (!value) { failure; } \
+    (vector).a = value; \
+  } \
+  (vector).a[(vector).n++] = (item); \
+} while (0)
+
+/* DUST depends only on the packed sequence and its length. A small exact
+ * cache catches repeated mappings/orientations without retaining query history. */
+typedef struct {
+  uint8_t sequence[4][128];
+  uint32_t lengths[4];
+  int32_t scores[4];
+  unsigned valid, next;
+} dust_cache_t;
+
+static int32_t cached_dust(const bam1_t *b, dust_cache_t *cache)
+{
+  uint32_t length = b->core.l_qseq;
+  size_t bytes = ((size_t)length + 1) / 2;
+  const uint8_t *sequence = bam_get_seq(b);
+  if (length <= 256) {
+    for (unsigned i = 0; i < cache->valid; ++i)
+      if (cache->lengths[i] == length && (!bytes || !memcmp(cache->sequence[i], sequence, bytes))) return cache->scores[i];
+  }
+  int32_t score = (int32_t)(0.5 + dust(sequence, length, 64, NULL));
+  if (length <= 256) {
+    unsigned i = cache->next;
+    if (bytes) memcpy(cache->sequence[i], sequence, bytes);
+    cache->lengths[i] = length; cache->scores[i] = score;
+    cache->next = (i + 1) % 4;
+    if (cache->valid < 4) ++cache->valid;
+  }
+  return score;
+}
+
 // ksort
 KSORT_INIT(_sfloat, float, ks_lt_generic)
 
-// Refstats coord-sorted fast path will follow a 3-step kt_pipeline structure
-// similar to taxstats:
-//   0) load a batch of reference blocks
-//   1) compute stats for the batch (parallel)
-//   2) emit/flush results (and optionally write BAM)
-//
-// This file currently keeps existing behavior by falling back to
-// `unsorted_compute()` while the pipeline steps are implemented incrementally.
+/* Coordinate input uses bounded loading, parallel reference computation and
+ * ordered emission. Oversized batches and large state can spill to scratch. */
 typedef struct pipeline {
   unicorn_t *u;
   unicorn_stat_t *stats;
   utax_t *utax;
   void *forpool;            // kt_forpool_t*
-  genesis_encoder_t enc;    // for camex/duplicity
-  uint8_t ksize;
-  // Output-related state (for the upcoming coord-sorted fast path)
   htsFile *outfp;           // optional: write filtered BAM while streaming
   sam_hdr_t *ohdr;          // output BAM header
-  bam1_t *b;                // reusable alignment record (reserved)
-  refmap_t *refmap;         // convenience alias for stats->__map (slow path only)
   int err;                  // non-zero on fatal error
 } pipeline_t;
 
 typedef kvec_t(refstat_t *) refstatpq_t;
 
 typedef struct refstep {
-  bamq_t *queue;            // one queue per reference block (prototype)
-  uint8_t nqueue;
+  FILE **spills;
+  uint64_t *counts;
+  int err;
+  bamq_t *queue;            // bounded batches, optionally disk-backed
+  uint32_t nqueue;
 	// Output of step 1 (per-queue list of finalized per-reference stats)
   // Produced by `_statfor()` and consumed by step 2.
   // Each `refstat_t*` corresponds to one reference (tid) group.
@@ -44,10 +83,10 @@ typedef struct refstep {
   const unicorn_stat_t *stats;
 } step_t;
 
-static inline float _fMEDIAN(float *v, uint32_t n);
+static inline float _fMEDIAN(float *v, size_t n);
 static inline uint32_t _udMEDIAN(uint32_t *v, uint32_t n);
 static inline uint32_t _udMODE(uint32_t *v, uint32_t n);
-static void _camex_add_read(lint2int_t *camex,
+static int _camex_add_read(lint2int_t *camex,
                             genesis_encoder_t enc,
                             bam1_t *b,
                             uint8_t ksize);
@@ -58,95 +97,85 @@ static int _addaln(refstat_t *rs,
                    const unicorn_t *u,
                    const unicorn_stat_t *stats,
                    bam1_t *b,
-                   genesis_encoder_t enc);
+                   genesis_encoder_t enc, dust_cache_t *cache);
 static void _refstat_free(refstat_t *r);
 static int _aln_passes_refstats_filters(const unicorn_t *u,
                                        const unicorn_stat_t *stats,
                                        const bam1_t *b);
 
-static void _loadalns(bamq_t *q,
-                      uint8_t *n,
-                      unicorn_t *u,
-                      uint32_t qsize)
+static int queue_append(step_t *s, uint8_t i, bam1_t *b, uint64_t *bytes, uint64_t limit)
 {
-  uint8_t nq = *n;
-  *n = 0;
-  bam1_t *b = bam_init1();
-  if (!b) return;
-  for (uint8_t i = 0; i < nq; i++) {
-    kv_init(q[i]);
-    // Seed this queue with the first alignment (from cache or file)
-    bam1_t *first = bam_init1();
-    if (!first) break;
-    if (u->dcache) {
-      if (!bam_copy1(first, u->daln)) break;
-      u->dcache = 0;
-    } else {
-      if (sam_read1(u->_FP, u->hdr, b) < 0) {
-        bam_destroy1(first);
-        break; // EOF
-      }
-      if (!bam_copy1(first, b)) break;
-    }
-    kv_push(bam1_t *, q[i], first);
-    // Target id of the current group comes from the first record
-    int32_t group_id = first->core.tid;
-    // Keep loading until >= LOADALNS_BATCH, then extend until the *current*
-    // targetid changes.
-    while (1) {
-			if (sam_read1(u->_FP, u->hdr, b) < 0) {
-        // EOF: commit this queue and stop
-        *n = i + 1;
-        goto done;
-      }
-			//extract refid goes here
-			int32_t next_id = b->core.tid;
-			if (q[i].n >= qsize && next_id != group_id) {
-        // Batch limit reached and taxid boundary crossed: cache for next call
-        if (!bam_copy1(u->daln, b)) break;
-        u->dcache = 1;
-        break;
-      }
-      bam1_t *cp = bam_init1();
-      if (!cp) break;
-      if (!bam_copy1(cp, b)) break;
-      kv_push(bam1_t *, q[i], cp);
-      if (next_id != group_id) {
-				group_id = next_id;
-			}
-    }
-    *n = i + 1;
+  unicorn_t *u = (unicorn_t *)s->u;
+  int32_t tid = b->core.tid < 0 ? INT32_MAX : b->core.tid;
+  if (u->coord_seen && (tid < u->coord_tid || (tid == u->coord_tid && b->core.pos < u->coord_pos))) {
+    fprintf(stderr, "[unicorn::refstats] Input is not coordinate sorted at query %s\n", bam_get_qname(b));
+    return -1;
   }
-  done:
-    bam_destroy1(b);
+  u->coord_seen = 1; u->coord_tid = tid; u->coord_pos = b->core.pos;
+  bamq_t *q = &s->queue[i];
+  uint64_t cost = sizeof(*b) + (size_t)b->l_data + sizeof(bam1_t *);
+  if (!s->spills[i] && (unicorn_memory_pressure() || cost > limit || *bytes > limit - cost)) {
+    s->spills[i] = unicorn_tmpfile();
+    if (!s->spills[i]) return -1;
+    for (size_t j = 0; j < q->n; ++j) {
+      if (unicorn_record_write(s->spills[i], q->a[j])) return -1;
+      bam_destroy1(q->a[j]); q->a[j] = NULL;
+    }
+    kv_destroy(*q); kv_init(*q);
+  }
+  if (s->spills[i]) {
+    if (unicorn_record_write(s->spills[i], b)) return -1;
+  } else {
+    bam1_t *copy = bam_dup1(b);
+    if (!copy) return -1;
+    kv_push(bam1_t *, *q, copy);
+    *bytes += cost;
+  }
+  ++s->counts[i];
+  return 0;
 }
 
-static step_t *_loadrefs(unicorn_t *u,
-												 const unicorn_stat_t *stats,
-												 utax_t *utax)
+static step_t *_loadrefs(unicorn_t *u, const unicorn_stat_t *stats, utax_t *utax)
 {
   (void)utax;
-	step_t *s = malloc(sizeof(step_t));
-	if (!s) return NULL;
-	s->queue = calloc(u->nthreads, sizeof(bamq_t));
-	s->nqueue  = u->nthreads;
-	_loadalns(s->queue, &s->nqueue, u, stats->qsize);
-	if (s->nqueue == 0) {
-		if (s->queue) free(s->queue);
-		free(s);
-		return NULL;
-	}
-  s->refq = calloc(s->nqueue, sizeof(*s->refq));
-  if (!s->refq) {
-    for (uint8_t i = 0; i < s->nqueue; i++) kv_destroy(s->queue[i]);
-    free(s->queue);
-    free(s);
+  step_t *s = calloc(1, sizeof(*s));
+  if (!s) return NULL;
+  s->u = u; s->stats = stats;
+  s->queue = calloc(u->nthreads, sizeof(*s->queue));
+  s->spills = calloc(u->nthreads, sizeof(*s->spills));
+  s->counts = calloc(u->nthreads, sizeof(*s->counts));
+  s->refq = calloc(u->nthreads, sizeof(*s->refq));
+  bam1_t *b = bam_init1();
+  if (!s->queue || !s->spills || !s->counts || !s->refq || !b) { s->err = 1; goto done; }
+  for (int i = 0; i < u->nthreads; ++i) {
+    int status;
+    if (u->dcache) { status = bam_copy1(b, u->daln) ? 0 : -2; u->dcache = 0; }
+    else status = sam_read1(u->_FP, u->hdr, b);
+    if (status < 0) { if (status < -1) s->err = 1; break; }
+    ++s->nqueue;
+    int32_t group = b->core.tid;
+    uint64_t bytes = 0;
+    while (1) {
+      if (queue_append(s, i, b, &bytes, u->memory_limit)) { s->err = 1; break; }
+      status = sam_read1(u->_FP, u->hdr, b);
+      if (status < 0) { if (status < -1) s->err = 1; break; }
+      if (s->counts[i] >= stats->qsize && b->core.tid != group) {
+        if (!bam_copy1(u->daln, b)) s->err = 1;
+        else u->dcache = 1;
+        break;
+      }
+      group = b->core.tid;
+    }
+    if (s->spills[i] && (fflush(s->spills[i]) || fseeko(s->spills[i], 0, SEEK_SET))) s->err = 1;
+    if (status < 0 || s->err) break;
+  }
+done:
+  bam_destroy1(b);
+  if (!s->nqueue && !s->err) {
+    free(s->queue); free(s->counts); free(s->spills); free(s->refq); free(s);
     return NULL;
   }
-  for (uint8_t i = 0; i < s->nqueue; i++) kv_init(s->refq[i]);
-	s->u = u;
-	s->stats = stats;
-	return s;
+  return s;
 }
 
 static refstat_t *_refstat_new(const unicorn_t *u, int32_t tid)
@@ -158,17 +187,18 @@ static refstat_t *_refstat_new(const unicorn_t *u, int32_t tid)
   // `_ntid` to remember the original tid for step 2 merging. The true
   // "new tid" is assigned later when building a filtered output header.
   r->_ntid = tid;
-  r->READSET = u64set_init();
+  r->READSET = unicorn_readset_new(0);
   kv_init(r->aANI);
   kv_init(r->aEVENT);
-  r->camex = lint2int_init();
+  r->camex = lint2int_init2(&unicorn_spill_threshold);
   r->REFLEN = u->hdr->target_len[tid];
   r->REFREADMIN = 0xffffffffU;
   if (!r->READSET || !r->camex) {
-    if (r->READSET) u64set_destroy(r->READSET);
+    free(r->aRLEN.dense);
+  if (r->READSET) unicorn_readset_free(r->READSET);
     if (r->camex) lint2int_destroy(r->camex);
-    kv_destroy(r->aANI);
-    kv_destroy(r->aEVENT);
+    unicorn_mem_free(&unicorn_spill_threshold, r->aANI.a);
+    unicorn_mem_free(&unicorn_spill_threshold, r->aEVENT.a);
     free(r);
     return NULL;
   }
@@ -191,9 +221,9 @@ static void _ref_finalize(refstat_t *r)
     r->REFALNANID = _fMEDIAN(r->aANI.a, r->aANI.n);
   }
   // Read-length median/mode from count array (READSET contains unique reads)
-  uint32_t nreads = r->READSET ? kh_size(r->READSET) : 0;
-  r->REFREADD = _udCAMEDIAN(r->aRLEN, 256, nreads);
-  r->REFREADO = _udCAMODE(r->aRLEN, 256);
+  uint32_t nreads = r->READSET ? unicorn_readset_size(r->READSET) : 0;
+  r->REFREADD = readhist_median(&r->aRLEN, nreads);
+  r->REFREADO = readhist_mode(&r->aRLEN);
   // Coverage stats from events
   if (r->aEVENT.n) {
     unicorn_sorturange(r->aEVENT.n, r->aEVENT.a);
@@ -237,7 +267,7 @@ static void _printrefstats(FILE *fp,
             taxid,                                      //2
             v->REFLEN,                                  //3
             v->REFNALNS,                                //4
-            v->READSET ? kh_size(v->READSET) : 0,        //5
+            v->READSET ? (uint32_t)unicorn_readset_size(v->READSET) : 0,        //5
             v->REFREADE,                                //6
             sqrtf(v->REFREADV),                         //7
             v->REFREADD,                                //8
@@ -272,7 +302,7 @@ static void _printrefstats(FILE *fp,
           accession,                                  //1
           v->REFLEN,                                  //2
           v->REFNALNS,                                //3
-          v->READSET ? kh_size(v->READSET) : 0,        //4
+          v->READSET ? (uint32_t)unicorn_readset_size(v->READSET) : 0,        //4
           v->REFREADE,                                //5
           sqrtf(v->REFREADV),                         //6
           v->REFREADD,                                //7
@@ -306,7 +336,7 @@ static int _addaln(refstat_t *rs,
                    const unicorn_t *u,
                    const unicorn_stat_t *stats,
                    bam1_t *b,
-                   genesis_encoder_t enc)
+                   genesis_encoder_t enc, dust_cache_t *cache)
 {
   if (!rs || !u || !stats || !b) return -1;
   if (!rs->READSET) return -1;
@@ -314,23 +344,20 @@ static int _addaln(refstat_t *rs,
   if (b->core.tid < 0) return 0;
   if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) return 0;
   if (!_ASCHECK(b, stats->minalnas)) return 0;
-  int32_t dusts = (int32_t)(0.5 + dust(bam_get_seq(b),
-                                      b->core.l_qseq,
-                                      64,
-                                      NULL));
+  int32_t dusts = cached_dust(b, cache);
   if (dusts > stats->maxdust) return 0;
 
   uint32_t qlen = b->core.l_qseq;
-  uint32_t naln = ++rs->REFNALNS;
+  uint64_t naln = ++rs->REFNALNS;
   int absent;
-  khint_t qh = kh_hash_str(bam_get_qname(b));
-  u64set_put(rs->READSET, qh, &absent);
+  absent = unicorn_readset_add(rs->READSET, bam_get_qname(b), 0);
+  if (absent < 0) return -1;
 
   float mean, delta;
 
   if (absent) {
-    rs->aRLEN[qlen < 256 ? qlen : 255]++;
-    uint32_t n = kh_size(rs->READSET);
+    if (readhist_add(&rs->aRLEN, qlen < 256 ? qlen : 255)) return -1;
+    uint32_t n = unicorn_readset_size(rs->READSET);
     mean = rs->REFREADE;
     delta = qlen - mean;
     rs->REFREADE += delta / n;
@@ -339,13 +366,13 @@ static int _addaln(refstat_t *rs,
     rs->REFREADMIN = qlen < rs->REFREADMIN ? qlen : rs->REFREADMIN;
     rs->REFREADMAX = qlen > rs->REFREADMAX ? qlen : rs->REFREADMAX;
     uint8_t ksize = stats->ksize ? stats->ksize : 17;
-    _camex_add_read(rs->camex, enc, b, ksize);
+    if (_camex_add_read(rs->camex, enc, b, ksize)) return -1;
   }
 
   // Alignment ANI
   uint32_t NM;
   float ani = _ANINM(b, &NM);
-  kv_push(float, rs->aANI, ani);
+  REF_PUSH(float, rs->aANI, ani, return -1);
   mean = rs->REFALNANIE;
   delta = ani - mean;
   rs->REFALNANIE += delta / naln;
@@ -355,8 +382,8 @@ static int _addaln(refstat_t *rs,
   // Coverage events
   _urangeevent s_ev = {b->core.pos, 1};
   _urangeevent e_ev = {bam_endpos(b), 0};
-  kv_push(_urangeevent, rs->aEVENT, s_ev);
-  kv_push(_urangeevent, rs->aEVENT, e_ev);
+  REF_PUSH(_urangeevent, rs->aEVENT, s_ev, return -1);
+  REF_PUSH(_urangeevent, rs->aEVENT, e_ev, return -1);
 
   // Alignment NM
   mean = rs->REFALNNM;
@@ -380,18 +407,22 @@ static void _statfor(void *data, long i, int tid)
   if (!s || !s->queue) return;
   if (i < 0 || i >= (long)s->nqueue) return;
   bamq_t *q = &s->queue[i];
-  if ( q->n == 0 ) return;
+  if (!s->counts[i]) return;
   if (!s->refq) return;
   if (!s->u || !s->stats) return;
-  uint8_t ksize = s->stats->ksize;
+  uint8_t ksize = s->stats->ksize ? s->stats->ksize : 17;
   genesis_encoder_t enc = genesis_encoderinit(ksize);
-  if (!enc) return;
+  if (!enc) { __atomic_store_n(&s->err, 1, __ATOMIC_RELAXED); return; }
+  dust_cache_t cache = {0};
   refstatpq_t *out = &s->refq[i];
   int32_t prev_tid = INT32_MIN;
   refstat_t *cur = NULL;
-  for (uint32_t j = 0; j < q->n; j++) {
-    bam1_t *b = q->a[j];
-    if (!b) continue;
+  bam1_t *scratch = s->spills[i] ? bam_init1() : NULL;
+  if (s->spills[i] && !scratch) { __atomic_store_n(&s->err, 1, __ATOMIC_RELAXED); genesis_encoderfree(enc); return; }
+  for (uint64_t j = 0; j < s->counts[i]; j++) {
+    bam1_t *b = s->spills[i] ? scratch : q->a[j];
+    if (s->spills[i] && unicorn_record_read(s->spills[i], b)) { __atomic_store_n(&s->err, 1, __ATOMIC_RELAXED); break; }
+    if (!b || _unmapped(b) || b->core.tid < 0) continue;
     int32_t tid0 = b->core.tid;
     if (j == 0) prev_tid = tid0;
     if (tid0 != prev_tid) {
@@ -405,15 +436,16 @@ static void _statfor(void *data, long i, int tid)
     }
     if (!cur) {
       cur = _refstat_new(s->u, tid0);
-      if (!cur) break;
+      if (!cur) { __atomic_store_n(&s->err, 1, __ATOMIC_RELAXED); break; }
     }
-    _addaln(cur, s->u, s->stats, b, enc);
+    if (_addaln(cur, s->u, s->stats, b, enc, &cache) < 0) { __atomic_store_n(&s->err, 1, __ATOMIC_RELAXED); break; }
   }
   if (cur) {
     cur->_ntid = prev_tid;
     _ref_finalize(cur);
     kv_push(refstat_t *, *out, cur);
   }
+  bam_destroy1(scratch);
   genesis_encoderfree(enc);
 }
 
@@ -433,154 +465,72 @@ static int _aln_passes_refstats_filters(const unicorn_t *u,
   return 1;
 }
 
-static void *_refstats_pipeline(void *data, int step, void *in)
+static void step_free(step_t *s)
 {
-  pipeline_t *p = (pipeline_t *)data;
-  if (!p || p->err) return 0;
-  if (0 == step) { // Load
-		step_t *s = _loadrefs(p->u, p->stats, p->utax);
-    if (!s) return 0;
-		if (p->stats && s->queue) {
-			uint64_t n = 0;
-			for (uint8_t i = 0; i < s->nqueue; i++) {
-				n += s->queue[i].n;
-			}
-			p->stats->_nalns += n;
-		}
-    return s;
+  if (!s) return;
+  for (unsigned i = 0; i < s->nqueue; ++i) {
+    if (s->queue) { for (size_t j = 0; j < s->queue[i].n; ++j) bam_destroy1(s->queue[i].a[j]); kv_destroy(s->queue[i]); }
+    if (s->spills && s->spills[i]) fclose(s->spills[i]);
+    if (s->refq) { for (size_t j = 0; j < s->refq[i].n; ++j) _refstat_free(s->refq[i].a[j]); kv_destroy(s->refq[i]); }
   }
-	else if (1 == step) { // Compute
-  	step_t *s = (step_t *)in;
-		if (s && s->nqueue)
-      kt_forpool(p->forpool, _statfor, s, s->nqueue);
-    return in;
-  }
-	else if (2 == step) { // Output/flush
-    step_t *s = (step_t *)in;
-    if (!s) return 0;
-		unicorn_stat_t *stats = p->stats;
-    uint8_t i = 0;
-    for (i = 0; i < s->nqueue; i++) { //Loop over queues
-      refstatpq_t *rq = &s->refq[i];
-      bamq_t *q = &s->queue[i];
-      uint32_t qi = 0;
-      for (uint32_t j = 0; j < rq->n; j++) { //Loop over refstats
-        refstat_t *rs = rq->a[j];
-				if (!rs) continue;
-        uint32_t nreads = rs->READSET ? kh_size(rs->READSET) : 0;
-        int32_t rtid = rs->_ntid;
-        // Consume the corresponding alignment block from the queue.
-        // `_loadalns()` guarantees reference groups are not split across batches,
-        // so the `refq` order matches contiguous `tid` runs in `queue`.
-        uint8_t ref_pass = 0;
-        if (stats) {
-          // Run-wide totals (before per-reference minreads filtering)
-          stats->_nreads += nreads;
-          stats->_nrefs  += 1;
-        }
-        // Apply the same per-reference filter as `_refmapstats()` in the slow path.
-        if (!stats || nreads >= stats->minnreads) ref_pass = 1;
-        // "Passed filters" totals match the slow-path meaning for refstats.
-        if (stats && ref_pass) {
-          stats->_nfreads += nreads;
-          stats->_nfalns  += rs->REFNALNS;
-          stats->_nfrefs  += 1;
-        }
-        // Print one refstats line. Original tid is stored in rs->_ntid.
-        if (ref_pass)
-          _printrefstats(p->u->ofp, p->u->hdr, rtid, rs, p->utax);
-        // Optional: stream BAM output for passing references.
-        if (p->outfp && p->ohdr) {
-          while (qi < q->n) {
-            bam1_t *b = q->a[qi];
-            if (!b) {
-              qi++;
-              continue;
-            }
-            if (b->core.tid != rtid) break;
-            if (ref_pass && stats && _aln_passes_refstats_filters(p->u, stats, b)) {
-              if (p->utax) {
-                const char *acc = p->u->hdr->target_name[rtid];
-                if (_append_refstats_tax_tags(b, acc, p->utax)) {
-                  p->err = 1;
-                  break;
-                }
-              }
-              if (sam_write1(p->outfp, p->ohdr, b) < 0) {
-                p->err = 1;
-                break;
-              }
-            }
-            bam_destroy1(b);
-            q->a[qi] = NULL;
-            qi++;
-          }
-          if (p->err) break;
-        }
-        // If not writing BAM, or if reference failed, still consume and free
-        // the alignment block for this reference.
-        if (!p->outfp || !p->ohdr || !ref_pass) {
-          while (qi < q->n) {
-            bam1_t *b = q->a[qi];
-            if (!b) {
-              qi++;
-              continue;
-            }
-            if (b->core.tid != rtid) break;
-            bam_destroy1(b);
-            q->a[qi] = NULL;
-            qi++;
-          }
-        }
-        _refstat_free(rs);
-        rq->a[j] = NULL;
-      }
-      kv_destroy(*rq);
-      kv_destroy(*q);
-      if (p->err) break;
-    }
-    // If we bailed out early, make sure to free remaining queued alignments.
-    if (p->err) {
-      for (uint8_t ii = i + 1; ii < s->nqueue; ii++) {
-        bamq_t *q2 = &s->queue[ii];
-        if (q2) {
-          for (uint32_t jj = 0; jj < q2->n; jj++) {
-            if (q2->a[jj]) bam_destroy1(q2->a[jj]);
-          }
-          kv_destroy(*q2);
-        }
-        refstatpq_t *rq2 = &s->refq[ii];
-        if (rq2) {
-          for (uint32_t jj = 0; jj < rq2->n; jj++) {
-            if (rq2->a[jj]) _refstat_free(rq2->a[jj]);
-          }
-          kv_destroy(*rq2);
-        }
-      }
-    }
-    free(s->refq);
-    free(s->queue);
-    free(s);
-    if (stats) stats->fc = 1;
-    return 0;
-  }
-  return 0;
+  free(s->queue); free(s->refq); free(s->counts); free(s->spills); free(s);
 }
 
-static uint32_t _getreadnum(unicorn_stat_t *stats)
+static void *_refstats_pipeline(void *data, int step, void *in)
 {
-  uint32_t nread = 0;
-  khint_t k;
-  refmap_t *refmap = (refmap_t *)stats->__map;
-  kh_foreach(refmap, k) {
-    u64set_t *readset = kh_val(refmap, k).READSET;
-    nread += kh_size(readset);
+  pipeline_t *p = data;
+  if (step == 0) {
+    if (__atomic_load_n(&p->err, __ATOMIC_RELAXED)) return NULL;
+    step_t *s = _loadrefs(p->u, p->stats, p->utax);
+    if (!s) return NULL;
+    if (s->err) { __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED); step_free(s); return NULL; }
+    for (unsigned i = 0; i < s->nqueue; ++i) p->stats->_nalns += s->counts[i];
+    return s;
   }
-  return nread;
+  step_t *s = in;
+  if (!s) return NULL;
+  if (step == 1) {
+    if (!__atomic_load_n(&p->err, __ATOMIC_RELAXED)) kt_forpool(p->forpool, _statfor, s, s->nqueue);
+    return s;
+  }
+  if (s->err) __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED);
+  bam1_t *scratch = bam_init1();
+  if (!scratch) __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED);
+  for (unsigned i = 0; i < s->nqueue && !__atomic_load_n(&p->err, __ATOMIC_RELAXED); ++i) {
+    refstatpq_t *rq = &s->refq[i];
+    for (size_t j = 0; j < rq->n; ++j) {
+      refstat_t *rs = rq->a[j];
+      uint64_t nreads = rs->READSET ? unicorn_readset_size(rs->READSET) : 0;
+      p->stats->_nreads += nreads;
+      ++p->stats->_nrefs;
+      if (nreads < p->stats->minnreads) continue;
+      p->stats->_nfreads += nreads; p->stats->_nfalns += rs->REFNALNS; ++p->stats->_nfrefs;
+      _printrefstats(p->u->ofp, p->u->hdr, rs->_ntid, rs, p->utax);
+    }
+    if (!p->outfp) continue;
+    if (s->spills[i] && fseeko(s->spills[i], 0, SEEK_SET)) { __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED); break; }
+    size_t rindex = 0;
+    for (uint64_t j = 0; j < s->counts[i]; ++j) {
+      bam1_t *b = s->spills[i] ? scratch : s->queue[i].a[j];
+      if (s->spills[i] && unicorn_record_read(s->spills[i], b)) { __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED); break; }
+      if (_unmapped(b) || b->core.tid < 0) continue;
+      while (rindex < rq->n && rq->a[rindex]->_ntid != b->core.tid) ++rindex;
+      if (rindex == rq->n) continue;
+      refstat_t *rs = rq->a[rindex];
+      if (unicorn_readset_size(rs->READSET) < p->stats->minnreads || !_aln_passes_refstats_filters(p->u, p->stats, b)) continue;
+      if (p->utax && _append_refstats_tax_tags(b, p->u->hdr->target_name[b->core.tid], p->utax)) { __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED); break; }
+      if (sam_write1(p->outfp, p->ohdr, b) < 0) { __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED); break; }
+    }
+  }
+  bam_destroy1(scratch);
+  if (ferror(p->u->ofp)) __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED);
+  p->stats->fc = 1;
+  step_free(s);
+  return NULL;
 }
 
 //TODO change to macro
-static inline float _fMEDIAN(float *v, uint32_t n)
+static inline float _fMEDIAN(float *v, size_t n)
 {
   if ( n%2 )
     return v[n/2];
@@ -618,29 +568,33 @@ static inline uint32_t _udMODE(uint32_t *v, uint32_t n)
   return _val;
 }
 
-static void _camex_add_read(lint2int_t *camex,
+static int _camex_add_read(lint2int_t *camex,
                             genesis_encoder_t enc,
                             bam1_t *b,
                             uint8_t ksize)
 {
-  if (!camex || !enc || !b || !ksize) return;
+  if (!camex || !enc || !b || !ksize) return 0;
   uint32_t qlen = b->core.l_qseq;
   uint32_t slen = qlen < 255 ? qlen : 255;
-  if (slen < ksize) return;
+  if (slen < ksize) return 0;
   char seq[256] = {0};
   uint8_t *s = bam_get_seq(b);
   for (uint32_t i = 0; i < slen; i++)
     seq[i] = seq_nt16_str[bam_seqi(s, i)];
+  uint64_t indices[256];
+  genesis_getcamexidx_bulk(enc, seq, slen, ksize, indices);
   for (uint32_t i = 0; i <= slen - ksize; i++) {
     int absent;
-    uint8_t ret = 0;
-    uint64_t kmeridx = genesis_getcamexidx(enc, seq+i, ksize, &ret);
+    uint64_t kmeridx = indices[i];
+    if (kh_size(camex) >= (3ULL << 29)) return -1;
     khint_t k = lint2int_put(camex, kmeridx, &absent);
+    if (absent < 0) return -1;
     if (absent)
       kh_val(camex, k) = 1;
     else
       kh_val(camex, k)++;
   }
+  return 0;
 }
 
 static void _refmapstats(unicorn_stat_t *stats)
@@ -648,19 +602,20 @@ static void _refmapstats(unicorn_stat_t *stats)
   //TODO parallelize
   refmap_t *refmap = stats->__map;
   khint_t k;
-  uint32_t _treads = 0, _freads = 0, _falns = 0;
+  uint64_t _treads = 0, _freads = 0, _falns = 0;
   int32q_t rmq;
   kv_init(rmq);
   //Loop over references and sort arrays
   kh_foreach(refmap, k) {
     int32_t tid = kh_key(refmap, k);        //tid AKA reference id
     refstat_t refstat = kh_val(refmap, k);  //stats data
-    uint32_t _n = kh_size(refstat.READSET); //number of reads
+    uint32_t _n = unicorn_readset_size(refstat.READSET); //number of reads
     _treads += _n;
     if ( _n < stats->minnreads ) { //filter out
-        u64set_destroy(refstat.READSET);
-        kv_destroy(refstat.aANI);
-        kv_destroy(refstat.aEVENT);
+        free(refstat.aRLEN.dense);
+        unicorn_readset_free(refstat.READSET);
+        unicorn_mem_free(&unicorn_spill_threshold, refstat.aANI.a);
+        unicorn_mem_free(&unicorn_spill_threshold, refstat.aEVENT.a);
         if (refstat.camex) lint2int_destroy(refstat.camex);
         kv_push(int32_t, rmq, tid); //tid is added to a removal queue
         continue;
@@ -669,7 +624,7 @@ static void _refmapstats(unicorn_stat_t *stats)
     _freads += _n;
     ueventq_t aEVENT = refstat.aEVENT;
     floatq_t  aANI   = refstat.aANI;
-    uint32_t *aRLEN  = refstat.aRLEN;
+    readhist_t *aRLEN = &kh_val(refmap, k).aRLEN;
     //Sort arrays
     ks_introsort(_sfloat,  aANI.n,  aANI.a);
     kh_val(refmap, k).REFALNANID = _fMEDIAN(aANI.a, aANI.n);
@@ -684,9 +639,10 @@ static void _refmapstats(unicorn_stat_t *stats)
                                   (float)kh_size(refstat.camex)/(float)nkmers :
                                   0.0f;
     //read length median and mode are computed from a count array
-    kh_val(refmap, k).REFREADD = _udCAMEDIAN(aRLEN, 256, _n);
-    kh_val(refmap, k).REFREADO = _udCAMODE(aRLEN, 256);
-    kv_destroy(aANI);
+    kh_val(refmap, k).REFREADD = readhist_median(aRLEN, _n);
+    kh_val(refmap, k).REFREADO = readhist_mode(aRLEN);
+    unicorn_mem_free(&unicorn_spill_threshold, aANI.a);
+    kv_init(kh_val(refmap, k).aANI);
     //Get coverage values
     unicorn_sorturange(aEVENT.n, aEVENT.a);
     _covstats_t covstats = {0};
@@ -700,7 +656,8 @@ static void _refmapstats(unicorn_stat_t *stats)
     kh_val(refmap, k).REFNENTROP = covstats.nentropy;
     kh_val(refmap, k).REFNGINI   = covstats.ngini;
     kh_val(refmap, k).tad80      = covstats.tad80;
-    kv_destroy(aEVENT);
+    unicorn_mem_free(&unicorn_spill_threshold, aEVENT.a);
+    kv_init(kh_val(refmap, k).aEVENT);
   }
   for (uint32_t i = 0; i < rmq.n; i++) {
     k = refmap_get(refmap, rmq.a[i]);
@@ -716,16 +673,20 @@ static void _refmapstats(unicorn_stat_t *stats)
 static void _refstat_free(refstat_t *r)
 {
   if (!r) return;
-  if (r->READSET) u64set_destroy(r->READSET);
+  free(r->aRLEN.dense);
+  if (r->READSET) unicorn_readset_free(r->READSET);
   if (r->camex) lint2int_destroy(r->camex);
-  kv_destroy(r->aANI);
-  kv_destroy(r->aEVENT);
+  unicorn_mem_free(&unicorn_spill_threshold, r->aANI.a);
+  unicorn_mem_free(&unicorn_spill_threshold, r->aEVENT.a);
   free(r);
 }
 
 int unsorted_compute(unicorn_t *u, unicorn_stat_t *stats)
 {
   int ret = -1, absent;
+  char *previous_query = NULL;
+  uint64_t query_id = 0;
+  int grouped = u && (u->sorted & (QUERYSORTED|QUERYGROUPED));
   if (!u || !stats) goto exit;
   ret = -2;
   bam1_t *b = bam_init1();
@@ -733,76 +694,87 @@ int unsorted_compute(unicorn_t *u, unicorn_stat_t *stats)
   refmap_t *refmap = stats->__map;
   uint8_t ksize = stats->ksize ? stats->ksize : 17;
   genesis_encoder_t enc = genesis_encoderinit(ksize);
-  //Loop over alignments //TODO refector //parallelize
+  dust_cache_t cache = {0};
+  // Stream records while maintaining per-reference state.
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     if (_unmapped(b)) continue;
     if (_reftooshort(u->hdr, b->core.tid, stats->minrefl)) continue;
     if ( !_ASCHECK(b, stats->minalnas) ) continue;
-    int32_t dusts = (int)(0.5 + dust(bam_get_seq(b), b->core.l_qseq, 64, NULL));
+    int32_t dusts = cached_dust(b, &cache);
     if ( dusts > stats->maxdust ) continue;
     naln++;
     int32_t tid   = b->core.tid;
     uint32_t qlen = b->core.l_qseq;
-    refstat_t refstat = {0};
+    refstat_t initial = {0};
     khint_t k = refmap_get(refmap, tid); //query reference map
     if ( k == kh_end(refmap) ) {
       // New reference sequence, initialize stats and insert in map
-      refstat.READSET = u64set_init(); //Unique queryIDs
-      kv_init(refstat.aANI);
-      kv_init(refstat.aEVENT);
-      refstat.camex = lint2int_init();
-      refstat.REFLEN = u->hdr->target_len[tid];
-      refstat.REFREADMIN = 0xffffffffU;
+      initial.READSET = unicorn_readset_new(grouped); //Unique queryIDs
+      kv_init(initial.aANI);
+      kv_init(initial.aEVENT);
+      initial.camex = lint2int_init2(&unicorn_spill_threshold);
+      initial.REFLEN = u->hdr->target_len[tid];
+      initial.REFREADMIN = 0xffffffffU;
+      if (!initial.READSET || !initial.camex) {
+        unicorn_readset_free(initial.READSET); lint2int_destroy(initial.camex); goto exit;
+      }
       k = refmap_put(refmap, tid, &absent);
-      kh_val(refmap, k) = refstat;
+      if (absent < 0) { unicorn_readset_free(initial.READSET); lint2int_destroy(initial.camex); goto exit; }
+      kh_val(refmap, k) = initial;
     }
     // update stats
-    refstat = kh_val(refmap, k);
-    uint32_t naln = ++refstat.REFNALNS;
+    refstat_t *refstat = &kh_val(refmap, k);
+    uint64_t naln = ++refstat->REFNALNS;
     //Add read name to read set to count number of reads to ref
-    khint_t q = kh_hash_str(bam_get_qname(b));
-    u64set_put(refstat.READSET, q, &absent);
+    const char *query_name = bam_get_qname(b);
+    if (grouped && (!previous_query || strcmp(previous_query, query_name))) {
+      char *copy = strdup(query_name);
+      if (!copy || query_id == UINT64_MAX) { free(copy); goto exit; }
+      free(previous_query); previous_query = copy; ++query_id;
+    }
+    absent = unicorn_readset_add(refstat->READSET, query_name, query_id);
+    if (absent < 0) goto exit;
     float mean, delta;
     //mean, median, and variance  Welford's online algorithm
     if (absent) { //Only first instance of query, no counting same read twice
       //Read length mean, variance, median, mode, min, max
-      refstat.aRLEN[qlen < 256 ? qlen : 255]++; //Count read length
-      uint32_t n = kh_size(refstat.READSET);
-      mean = refstat.REFREADE;                         //Get current mean
+      if (readhist_add(&refstat->aRLEN, qlen < 256 ? qlen : 255)) goto exit; //Count read length
+      uint32_t n = unicorn_readset_size(refstat->READSET);
+      mean = refstat->REFREADE;                         //Get current mean
       delta = qlen - mean;                             //Compute difference
-      refstat.REFREADE += delta/n;                     //Running mean
-      refstat._M += delta * (qlen - refstat.REFREADE); //Keep track of m
-      refstat.REFREADV = n - 1 ? (refstat._M / (n-1)) : 0.0f; //Running variance
-      refstat.REFREADMIN = qlen<refstat.REFREADMIN ? qlen :  refstat.REFREADMIN;
-      refstat.REFREADMAX = qlen>refstat.REFREADMAX ? qlen :  refstat.REFREADMAX;
-      _camex_add_read(refstat.camex, enc, b, ksize);
+      refstat->REFREADE += delta/n;                     //Running mean
+      refstat->_M += delta * (qlen - refstat->REFREADE); //Keep track of m
+      refstat->REFREADV = n - 1 ? (refstat->_M / (n-1)) : 0.0f; //Running variance
+      refstat->REFREADMIN = qlen<refstat->REFREADMIN ? qlen :  refstat->REFREADMIN;
+      refstat->REFREADMAX = qlen>refstat->REFREADMAX ? qlen :  refstat->REFREADMAX;
+      if (_camex_add_read(refstat->camex, enc, b, ksize)) goto exit;
     }
     //Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
-    kv_push(float, refstat.aANI, ani);
-    mean = refstat.REFALNANIE;
+    REF_PUSH(float, refstat->aANI, ani, goto exit);
+    mean = refstat->REFALNANIE;
     delta = ani-mean;
-    refstat.REFALNANIE += delta/naln;
-    refstat._MANI += delta * (ani - refstat.REFALNANIE);
-    refstat.REFALNANIV = naln > 1 ? refstat._MANI / (naln - 1) : 0.0f;
+    refstat->REFALNANIE += delta/naln;
+    refstat->_MANI += delta * (ani - refstat->REFALNANIE);
+    refstat->REFALNANIV = naln > 1 ? refstat->_MANI / (naln - 1) : 0.0f;
 		//Add alignment event, for coverage comp via sweep line algorith
     _urangeevent s = {b->core.pos,   1};
     _urangeevent e = {bam_endpos(b), 0};
-    kv_push(_urangeevent, refstat.aEVENT, s);
-    kv_push(_urangeevent, refstat.aEVENT, e);
+    REF_PUSH(_urangeevent, refstat->aEVENT, s, goto exit);
+    REF_PUSH(_urangeevent, refstat->aEVENT, e, goto exit);
     //Alignment NM
-    mean = refstat.REFALNNM;
+    mean = refstat->REFALNNM;
     delta = NM-mean;
-    refstat.REFALNNM += delta/naln;
+    refstat->REFALNNM += delta/naln;
     //Alignment dust
-    mean = refstat.mdust;
+    mean = refstat->mdust;
     delta = dusts - mean;
-    refstat.mdust += delta/naln;
-    refstat._MDUST += delta * (dusts - refstat.mdust);
-    refstat.vdust = naln > 1 ? refstat._MDUST / (naln - 1) : 0.0f;
+    refstat->mdust += delta/naln;
+    refstat->_MDUST += delta * (dusts - refstat->mdust);
+    refstat->vdust = naln > 1 ? refstat->_MDUST / (naln - 1) : 0.0f;
     //Don't loose your stats value
-    kh_val(refmap, k) = refstat;
+
   }
   stats->_nalns = naln;
   if (VERBOSE)
@@ -814,28 +786,25 @@ int unsorted_compute(unicorn_t *u, unicorn_stat_t *stats)
   stats->fc = 1;
   ret = 0;
   exit:
+    free(previous_query);
     return ret;
 }
 
 int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 {
+  if (u) u->coord_seen = 0;
 	if (!u || !stats) return -1;
   // Print header once for the entire run. The coord-sorted pipeline prints
   // per-reference rows directly and does not populate `stats->__map` yet.
   if (utax) fprintf(u->ofp, REFSTATSTR2);
   else      fprintf(u->ofp, REFSTATSTR);
-  // Prototype scaffold: set up the objects we will need for the coord-sorted
-  // pipeline, but keep existing behavior until the steps are implemented.
   pipeline_t p = {0};
   p.u = u;
   p.stats = stats;
   p.utax  = utax;
-  p.refmap  = (refmap_t *)stats->__map;
-  p.ksize   = stats->ksize ? stats->ksize : 17;
-  p.enc     = genesis_encoderinit(p.ksize);
   p.forpool = kt_forpool_init(u->nthreads);
-  p.b = bam_init1();
   p.err = 0;
+  if (!p.forpool) { p.err = 1; goto exit; }
   // Optional: stream an output BAM without a second pass over the input.
   // We keep the original header (no tid remapping) and only emit alignments
   // for references that pass filters.
@@ -846,7 +815,7 @@ int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
       goto exit;
     }
     if (u->nthreads > 1) bgzf_thread_pool(p.outfp->fp.bgzf, u->p, 0);
-    p.ohdr = sam_hdr_dup(u->hdr);
+    p.ohdr = u->hdr; /* No target remapping; reuse the immutable dictionary. */
     if (!p.ohdr) {
       p.err = 1;
       goto exit;
@@ -868,14 +837,12 @@ int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
     }
   }
 
-  // TODO: enable once step 0/1/2 are implemented:
   kt_pipeline(3, _refstats_pipeline, &p, 3);
   exit:
-    if (p.b) bam_destroy1(p.b);
     if (p.forpool) kt_forpool_destroy(p.forpool);
-    if (p.enc) genesis_encoderfree(p.enc);
-    if (p.outfp) sam_close(p.outfp);
-    if (p.ohdr) sam_hdr_destroy(p.ohdr);
+    if (p.outfp && sam_close(p.outfp) < 0) p.err = 1;
+    if (fflush(u->ofp)) p.err = 1;
+
     if (p.err) return -1;
     return 0;
 }
@@ -883,8 +850,7 @@ int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 int unicorn_refstat_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
 {
   if (!u || !stats) return -1;
-  // Fast path for coordinate-sorted BAMs (prototype). Falls back to the
-  // existing order-agnostic implementation until fully implemented.
+  // Coordinate order allows completed references to be emitted and released.
   if (u->sorted & COORDSORTED) return sorted_compute(u, stats, utax);
   return unsorted_compute(u, stats);
 }
@@ -910,7 +876,7 @@ uint64_t unicorn_stat_getfaln(const unicorn_stat_t *stats)
   return stats->_nfalns;
 }
 
-int32_t unicorn_stats_getfrefn(const unicorn_stat_t *stats)
+uint64_t unicorn_stats_getfrefn(const unicorn_stat_t *stats)
 {
   return stats->_nfrefs;
 }
@@ -1007,6 +973,8 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   uint8_t ret = 1;
   if (!u || !stats) return ret;
   if (!stats->fc)   return ret;
+  // Coordinate-sorted input already streamed its BAM during computation.
+  if (u->sorted & COORDSORTED) return 0;
   sam_hdr_t *ohdr = NULL;
   sam_hdr_t *_hdr = NULL;
   bam1_t *b = bam_init1();
@@ -1037,7 +1005,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
   refmap_t *refmap = (refmap_t *)stats->__map;
   while (sam_read1(u->_FP, _hdr, b) >= 0) {
     if (_unmapped(b)) continue;
-    if ( !_ASCHECK(b, stats->minalnas) ) continue; //Check for alignment score
+    if (!_aln_passes_refstats_filters(u, stats, b)) continue;
     int32_t tid = b->core.tid;
     khint_t k = refmap_get(refmap, tid);
     if (k == kh_end(refmap)) continue; //Reference not in map
@@ -1087,6 +1055,7 @@ void unicorn_refstat_print(const unicorn_t *u,
                            FILE *fp,
                            utax_t *utax)
 {
+    if (!fp && u) fp = u->ofp;
     if (!stats || !fp || !u) return;
     if (!stats->fc) return;
     refmap_t *refmap = (refmap_t *)stats->__map;
@@ -1101,6 +1070,7 @@ void unicorn_refstat_print(const unicorn_t *u,
     }
     fprintf(fp, REFSTATSTR);
     _print_notax(fp, hdr, refmap);
+    fflush(fp);
     return;
 }
 

@@ -269,10 +269,21 @@ samtools view refstats.XRSorted.bam <() |
 
 ## Output Columns
 
-Unicorn prints numbered headers in each statistics file. The most important
-columns are shared across `refstats` and `taxstats`:
+Unicorn prints numbered headers in each statistics file. Statistics and counts
+are prefixed with `rs_` for `refstats` and `ts_` for `taxstats`, so they can be
+joined with metaDMG outputs without ambiguous metric names. For example,
+read counts are `rs_nreads` and `ts_nreads`, and mean ANI is `rs_mean_alnani`
+or `ts_mean_alnani`. Reference length is `rs_length`; taxon reference counts
+and summed lengths are `ts_num_accessions` and `ts_total_length`.
 
-- `num_alns`, `num_reads`: alignments and unique reads contributing to the row.
+Join identifiers retain their existing names: `Id` and optional `taxID` in
+`refstats`, and `taxid` and `name` in `taxstats`. Column numbering, order and
+values are unchanged. `bamstats` headers are unchanged. Existing scripts
+that select the old unprefixed statistics headers must use the new names.
+
+The following metric suffixes are shared across `refstats` and `taxstats`:
+
+- `num_alns`, `nreads`: alignments and unique reads contributing to the row.
 - `mean_readl`, `stdev_readl`, `median_readl`, `mode_readl`: read length summary.
 - `mean_alnnm`: mean edit distance from the `NM` tag.
 - `mean_alnani`, `stdev_alnani`, `median_alnani`: alignment ANI summary.
@@ -289,8 +300,8 @@ normalized Gini, and `tad80`.
 `taxstats` reports:
 
 - `taxid` and `name`
-- `num_accessions`: number of references assigned to the taxid
-- `total_length`: summed reference length for the taxid
+- `ts_num_accessions`: number of references assigned to the taxid
+- `ts_total_length`: summed reference length for the taxid
 
 ## Taxonomy Files
 
@@ -311,12 +322,90 @@ species genus family order class phylum kingdom domain
 
 - `refstats`, `bamstats`, and `taxstats` can read ordinary SAM/BAM files.
 - `alnfilt` requires query-sorted or query-grouped input.
-- Alignment ANI uses the `NM` tag and read length.
+- `alnfilt` ANI uses the `NM` tag and reference-aligned span; reported ANI in
+  `refstats` and `taxstats` uses the BAM read length.
 - Alignment filters that use score require an alignment score tag compatible with Unicorn's score checks.
 - Coverage breadth is the fraction of reference bases covered at least once.
 - Coverage evenness is computed from coverage on covered bases, so it is best interpreted together with `breath_cov`.
 
 
+## Large BAM files and resource controls
+
+`alnfilt` now makes one input pass, buffering only one query group. It preserves
+the input reference dictionary (unused references can remain in the header),
+record order, alignment fields and tags. Oversized groups spill to local scratch.
+`--compression 0` avoids redundant compression when piping into another BAM tool.
+`--seed` makes `RNDTOP` reproducible; `ALLTOP`, `PCTTOP` and `ALL` are deterministic.
+Mode names are case-insensitive. Missing/invalid `NM` tags on mapped records are
+errors; unmapped records are skipped. ANI retains its reference-span definition.
+
+For large `refstats` jobs, use coordinate-sorted input. Completed references are
+emitted and released by a three-stage pipeline. Query-grouped/unsorted input
+remains supported, but retains state for all references and can use much more
+memory. Exact ANI and coverage arrays, read indexes and k-mer indexes can spill
+to file-backed storage; no approximate medians or cardinality sketches are used.
+
+Both commands accept `--group-memory <MiB>` (default 64) and `--tmpdir <path>`.
+The threshold controls each query/reference input queue and large state
+allocations; **it is not a total process-RSS limit**. Memory also includes the
+reference header, worker queues, small per-reference state and OS-managed mmap
+pages. Use fast local scratch with sufficient free space. Private temporary
+files are unlinked and released when processing ends. `TMPDIR` is honored when
+`--tmpdir` is omitted. `refstats --qsize` defaults to 8192; lower values reduce
+in-flight batching memory. More threads can increase memory and may not improve
+throughput once serialization or disk I/O dominates.
+
+Example (paths and thread counts should match the host):
+
+```bash
+unicorn alnfilt -b input.query.bam --minani 93 --maxani 100 --mode ALLTOP \
+  --threads 4 --compression 0 --group-memory 64 --tmpdir /scratch | \
+  samtools sort -@ 4 -m 512M -T /scratch/unicorn-sort -o filtered.coord.bam
+unicorn refstats -b filtered.coord.bam --threads 4 --group-memory 64 \
+  --tmpdir /scratch --outstat refstats.tsv
+```
+
+See [scalability and validation notes](doc/scalability.md) for measurements,
+correctness fixes, scratch requirements and remaining limits. A terabyte-sized
+input has not yet been benchmarked; larger-file validation on the production
+host is still required before claiming terabyte-scale certification.
+
+## Development tests
+
+After building, run `make test`. The regression tests require Python 3 and
+`samtools` on `PATH`; use `make test PYTHON=/path/to/python3` if needed.
+They check statistics output, readable filtered BAMs for query-name and
+coordinate-sorted input, reference filtering, and exact `bamstats` read counts
+when different read names share a hash.
+
+For a Conda development environment with Genesis installed, initialize the
+`src/klib` submodule and use:
+
+```bash
+conda activate unicorn_dev
+make HTSSRC="$CONDA_PREFIX" CC=clang CXX=clang++
+make test
+```
+
+`bamstats` counts distinct full query names across the BAM. The `refstats`
+run summary sums per-reference read counts, so a read mapping to multiple
+references contributes more than once. `refstats` resolves read identities
+exactly: grouped input uses 64-bit query IDs, and coordinate/ungrouped input
+uses collision-resolving full-name indexes with spillable name arenas.
+`taxstats` also resolves full read names exactly, including run-wide totals
+and XR-sorted processing. Its `--minreads` filter applies to both ordinary and
+XR-sorted output. Taxstats has a separate coverage/k-mer implementation; its
+large-file memory behavior still needs production-scale validation. When a
+requested rank has no matching ancestor, the existing taxonomy fallback can
+report another rank. Check output taxids against `nodes.dmp` before treating
+all rows as strictly genus-level (or another requested rank).
+See [taxstats validation](doc/taxstats-validation.md) for the 22 October 2026
+combined-map test, numerical corrections and remaining limits.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+See [statistics compression and memory spilling](doc/output-storage.md) for default BGZF outputs, `--plain-text`, and the soft `--memory-limit 50G` trigger.
+
+See [development changes](CHANGELOG.md) for the consolidated dev2 change summary.

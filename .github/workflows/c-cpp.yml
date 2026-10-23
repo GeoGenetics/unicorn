@@ -2,9 +2,9 @@ name: C/C++ CI
 
 on:
   push:
-    branches: [ "unicorn" ]
+    branches: [ "unicorn", "dev2" ]
   pull_request:
-    branches: [ "unicorn" ]
+    branches: [ "unicorn", "dev2" ]
 
 jobs:
   build:
@@ -18,9 +18,9 @@ jobs:
       - name: Install htslib
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update && sudo apt-get install -y libhts-dev
+            sudo apt-get update && sudo apt-get install -y libhts-dev samtools python3
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            brew install htslib
+            brew install htslib samtools python
           fi
       - name: Update submodules
         run: git submodule update --init --recursive

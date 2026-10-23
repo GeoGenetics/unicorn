@@ -85,7 +85,7 @@ void unicorn_destroy(unicorn_t *u)
     if (u->ifile) free(u->ifile);
     if (u->hdr)   bam_hdr_destroy(u->hdr);
     if (u->_FP)   hts_close(u->_FP);
-    if (u->_OFP)  hts_close(u->_OFP);
+    if (u->ofp && u->ofp != stdout) fclose(u->ofp);
 		if (u->p)     hts_tpool_destroy(u->p);
 		if (u->daln)  bam_destroy1(u->daln);
 		free(u);
@@ -102,42 +102,39 @@ unicorn_t *unicorn_init( int nthreads,
     int ret = -1;
     unicorn_t *u = calloc(1, sizeof(unicorn_t));
     if (!u) return NULL;
+    if (nthreads < 1 || nthreads > 256) { free(u); return NULL; }
     u->nthreads = nthreads;
+    u->memory_limit = 64ULL << 20;
+    u->compression = 5;
     u->ifile = strdup(ifile);
     if ( !( u->_FP = hts_open(ifile,"r") ) ) goto exit;
+    if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
     if (nthreads > 1) {
-        u->p = hts_tpool_init(nthreads < 4 ? nthreads : 4);
+        u->p = hts_tpool_init(nthreads);
         if (!u->p) goto exit;
         bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0);
     }
-    if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
     u->argc = argc;
     u->argv = argv;
-    if (outbam) {
-		  u->outbam = outbam;
-      if ( !( u->_OFP = hts_open(outbam,"wbz") ) ) goto exit;
-		  if (nthreads > 1) {
-        //u->p = hts_tpool_init(nthreads < 4 ? nthreads : 4);
-        //if (!u->p) goto exit;
-        bgzf_thread_pool(u->_OFP->fp.bgzf, u->p, 0);
-      }
-		}
-		u->daln = bam_init1();
-		if (ofile) {
-			u->ofp = fopen(ofile, "w");
-			if (!u->ofp) goto exit;
-		}
-		else u->ofp = stdout;
-		if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
-		if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
-		if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;
-		if (isXsorted(u->hdr))  u->sorted  = XRSORTED;
-		if (VERBOSE)
-			fprintf(stderr, "[libunicorn::%s] %s file\n",
-							__func__,
-							unicorn_sortorder_str(u->sorted));
-		u->values.nref = u->hdr->n_targets;
-		ret = 0;
+    // Writers own their output handle; opening it here would truncate it twice.
+    if (outbam) u->outbam = outbam;
+
+    u->daln = bam_init1();
+    if (ofile) {
+        u->ofp = unicorn_text_open(ofile, nthreads);
+        if (!u->ofp) goto exit;
+    }
+    else u->ofp = stdout;
+    if (isqsorted(u->hdr))  u->sorted  = QUERYSORTED;
+    if (isqgrouped(u->hdr)) u->sorted |= QUERYGROUPED;
+    if (iscsorted(u->hdr))  u->sorted  = COORDSORTED;
+    if (isXsorted(u->hdr))  u->sorted  = XRSORTED;
+    if (VERBOSE)
+        fprintf(stderr, "[libunicorn::%s] %s file\n",
+                        __func__,
+                        unicorn_sortorder_str(u->sorted));
+    u->values.nref = u->hdr->n_targets;
+    ret = 0;
     exit:
     if (ret) {
         unicorn_destroy(u);
@@ -166,14 +163,14 @@ int64_t unicorn_getnfaln(unicorn_t *u)
 	return u ? (int64_t)u->values.nfaln : -1;
 }
 
-int32_t unicorn_getnqueries(unicorn_t *u)
+int64_t unicorn_getnqueries(unicorn_t *u)
 {
-	return u ? (int32_t)u->values.nread : -1;
+	return u ? (int64_t)u->values.nread : -1;
 }
 
-int32_t unicorn_getnfqueries(unicorn_t *u)
+int64_t unicorn_getnfqueries(unicorn_t *u)
 {
-	return u ? (int32_t)u->values.nfread : -1;
+	return u ? (int64_t)u->values.nfread : -1;
 }
 
 uint64_t unicorn_loadqueues(unicorn_t *u, bamq_t *q, uint8_t n)
@@ -632,3 +629,20 @@ emap_chr2int_t *_io_loadkhash(BGZF *fp, int *ret)
 		}
 		return map;
 }
+
+void unicorn_set_stream_options(unicorn_t *u, uint64_t bytes, int compression)
+{
+  if (!u) return;
+  if (bytes) { u->memory_limit = bytes; unicorn_spill_threshold = bytes; }
+  if (compression >= 0 && compression <= 9) u->compression = compression;
+}
+
+int unicorn_check_output(unicorn_t *u)
+{
+  if (!u || !u->ofp) return -1;
+  int ret = fflush(u->ofp) || ferror(u->ofp);
+  if (u->ofp != stdout) { if (fclose(u->ofp)) ret = 1; u->ofp = NULL; }
+  return ret ? -1 : 0;
+}
+
+void unicorn_set_output(unicorn_t *u, FILE *fp) { if (u) u->ofp = fp; }

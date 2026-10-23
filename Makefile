@@ -44,9 +44,11 @@ endif
 HTSINCDIR = $(HTS_PREFIX)/include
 HTSLIBDIR = $(HTS_PREFIX)/lib
 
-.PHONY: clean all
+.PHONY: clean all test
 
-%.o:%.c src/version.h
+PYTHON ?= python3
+
+%.o:%.c src/version.h src/unicorn.h src/libunicorn/unicorn_internal.h
 	$(CC) -o $(@) $*.c -c $(CFLAGS) $(HTSIPTH)
 
 all: genesis genesisC klib libunicorn unicorn
@@ -74,9 +76,9 @@ unicorn: src/unicorn.c $(OBJ) src/version.h
 src/version.h: src/version.h.in
 	sed 's/@GIT_COMMIT@/$(GIT_COMMIT)/' $< > $@
 
+# Tests validate decoded output and statistics rather than a platform-specific checksum.
 test:
-	cksum=$$(./unicorn refstats -b data/test.bam 2> /dev/null | cksum | awk '{print $$1}' ); \
-	[ $$cksum -eq 996842798 ] || (exit 1)
+	$(PYTHON) -m unittest discover -s tests -p 'test_*.py' -v
 
 clean:
 	rm -f $(OBJ) src/version.h libunicorn.a unicorn unicorn.h $(KOBJ) data/out.bam data/out.stats.txt

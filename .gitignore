@@ -19,3 +19,7 @@ testing
 conda/*.gz
 figures/
 src/genesisC/*.o
+
+# Python test caches
+__pycache__/
+*.py[cod]

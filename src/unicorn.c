@@ -28,10 +28,14 @@ SOFTWARE.
 #include <time.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <math.h>
+#include <strings.h>
 
 #include "klib/ketopt.h"
 #define OPT_STR "b:o:t:a:n:d:1:2:p:q:k:h"
 static ko_longopt_t unicorn_lopts[] = {
+    { "memory-limit", ko_required_argument, 336 },
+    { "plain-text", ko_no_argument, 337 },
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
     { "names",           ko_required_argument, 302 },
@@ -64,6 +68,10 @@ static ko_longopt_t unicorn_lopts[] = {
     { "maxdust",         ko_required_argument, 329 },
     { "ksize",           ko_required_argument, 330 },
 		{ "qsize",           ko_required_argument, 331 },
+    { "group-memory", ko_required_argument, 332 },
+    { "compression", ko_required_argument, 333 },
+    { "seed", ko_required_argument, 334 },
+    { "tmpdir", ko_required_argument, 335 },
     {0 ,0 ,0}
 };
 #include "klib/kvec.h"
@@ -84,6 +92,11 @@ static const char *ERRORS[16] = { 0,
                                   "Bad taxonomy"};
 
 typedef struct unicorn_opts {
+  char *tmpdir;
+  uint64_t group_memory;
+  uint64_t rss_limit;
+  int plain_text;
+  int compression;
   int  threads;         // Number of threads to use
   char *filelist;        // File containing list of input files
   char *outbam;         // Output BAM file
@@ -158,7 +171,9 @@ static void refstats_usage(FILE *fp)
             "  -t <int>, --threads <int> Number of threads [4]\n"
             "  -o <str>, --outbam  <str> Output BAM file with filtered references\n"\
 						"  -k <int>, --ksize <int>   kmer size for duplicity computation [17]\n"\
-						"  --outstat <str> Print statistics to file <str> [stdout]\n"\
+						"  --memory-limit <N[G|M]> Soft RSS spill trigger (GiB/MiB); not a hard cap\n"\
+            "  --plain-text                 Disable default BGZF for named statistics\n"\
+            "  --outstat <str> Print statistics to file <str> [stdout]\n"\
             "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      Example: \"--minreads 100\" to filter out references with\n"\
             "                 less than 100 reads.\n"\
@@ -177,8 +192,10 @@ static void refstats_usage(FILE *fp)
 						"  XR:i:<taxid> tag in.\n"\
 						"  taxid column 2 in the output statistics file.\n"\
 						"  --rank <str>  Taxonomic rank for XR tag. [genus]\n"\
-						"  --qsize <int> Size of queue for coordinate sorted input bam files [1024]\n"\
+						"  --qsize <int> Size of queue for coordinate sorted input bam files [8192]\n"\
 						"  --verbose  Print libunicorn's messages.\n"\
+            "  --group-memory <MiB> Per-queue spill and large-allocation threshold [64]\n"\
+            "  --tmpdir <directory> Local scratch directory [TMPDIR or /tmp]\n"\
             "  -h         print this help message\n");
 }
 
@@ -200,7 +217,9 @@ static void taxstats_usage(FILE *fp)
             "  -b <str>                     Input bam|sam\n"\
 						"  -t <int>, --threads <int>    Number of threads [4]\n"\
             "  -k <int>, --ksize <int>      kmer size for duplicity computation [17]\n"\
-						"  --outstat <str> Print statistics to file <str> [stdout]\n"\
+						"  --memory-limit <N[G|M]> Soft RSS spill trigger (GiB/MiB); not a hard cap\n"\
+            "  --plain-text                 Disable default BGZF for named statistics\n"\
+            "  --outstat <str> Print statistics to file <str> [stdout]\n"\
 	          "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
             "      For example \"--minreads 100\" to filter out taxids with\n"\
             "      less than 100 reads.\n"\
@@ -235,6 +254,11 @@ static void alnfilt_usage(FILE *fp)
             "  --pct <float>                Percentage threshold for PCTTOP mode [0.90]\n"\
             "  --minani <float>             Minimum average nucleotide identity [90.0]\n"\
             "  --maxani <float>             Maximum average nucleotide identity [100.0]\n"\
+            "  --tmpdir <directory>         Local scratch directory [TMPDIR or /tmp]\n"\
+            "  --memory-limit <N[G|M]>     Soft RSS spill trigger; e.g. 50G\n"\
+            "  --group-memory <MiB>         Query buffer before disk spill [64]\n"\
+            "  --compression <0..9>         Output compression [5]; 0 for pipes\n"\
+            "  --seed <int>                 Seed for RNDTOP reservoir sampling\n"\
             "  --strictbounds               Remove query if ANI out of bounds at any alignment.\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message.\n");
@@ -277,7 +301,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         opts->col2 = strtoul(o.arg, NULL, 10);
         break;
       case 'k':
-        opts->ksize = strtoul(o.arg, NULL, 10);
+        { unsigned long k = strtoul(o.arg, NULL, 10);
+          if (k < 1 || k > 32) return 7;
+          opts->ksize = k; }
         break;
       case 'h':
 				ret = 1;
@@ -372,13 +398,13 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         }
       break;
       case 323: //alnfiltmode
-        if (strcmp(o.arg, "ALLTOP") == 0) {
+        if (strcasecmp(o.arg, "ALLTOP") == 0) {
           opts->alnfiltmode = UNICORN_ALNFILT_ALLTOP;
-        } else if (strcmp(o.arg, "RNDTOP") == 0) {
+        } else if (strcasecmp(o.arg, "RNDTOP") == 0) {
           opts->alnfiltmode = UNICORN_ALNFILT_RNDTOP;
-        } else if (strcmp(o.arg, "PCTTOP") == 0) {
+        } else if (strcasecmp(o.arg, "PCTTOP") == 0) {
           opts->alnfiltmode = UNICORN_ALNFILT_PCTTOP;
-        } else if (strcmp(o.arg, "ALL") == 0) {
+        } else if (strcasecmp(o.arg, "ALL") == 0) {
           opts->alnfiltmode = UNICORN_ALNFILT_ALL;
         } else {
           fprintf(stderr, "[unicorn::%s] Error: Unknown --mode %s\n", __func__, o.arg);
@@ -396,7 +422,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         break;
       case 325: //pct
           opts->pct = strtof(o.arg, NULL);
-        if (opts->pct <= 0.f || opts->pct > 100.f) {
+        if (!isfinite(opts->pct) || opts->pct <= 0.f || opts->pct > 1.f) {
           fprintf(stderr, "[unicorn::%s] Error: --pct must be between (0.0 and 1.0]\n", __func__);
           ret = 7;
           goto exit;
@@ -420,11 +446,42 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         opts->maxdust = strtoul(o.arg, NULL, 10);
         break;
       case 330: //ksize
-        opts->ksize = strtoul(o.arg, NULL, 10);
+        { unsigned long k = strtoul(o.arg, NULL, 10);
+          if (k < 1 || k > 32) return 7;
+          opts->ksize = k; }
         break;
 			case 331: //qsize
 				opts->qsize = strtoul(o.arg, NULL, 10);
+        if (!opts->qsize) return 7;
 				break;
+      case 337: opts->plain_text = 1; break;
+      case 336: {
+        char *end; double n = strtod(o.arg, &end), scale = 1;
+        if (*end == 'G' && !end[1]) scale = 1073741824.0;
+        else if (*end == 'M' && !end[1]) scale = 1048576.0;
+        else if (*end) return 7;
+        if (!isfinite(n) || n <= 0 || n * scale >= (double)UINT64_MAX) return 7;
+        opts->rss_limit = (uint64_t)(n * scale);
+        if (!opts->rss_limit) return 7;
+        break;
+      }
+      case 332: {
+        char *end = NULL;
+        unsigned long long bytes = strtoull(o.arg, &end, 10);
+        if (!bytes || !end || *end || bytes > SIZE_MAX / (1ULL<<20)) return 7;
+        opts->group_memory = bytes << 20;
+        break;
+      }
+      case 333:
+        if (strlen(o.arg) != 1 || o.arg[0] < '0' || o.arg[0] > '9') return 7;
+        opts->compression = o.arg[0] - '0';
+        break;
+      case 335:
+        free(opts->tmpdir); opts->tmpdir = strdup(o.arg);
+        break;
+      case 334:
+        srand((unsigned)strtoul(o.arg, NULL, 10));
+        break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
                         __func__,
@@ -439,6 +496,15 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
       }
   }
   if (ret) goto exit;
+  unicorn_set_memory_limit(opts->rss_limit);
+  if (opts->outstat && !opts->plain_text) {
+    size_t n = strlen(opts->outstat);
+    if (n < 3 || strcmp(opts->outstat+n-3, ".gz")) {
+      char *path = malloc(n+4); if (!path) return 7;
+      memcpy(path, opts->outstat, n); memcpy(path+n, ".gz", 4);
+      free(opts->outstat); opts->outstat = path;
+    }
+  }
   exit:
     return ret;
 }
@@ -451,7 +517,7 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
   fprintf(fp, "\t-t %d\n", opts->threads);
   fprintf(fp, "\t-k %d\n", opts->ksize);
 	fprintf(fp, "\t--outstat  %s\n", opts->outstat ? opts->outstat : "/dev/stdout");
-  fprintf(fp, "\t--minrefl %lu\n", opts->minrefl);
+  fprintf(fp, "\t--minrefl %"PRIu64"\n", opts->minrefl);
   fprintf(fp, "\t--minreads  %d\n", opts->minnreads);
   fprintf(fp, "\t--minalnas  %d\n", opts->minalnas);
   fprintf(fp, "\t--maxdust   %d\n", opts->maxdust);
@@ -501,7 +567,7 @@ static void _printrefnums(unicorn_t *u, unicorn_stat_t *stats, uint64_t ns)
                   tread,
                   fread,
                   (float)fread/tread);
-  fprintf(stderr, "\t %d references, %lu passed filters (%f)\n",
+  fprintf(stderr, "\t %d references, %"PRIu64" passed filters (%f)\n",
 									unicorn_getnref(u),
                   unicorn_stats_getfrefn(stats),
                   (float)unicorn_stats_getfrefn(stats)/unicorn_getnref(u));
@@ -515,12 +581,13 @@ static int unicorn_refstats(int argc, char **argv)
   uint64_t ns;
   unicorn_opt_t opts = {0};
   opts.threads   = 4;
+  opts.group_memory = 64ULL << 20;
   opts.minnreads = 1;
   opts.minrefl   = 0;
   opts.minalnas  = INT32_MIN;
   opts.maxdust   = 100;
   opts.ksize     = 17;
-  opts.qsize		 = 1024;
+  opts.qsize		 = 8192;
 	opts.rank  = strdup("genus");
 	unicorn_t *u   = NULL;
   unicorn_stat_t *stats = NULL;
@@ -531,6 +598,7 @@ static int unicorn_refstats(int argc, char **argv)
 	for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+  if (unicorn_set_temp_directory(opts.tmpdir)) { ret = 7; goto exit; }
 	if ( (ret = _refstats_checkopt(&opts)) )            goto exit;
 	unicorn_printopts(&opts, stderr, REFSTATS);
   clock_gettime(CLOCK_MONOTONIC, &progB);
@@ -576,7 +644,7 @@ static int unicorn_refstats(int argc, char **argv)
                             opts.minalnas,
                             opts.maxdust,
                             opts.ksize,
-														0,
+                            opts.qsize,
                             REFSTATS);
   if (!stats) goto exit;
   ret = -4;
@@ -589,6 +657,7 @@ static int unicorn_refstats(int argc, char **argv)
 	fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
   fflush(stderr);
   unicorn_refstat_print(u, stats, ofp, utax);
+  if (unicorn_check_output(u)) { ret = 3; goto exit; }
   if (opts.outbam) {
     fprintf(stderr, "[unicorn::%s] Writing bamfile\n", __func__);
     fprintf(stderr, "\twriting to %s\n", opts.outbam);
@@ -618,7 +687,7 @@ static int unicorn_refstats(int argc, char **argv)
     if (ret) {
 			refstats_usage(stderr);
 			if (1==ret) ret = 0;
-			else fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
+      else fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, (ret > 0 && ret < 9 ? ERRORS[ret] : "Processing or I/O error"));
     }
     if (opts.ifile)      free(opts.ifile);
     if (opts.statstr)    free(opts.statstr);
@@ -758,6 +827,7 @@ static int unicorn_bamstats(int argc, char **argv)
 static int unicorn_taxstats(int argc, char **argv)
 {
   int ret = 1;
+  int failed = 0;
 	struct timespec start = {0}, stop = {0}, pstart = {0}, pstop = {0};
   uint64_t ns = 0;
   utax_t *utax = NULL;
@@ -782,10 +852,11 @@ static int unicorn_taxstats(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+  if (unicorn_set_temp_directory(opts.tmpdir)) { ret = 7; goto exit; }
 	ret = 2;
-	if (!opts.ifile && !opts.filel) goto exit;
+	if (!opts.ifile && !opts.filelist) goto exit;
 	if (opts.outstat) {
-    ofp = fopen(opts.outstat, "w");
+    ofp = unicorn_text_open(opts.outstat, opts.threads);
     if (!ofp) goto exit;
   }
   else ofp = stdout;
@@ -793,7 +864,7 @@ static int unicorn_taxstats(int argc, char **argv)
 	//Add files to queue
   strq_t fileq = {0};
   if (opts.ifile) kv_push(char *, fileq, opts.ifile);
-  if (opts.filel) unicorn_addfilelist(opts.filel, &fileq);
+  if (opts.filelist) unicorn_addfilelist(opts.filelist, &fileq);
   if (opts.onlypresent) {
     if (!opts.dumpacc2tax) opts.dumpacc2tax = strdup("acc2tax.khash");
     kv_init(accq);
@@ -838,15 +909,17 @@ static int unicorn_taxstats(int argc, char **argv)
 		u = unicorn_init(opts.threads,
                      fileq.a[i],
                      obamstr,
-										 opts.outstat ? opts.outstat : NULL,
+										 NULL,
                      argc,
                      _argv);
     if (obamstr && obamstr != opts.outbam) free(obamstr);
     if (!u) {
       fprintf(stderr, "[unicorn::%s] Error: Cannot initialize unicorn with file %s\n",
                        __func__, fileq.a[i]);
+      failed = 1;
       continue;
     }
+    unicorn_set_output(u, ofp);
 		clock_gettime(CLOCK_MONOTONIC, &stop);
 		ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
@@ -860,15 +933,17 @@ static int unicorn_taxstats(int argc, char **argv)
                               opts.ksize,
 															opts.qsize,
                               TAXSTATS);
-    if (!stats) goto exit;
+    if (!stats) { ret = 3; goto exit; }
     clock_gettime(CLOCK_MONOTONIC, &start);
     if ( (ret = unicorn_tidstat_compute(u, stats, utax)) ) {
       fprintf(stderr, "[unicorn::%s] Error: Failed to compute statistics for file %s\n",
                        __func__, fileq.a[i]);
+      unicorn_set_output(u, NULL);
       unicorn_destroy(u);
       unicorn_stat_destroy(stats);
       u = NULL;
       stats = NULL;
+      failed = 1;
       continue;
     }
     clock_gettime(CLOCK_MONOTONIC, &stop);
@@ -896,7 +971,8 @@ static int unicorn_taxstats(int argc, char **argv)
     fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
     unicorn_taxstat_print(u, stats, ofp, utax);
     unicorn_stat_destroy(stats);
-    unicorn_destroy(u);
+    unicorn_set_output(u, NULL);
+      unicorn_destroy(u);
     stats = NULL;
     u     = NULL;
   }
@@ -906,13 +982,17 @@ static int unicorn_taxstats(int argc, char **argv)
     unicorn_strqdestroy(accq);
   }
    for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
-  ret = 0;
+  ret = failed ? 3 : 0;
   exit:
     if (ret) {
 			if (ret > 1)
-      	fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, ERRORS[ret]);
+        fprintf(stderr, "[unicorn::%s] Error: %s\n",__func__, (ret > 0 && ret < 9 ? ERRORS[ret] : "Processing or I/O error"));
 			else ret = 0;
 				taxstats_usage(stderr);
+    }
+    if (ofp) { int bad = ferror(ofp);
+      if (ofp != stdout) { if (fclose(ofp) || bad) ret = 3; }
+      else if (fflush(ofp) || bad) ret = 3;
     }
     if (utax) unicorn_closetaxonomy(utax);
     if (opts.ifile)   free(opts.ifile);
@@ -921,7 +1001,7 @@ static int unicorn_taxstats(int argc, char **argv)
     if (opts.names)   free(opts.names);
     if (opts.nodes)   free(opts.nodes);
     if (opts.dumpacc2tax) free(opts.dumpacc2tax);
-    if (opts.filel)   free(opts.filel);
+    if (opts.filelist)   free(opts.filelist);
     if (opts.rank)    free(opts.rank);
     clock_gettime(CLOCK_MONOTONIC, &pstop);
     ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
@@ -938,6 +1018,7 @@ static int unicorn_cmpstat(int argc, char **argv)
   opts.threads   = 4;
   //Read command line options
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+  if (unicorn_set_temp_directory(opts.tmpdir)) { ret = 7; goto exit; }
   fprintf(stderr, "\tComparing statistics:\n"\
                   "\tstat1: %s\n"\
                   "\tstat2: %s\n"\
@@ -962,6 +1043,9 @@ static int unicorn_alnfilt(int argc, char **argv)
   clock_gettime(CLOCK_MONOTONIC, &pB);
   unicorn_opt_t opts = {0};
   opts.strictb     = 0;
+  opts.group_memory = 64ULL << 20;
+  opts.compression = 5;
+  opts.maxani = 100.0;
   opts.threads     = 4;
   opts.minani      = 90.0;
   opts.pct         = 0.90;
@@ -972,6 +1056,7 @@ static int unicorn_alnfilt(int argc, char **argv)
   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i)
     _argv[i] = strdup(argv[i]);
   if ( (ret = unicorn_parseopts(argc, argv, &opts)) ) goto exit;
+  if (unicorn_set_temp_directory(opts.tmpdir)) { ret = 7; goto exit; }
   ret = 1;
   if (!opts.ifile) goto exit;
   ret = 2;
@@ -1006,11 +1091,12 @@ static int unicorn_alnfilt(int argc, char **argv)
   if (opts.strictb)
     fprintf(stderr, "\tstrictbounds == TRUE\n");
   fflush(stderr);
+  unicorn_set_stream_options(u, opts.group_memory, opts.compression);
   ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minani, opts.maxani, opts.pct, opts.strictb);
   if (ret) goto exit;
   fprintf(stderr, "[unicorn::%s] Done\n"\
                   "\t%"PRIu64" alignments, %" PRIu64 " passed filters (%f)\n"\
-                  "\t%u queries, %u passed filter (%f)\n"\
+                  "\t%"PRId64" queries, %"PRId64" passed filter (%f)\n"\
                   "\t%u references, %u passed filter (%f)\n",
                   __func__,
                   unicorn_getnaln(u), unicorn_getnfaln(u),
@@ -1023,13 +1109,16 @@ static int unicorn_alnfilt(int argc, char **argv)
   exit:
     if (ret) {
       alnfilt_usage(stderr);
-      if (ret < 0) ret = 0;
+      if (ret < 0) ret = 3;
     }
     clock_gettime(CLOCK_MONOTONIC, &pE);
     ns = (pE.tv_sec - pB.tv_sec) * 1000000000 + (pE.tv_nsec - pB.tv_nsec);
     fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",
                     __func__,
                     (double)ns/1000000000.f);
+    if (u) unicorn_destroy(u);
+    for (unsigned i = 0; i < ((argc > 64) ? 64u : (unsigned)argc); ++i) free(_argv[i]);
+    free(opts.ifile); free(opts.outbam); free(opts.tmpdir);
     return ret;
 }
 

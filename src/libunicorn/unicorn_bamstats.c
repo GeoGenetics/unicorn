@@ -7,6 +7,9 @@
 
 #define docoverage 1
 
+// Keep full names so distinct reads with colliding hashes remain distinct.
+KHASHL_SET_INIT(static, readnames_t, readnames, const char *, kh_hash_str, kh_eq_str)
+
 KHASHL_MAP_INIT(static,
 								covmap_t,
 								covmap,
@@ -64,7 +67,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	covmap_t *covmap = covmap_init(); 
 	uint64_t nalns = 0, nreads = 0;
 	khint_t k;
-	u64set_t *readset = u64set_init();
+	readnames_t *readset = readnames_init();
 	floatmap_t   *anihist = floatmap_init();
 	uint32_t RLHIST[256] = {0}; //Read length count table
 	//Loop over alignments //TODO refector
@@ -72,10 +75,12 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		if (_unmapped(b)) continue;
 		uint32_t qlen = b->core.l_qseq;
-		khint_t q = kh_hash_str(bam_get_qname(b));
+		const char *qname = bam_get_qname(b);
 		int absent;
-		u64set_put(readset, q, &absent);
+		khint_t q = readnames_put(readset, qname, &absent);
 		if (absent) {
+			// The BAM buffer is reused on the next read, so own each stored name.
+			kh_key(readset, q) = strdup(qname);
 			//New read, increment read count
 			nreads++;
 			RLHIST[qlen < 256 ? qlen : 255]++;
@@ -140,7 +145,8 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	stats->_clen = clen;
 	memcpy(stats->_readlc, RLHIST, 256*sizeof(uint32_t));	
 	bam_destroy1(b);
-	u64set_destroy(readset);
+	kh_foreach(readset, k) free((void *)kh_key(readset, k));
+	readnames_destroy(readset);
 	stats->fc = 1;
 	return 0;
 }

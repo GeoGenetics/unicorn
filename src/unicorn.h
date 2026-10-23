@@ -92,8 +92,8 @@ int32_t unicorn_getnref(unicorn_t *u);
 int32_t unicorn_getnfref(unicorn_t *u);
 int64_t unicorn_getnaln(unicorn_t *u);
 int64_t unicorn_getnfaln(unicorn_t *u);
-int32_t unicorn_getnqueries(unicorn_t *u);
-int32_t unicorn_getnfqueries(unicorn_t *u);
+int64_t unicorn_getnqueries(unicorn_t *u);
+int64_t unicorn_getnfqueries(unicorn_t *u);
 
 
 /**
@@ -224,7 +224,7 @@ void unicorn_taxstat_print(const unicorn_t *u,
                            FILE *fp,
                            utax_t *utax);
 
-/* Print statistics table to fp*/
+/* Print statistics table to fp, or the configured statistics stream if NULL. */
 void unicorn_refstat_print(const unicorn_t *u,
                            const unicorn_stat_t *stats,
                            FILE *fp,
@@ -275,3 +275,18 @@ unicorn's alnfilt routines
 
 ****************************************************/
 int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct, uint8_t strictb);
+
+/* Configure query spill threshold in bytes and BAM compression (0..9). */
+void unicorn_set_stream_options(unicorn_t *u, uint64_t bytes, int compression);
+
+/* Set local scratch directory for private, automatically unlinked spill files. */
+int unicorn_set_temp_directory(const char *path);
+
+/* Flush and check the configured statistics stream. */
+int unicorn_check_output(unicorn_t *u);
+
+/* Soft RSS spill trigger, bytes; zero disables it. */
+void unicorn_set_memory_limit(uint64_t bytes);
+FILE *unicorn_text_open(const char *path, int threads);
+
+void unicorn_set_output(unicorn_t *u, FILE *fp);

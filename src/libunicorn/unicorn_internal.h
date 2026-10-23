@@ -34,6 +34,26 @@ SOFTWARE.
 #include <htslib/sam.h>
 #include <htslib/bgzf.h>
 
+typedef struct unicorn_readset unicorn_readset_t;
+unicorn_readset_t *unicorn_readset_new(int grouped);
+uint64_t unicorn_readset_size(const unicorn_readset_t *set);
+int unicorn_readset_add(unicorn_readset_t *set, const char *name, uint64_t id);
+void unicorn_readset_free(unicorn_readset_t *set);
+int unicorn_readset_merge(unicorn_readset_t *destination, const unicorn_readset_t *source);
+extern size_t unicorn_spill_threshold;
+int unicorn_memory_pressure(void);
+FILE *unicorn_text_open(const char *path, int threads);
+FILE *unicorn_tmpfile(void);
+void *unicorn_mem_alloc(void *context, size_t size, int clear);
+void *unicorn_mem_resize(void *context, void *pointer, size_t size);
+void unicorn_mem_free(void *context, void *pointer);
+int unicorn_record_write(FILE *fp, const bam1_t *b);
+int unicorn_record_read(FILE *fp, bam1_t *b);
+#define Kmalloc(km, type, cnt) ((type*)unicorn_mem_alloc(km, (cnt)*sizeof(type), 0))
+#define Kcalloc(km, type, cnt) ((type*)unicorn_mem_alloc(km, (cnt)*sizeof(type), 1))
+#define Krealloc(km, type, ptr, cnt) ((type*)unicorn_mem_resize(km, ptr, (cnt)*sizeof(type)))
+#define Kfree(km, ptr) unicorn_mem_free(km, ptr)
+#define kh_packed /* Values contain naturally aligned counters and pointers. */
 #include "klib/khashl.h"
 #include "klib/ksort.h"
 #include "klib/kthread.h"
@@ -83,7 +103,7 @@ static inline uint8_t _eventlt(_urangeevent a, _urangeevent b)
     return a.e > b.e;
 }
 typedef kvec_t(_urangeevent) ueventq_t;
-void unicorn_sorturange(uint32_t n, _urangeevent *a);
+void unicorn_sorturange(size_t n, _urangeevent *a);
 
 /*Sort values for bam files*/
 #define UNSRTED 0x00
@@ -105,13 +125,17 @@ typedef struct {
   int  argc;
   char **argv;
   int  nthreads;
+  uint64_t memory_limit; // Bytes buffered per query before disk spill.
+  int compression;
+  int coord_seen;
+  int32_t coord_tid;
+  hts_pos_t coord_pos;
   char *ifile;
 	char *outbam;
 	FILE *ofp;
 	hts_tpool *p;
   htsFile   *_FP;
   bam_hdr_t *hdr;
-  htsFile   *_OFP;
 	bam_hdr_t *ohdr;
 	//char *outbam;
 	uint8_t sorted; //See sort values
@@ -139,7 +163,7 @@ KHASHL_MAP_INIT(static,
                 kh_hash_uint32,
                 kh_eq_generic)
 KHASHL_MAP_INIT(static, lint2int_t, lint2int,
-                uint64_t, uint32_t,
+                uint64_t, uint64_t,
                 kh_hash_uint64, kh_eq_generic)
 
 /******************
@@ -149,7 +173,7 @@ KHASHL_MAP_INIT(static, lint2int_t, lint2int,
 KHASHL_SET_INIT(static,               //Scope
                 u64set_t, u64set, //type and prefix
                 uint64_t,             //key type
-                kh_hash_dummy, kh_eq_generic) //hash and equality functions
+                kh_hash_uint64, kh_eq_generic) //full-width IDs, with exact equality
 
 /******************
  * Reference statistics
@@ -157,6 +181,55 @@ KHASHL_SET_INIT(static,               //Scope
  * It is used to compute the statistics for each reference sequence
  * in the BAM file.
 */
+/* Small references usually have only a few distinct read lengths. Keep eight
+ * ordered bins inline and promote to the old dense range only when necessary. */
+typedef struct {
+  uint64_t counts[8];
+  uint8_t lengths[8];
+  uint8_t n;
+  uint64_t *dense;
+} readhist_t;
+
+static inline int readhist_add(readhist_t *h, uint8_t length)
+{
+  if (h->dense) { ++h->dense[length]; return 0; }
+  unsigned i = 0;
+  while (i < h->n && h->lengths[i] < length) ++i;
+  if (i < h->n && h->lengths[i] == length) { ++h->counts[i]; return 0; }
+  if (h->n == 8) {
+    h->dense = calloc(256, sizeof(*h->dense));
+    if (!h->dense) return -1;
+    for (unsigned j = 0; j < h->n; ++j) h->dense[h->lengths[j]] = h->counts[j];
+    ++h->dense[length];
+    return 0;
+  }
+  for (unsigned j = h->n; j > i; --j) {
+    h->counts[j] = h->counts[j-1]; h->lengths[j] = h->lengths[j-1];
+  }
+  h->lengths[i] = length; h->counts[i] = 1; ++h->n;
+  return 0;
+}
+
+static inline uint32_t readhist_median(const readhist_t *h, uint64_t total)
+{
+  uint64_t cumulative = 0;
+  for (unsigned i = 0; i < (h->dense ? 256 : h->n); ++i) {
+    cumulative += h->dense ? h->dense[i] : h->counts[i];
+    if (cumulative > total / 2) return h->dense ? i : h->lengths[i];
+  }
+  return 256; /* Preserve the legacy empty-histogram result. */
+}
+
+static inline uint32_t readhist_mode(const readhist_t *h)
+{
+  uint64_t best = 0; uint32_t length = 0;
+  for (unsigned i = 0; i < (h->dense ? 256 : h->n); ++i) {
+    uint64_t count = h->dense ? h->dense[i] : h->counts[i];
+    if (count > best) { best = count; length = h->dense ? i : h->lengths[i]; }
+  }
+  return length;
+}
+
 typedef struct refstat_t {
   uint32_t     REFLEN;     // Length of the reference sequence
   uint64_t     REFNALNS;   // Number of alignments mapped to the reference
@@ -168,7 +241,7 @@ typedef struct refstat_t {
   float        _M;         // Sum of squares of difference from mean
   uint32_t     REFREADMIN;
   uint32_t     REFREADMAX;
-  u64set_t     *READSET;   // Hash set of read IDs mapped to the reference
+  unicorn_readset_t *READSET;   // Hash set of read IDs mapped to the reference
   //Alignment data
   float        REFALNNM;   // mean edit distance
   float        REFALNANIE; // mean Average nucleotide identity(ANI)
@@ -194,7 +267,7 @@ typedef struct refstat_t {
 	//Data arrays
   floatq_t     aANI;
   //uint32q_t    aRLEN;
-  uint32_t     aRLEN[256]; //Count array of read lengths
+  readhist_t   aRLEN;      //Adaptive, exact read-length counts
   ueventq_t    aEVENT;     // For coverage computation
   //rehead members
   int32_t      _ntid;        // New Reference sequence ID
@@ -206,30 +279,43 @@ KHASHL_MAP_INIT(static,                        //Scope
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions
 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
 
+/* Taxstats needs only reference length and coverage events. */
+typedef struct { uint32_t REFLEN; ueventq_t aEVENT; } taxref_t;
+KHASHL_MAP_INIT(static, taxrefmap_t, taxrefmap, int32_t, taxref_t,
+               kh_hash_uint32, kh_eq_generic)
+static inline void taxrefmap_free(taxrefmap_t *map)
+{
+  if (!map) return;
+  khint_t k;
+  kh_foreach(map, k) unicorn_mem_free(&unicorn_spill_threshold, kh_val(map, k).aEVENT.a);
+  taxrefmap_destroy(map);
+}
+
 typedef struct taxstat_t {
   uint32_t     nrefs;    //Number of references in the taxon
   uint64_t     reflen;   // sum of reference lengths
   uint64_t     nalns;    // Number of alignments mapped to the reference
+  uint64_t     nmsum;    // Exact edit-distance sum for stable means
   //Read length data
-  float        readl_mean;     // Mean read length
-  float        readl_var;      // Read length variance
+  double       readl_mean;     // Mean read length
+  double       readl_var;      // Read length variance
   uint32_t     readl_median;   // Read length median
   uint32_t     readl_mode;     // Read length mode
-  float        _M;             // Sum of squares of difference from mean
+  double       _M;             // Sum of squares of difference from mean
   uint32_t     readl_min;
   uint32_t     readl_max;
-  u64set_t     *readset;       // Hash set of read IDs mapped to the reference
-  refmap_t     *refmap;
+  unicorn_readset_t *readset; // Exact, collision-resolving full read names
+  taxrefmap_t  *refmap;
   //Alignment data
-  float        alnnm_mean;   // mean edit distance
-  float        alnani_mean; // mean Average nucleotide identity(ANI)
-  float        alnani_var; // variance ANI
+  double       alnnm_mean;   // mean edit distance
+  double       alnani_mean; // mean Average nucleotide identity(ANI)
+  double       alnani_var; // variance ANI
   float        alnani_median; // median ANI
   float        alnani_mode; // Mode ANI
-  float        _MANI;      // See _M
-  float        mdust;      // Mean dust score
-  float        vdust;      // Variance dust score
-  float        _MDUST;     // See _M
+  double       _MANI;      // See _M
+  double       mdust;      // Mean dust score
+  double       vdust;      // Variance dust score
+  double       _MDUST;     // See _M
 	float        duplicity;  // Fraction of unique kmers in the taxon, as a proxy for genome complexity
 	//uint32_t     *camex;
 	lint2int_t		 *camex;    // Count array for camex kmer counts, using a hash map to save memory
@@ -309,103 +395,103 @@ typedef struct _covstats_t {
 } _covstats_t;
 
 #define REFSTATSTR "#1:Id\t"\
-                "2:Length\t"\
-                "3:num_alns\t"\
-                "4:num_reads\t"\
-                "5:mean_readl\t"\
-                "6:stdev_readl\t"\
-                "7:median_readl\t"\
-                "8:mode_readl\t"\
-                "9:readl_min\t"\
-                "10:readl_max\t"\
-                "11:mean_alnnm\t"\
-                "12:mean_alnani\t"\
-                "13:stdev_alnani\t"\
-                "14:median_alnani\t"\
-                "15:num_covbases\t"\
-                "16:mean_cov\t"\
-                "17:breath_cov\t"\
-                "18:exp_breath\t"\
-                "19:breath_ratio\t"\
-                "20:mean_covcovered\t"\
-                "21:stdev_covcovered\t"\
-                "22:evenness_cov\t"\
-                "23:site_density\t"\
-                "24:duplicity\t"\
-                "25:entropy\t"\
-                "26:gini\t"\
-                "27:norm_entropy\t"\
-                "28:norm_gini\t"\
-                "29:tad80\t"\
-                "30:mdust\t"\
-                "31:stdev_dust\n"
+                "2:rs_length\t"\
+                "3:rs_num_alns\t"\
+                "4:rs_nreads\t"\
+                "5:rs_mean_readl\t"\
+                "6:rs_stdev_readl\t"\
+                "7:rs_median_readl\t"\
+                "8:rs_mode_readl\t"\
+                "9:rs_readl_min\t"\
+                "10:rs_readl_max\t"\
+                "11:rs_mean_alnnm\t"\
+                "12:rs_mean_alnani\t"\
+                "13:rs_stdev_alnani\t"\
+                "14:rs_median_alnani\t"\
+                "15:rs_num_covbases\t"\
+                "16:rs_mean_cov\t"\
+                "17:rs_breath_cov\t"\
+                "18:rs_exp_breath\t"\
+                "19:rs_breath_ratio\t"\
+                "20:rs_mean_covcovered\t"\
+                "21:rs_stdev_covcovered\t"\
+                "22:rs_evenness_cov\t"\
+                "23:rs_site_density\t"\
+                "24:rs_duplicity\t"\
+                "25:rs_entropy\t"\
+                "26:rs_gini\t"\
+                "27:rs_norm_entropy\t"\
+                "28:rs_norm_gini\t"\
+                "29:rs_tad80\t"\
+                "30:rs_mdust\t"\
+                "31:rs_stdev_dust\n"
 #define REFSTATSTR2 "#1:Id\t"\
                  "2:taxID\t"\
-                 "3:Length\t"\
-                 "4:num_alns\t"\
-                 "5:num_reads\t"\
-                 "6:mean_readl\t"\
-                 "7:stdev_readl\t"\
-                 "8:median_readl\t"\
-                 "9:mode_readl\t"\
-                 "10:readl_min\t"\
-                 "11:readl_max\t"\
-                 "12:mean_alnnm\t"\
-                 "13:mean_alnani\t"\
-                 "14:stdev_alnani\t"\
-                 "15:median_alnani\t"\
-                 "16:num_covbases\t"\
-                 "17:mean_cov\t"\
-                 "18:breath_cov\t"\
-                 "19:exp_breath\t"\
-                 "20:breath_ratio\t"\
-                 "21:mean_covcovered\t"\
-                 "22:stdev_covcovered\t"\
-                 "23:evenness_cov\t"\
-                 "24:site_density\t"\
-                 "25:duplicity\t"\
-                 "26:entropy\t"\
-                 "27:gini\t"\
-                 "28:norm_entropy\t"\
-                 "29:norm_gini\t"\
-                 "30:tad80\t"\
-								 "31:mdust\t"\
-								 "32:stdev_dust\n"
+                 "3:rs_length\t"\
+                 "4:rs_num_alns\t"\
+                 "5:rs_nreads\t"\
+                 "6:rs_mean_readl\t"\
+                 "7:rs_stdev_readl\t"\
+                 "8:rs_median_readl\t"\
+                 "9:rs_mode_readl\t"\
+                 "10:rs_readl_min\t"\
+                 "11:rs_readl_max\t"\
+                 "12:rs_mean_alnnm\t"\
+                 "13:rs_mean_alnani\t"\
+                 "14:rs_stdev_alnani\t"\
+                 "15:rs_median_alnani\t"\
+                 "16:rs_num_covbases\t"\
+                 "17:rs_mean_cov\t"\
+                 "18:rs_breath_cov\t"\
+                 "19:rs_exp_breath\t"\
+                 "20:rs_breath_ratio\t"\
+                 "21:rs_mean_covcovered\t"\
+                 "22:rs_stdev_covcovered\t"\
+                 "23:rs_evenness_cov\t"\
+                 "24:rs_site_density\t"\
+                 "25:rs_duplicity\t"\
+                 "26:rs_entropy\t"\
+                 "27:rs_gini\t"\
+                 "28:rs_norm_entropy\t"\
+                 "29:rs_norm_gini\t"\
+                 "30:rs_tad80\t"\
+								 "31:rs_mdust\t"\
+								 "32:rs_stdev_dust\n"
 #define TIDSTATSTR "#1:taxid\t"\
                    "2:name\t"\
-                   "3:num_accessions\t"\
-                   "4:total_length\t"\
-                   "5:num_alns\t"\
-                   "6:num_reads\t"\
-                   "7:mean_readl\t"\
-                   "8:stdev_readl\t"\
-                   "9:median_readl\t"\
-                   "10:mode_readl\t"\
-                   "11:readl_min\t"\
-                   "12:readl_max\t"\
-                   "13:mean_alnnm\t"\
-                   "14:mean_alnani\t"\
-                   "15:stdev_alnani\t"\
-                   "16:median_alnani\t"\
-                   "17:num_covbases\t"\
-                   "18:mean_cov\t"\
-                   "19:breath_cov\t"\
-                   "20:exp_breath\t"\
-                   "21:breath_ratio\t"\
-                   "22:mean_covcovered\t"\
-                   "23:stdev_covcovered\t"\
-                   "24:evenness_cov\t"\
-                   "25:site_density\t"\
-                   "26:duplicity\t"\
-                   "27:mdust\t"\
-                   "28:stdev_dust\n"
+                   "3:ts_num_accessions\t"\
+                   "4:ts_total_length\t"\
+                   "5:ts_num_alns\t"\
+                   "6:ts_nreads\t"\
+                   "7:ts_mean_readl\t"\
+                   "8:ts_stdev_readl\t"\
+                   "9:ts_median_readl\t"\
+                   "10:ts_mode_readl\t"\
+                   "11:ts_readl_min\t"\
+                   "12:ts_readl_max\t"\
+                   "13:ts_mean_alnnm\t"\
+                   "14:ts_mean_alnani\t"\
+                   "15:ts_stdev_alnani\t"\
+                   "16:ts_median_alnani\t"\
+                   "17:ts_num_covbases\t"\
+                   "18:ts_mean_cov\t"\
+                   "19:ts_breath_cov\t"\
+                   "20:ts_exp_breath\t"\
+                   "21:ts_breath_ratio\t"\
+                   "22:ts_mean_covcovered\t"\
+                   "23:ts_stdev_covcovered\t"\
+                   "24:ts_evenness_cov\t"\
+                   "25:ts_site_density\t"\
+                   "26:ts_duplicity\t"\
+                   "27:ts_mdust\t"\
+                   "28:ts_stdev_dust\n"
 
 #define TIDFMTSTR "%u\t"\
                   "%s\t"\
                   "%u\t"\
                   "%"PRIu64"\t"\
                   "%"PRIu64"\t"\
-                  "%u\t"\
+                  "%"PRIu64"\t"\
                   "%f\t"\
                   "%f\t"\
                   "%u\t"\
@@ -464,6 +550,7 @@ uint64_t cov_hist(ueventq_t events,
          uint64_t *_tdepthsum,
          uint64_t *_sumsqdepth,
          uint32_t *_maxdepth);
+uint64_t _taxcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 
 /*
