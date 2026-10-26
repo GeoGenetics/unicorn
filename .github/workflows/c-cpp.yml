@@ -18,7 +18,7 @@ jobs:
       - name: Install htslib
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            sudo apt-get update && sudo apt-get install -y libbz2-dev libhts-dev samtools python3
+            sudo apt-get update && sudo apt-get install -y libbz2-dev libhts-dev samtools tabix python3
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
             brew install htslib samtools python
           fi
