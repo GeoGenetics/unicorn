@@ -409,3 +409,31 @@ MIT License. See [LICENSE](LICENSE) for details.
 See [statistics compression and memory spilling](doc/output-storage.md) for default BGZF outputs, `--plain-text`, and the soft `--memory-limit 50G` trigger.
 
 See [development changes](CHANGELOG.md) for the consolidated dev2 change summary.
+
+### Taxstats reference summaries and read-length distributions
+
+Taxstats includes mean/median/quartile summaries of reference breadth, coverage, Gini and entropy, full-range read-length medians, median NM/DUST and a BGZF read-length histogram companion. **These aligned-reference summaries are not genome completeness or pooled taxon Gini/entropy.** See [definitions, usage and interpretation cautions](doc/taxstats-reference-summaries.md).
+
+```bash
+unicorn taxstats -b sample.coord.bam --acc2tax accessions.tsv \
+  --names names.dmp --nodes nodes.dmp --outstat sample.tsv \
+  --read-lengths sample.readlengths.tsv.gz --memory-limit 50G --tmpdir /local/scratch
+```
+
+### Taxstats at all observed taxonomic ranks
+
+Run `taxstats --rank assigned --minreads 1` once to retain each accession's
+mapped taxid, then use `tools/taxstats_all_ranks.py` to propagate counts and
+read-weighted leaf statistics to every observed ancestor without rescanning the
+BAM. Counts are read–taxon **associations**, not distinct ancestor reads;
+coverage, Gini and entropy do not establish genome completeness. The optional
+read-length companion yields exact association-based medians at each ancestor.
+See [commands, output definitions, validation and cautions](doc/taxstats-all-ranks.md).
+
+### Spatial alignment statistics
+
+`refstats` now appends linear KS, linear Kuiper, circular Kuiper and valid/excluded
+alignment counts. `taxstats` adds reference-level means, medians and quartiles plus
+spatial denominators. These describe retained alignment positions; they are not
+species-authentication tests or pooled taxon distances. No cutoff is enabled.
+See [definitions, memory behaviour and cautions](doc/spatial-statistics.md).

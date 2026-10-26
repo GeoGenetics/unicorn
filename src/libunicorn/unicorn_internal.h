@@ -230,6 +230,19 @@ static inline uint32_t readhist_mode(const readhist_t *h)
   return length;
 }
 
+/* Exact alignment-position distances; storage uses the shared spill allocator. */
+typedef struct { double linear, circular; } spatial_pos_t;
+typedef kvec_t(spatial_pos_t) spatialq_t;
+typedef struct {
+  spatialq_t positions;
+  uint64_t invalid, valid;
+  double ks, kuiper, circular;
+} spatial_t;
+int unicorn_spatial_add(spatial_t *s, int64_t start, int64_t end, uint64_t length);
+void unicorn_spatial_finish(spatial_t *s);
+void unicorn_spatial_free(spatial_t *s);
+#define UNICORN_REF_METRICS 12
+
 typedef struct refstat_t {
   uint32_t     REFLEN;     // Length of the reference sequence
   uint64_t     REFNALNS;   // Number of alignments mapped to the reference
@@ -269,6 +282,7 @@ typedef struct refstat_t {
   //uint32q_t    aRLEN;
   readhist_t   aRLEN;      //Adaptive, exact read-length counts
   ueventq_t    aEVENT;     // For coverage computation
+  spatial_t spatial;
   //rehead members
   int32_t      _ntid;        // New Reference sequence ID
 } refstat_t;
@@ -279,18 +293,24 @@ KHASHL_MAP_INIT(static,                        //Scope
                 kh_hash_uint32, kh_eq_generic) //hash and equality functions
 #define kh_range_hash(r) kh_hash_dummy((r).qhash)
 
-/* Taxstats needs only reference length and coverage events. */
-typedef struct { uint32_t REFLEN; ueventq_t aEVENT; } taxref_t;
+/* Taxstats stores reference length, coverage events and spatial positions. */
+typedef struct { uint32_t REFLEN; ueventq_t aEVENT; spatial_t spatial; } taxref_t;
 KHASHL_MAP_INIT(static, taxrefmap_t, taxrefmap, int32_t, taxref_t,
                kh_hash_uint32, kh_eq_generic)
 static inline void taxrefmap_free(taxrefmap_t *map)
 {
   if (!map) return;
   khint_t k;
-  kh_foreach(map, k) unicorn_mem_free(&unicorn_spill_threshold, kh_val(map, k).aEVENT.a);
+  kh_foreach(map, k) {
+    unicorn_mem_free(&unicorn_spill_threshold, kh_val(map, k).aEVENT.a);
+    unicorn_spatial_free(&kh_val(map,k).spatial);
+  }
   taxrefmap_destroy(map);
 }
 
+typedef kvec_t(double) taxmetricq_t;
+int unicorn_histogram_add(int32int64map_t **hist, uint32_t value, uint64_t count);
+int unicorn_histogram_median(const int32int64map_t *hist, double *median, uint32_t *mode, uint64_t *total);
 typedef struct taxstat_t {
   uint32_t     nrefs;    //Number of references in the taxon
   uint64_t     reflen;   // sum of reference lengths
@@ -299,7 +319,7 @@ typedef struct taxstat_t {
   //Read length data
   double       readl_mean;     // Mean read length
   double       readl_var;      // Read length variance
-  uint32_t     readl_median;   // Read length median
+  double       readl_median;   // Read length median
   uint32_t     readl_mode;     // Read length mode
   double       _M;             // Sum of squares of difference from mean
   uint32_t     readl_min;
@@ -332,7 +352,11 @@ typedef struct taxstat_t {
   //Data arrays
   floatq_t     a_ani;
   //uint32q_t    aRLEN;
-  uint32_t     v_rlen[256]; //Count array of read lengths
+  int32int64map_t *length_hist, *nm_hist, *dust_hist;
+  double median_nm, median_dust, expected_covbases;
+  uint64_t spatial_nalns, spatial_invalid, spatial_nrefs;
+  taxmetricq_t ref_metrics[UNICORN_REF_METRICS];
+  double ref_summary[UNICORN_REF_METRICS][4]; // mean, median, q25, q75
   ueventq_t    aEVENT;     // For coverage computation
   //rehead members
   int32_t      _ntid;        // New Reference sequence ID
@@ -424,7 +448,12 @@ typedef struct _covstats_t {
                 "28:rs_norm_gini\t"\
                 "29:rs_tad80\t"\
                 "30:rs_mdust\t"\
-                "31:rs_stdev_dust\n"
+                "31:rs_stdev_dust\t"\
+                "32:rs_ks_linear\t"\
+                "33:rs_kuiper_linear\t"\
+                "34:rs_kuiper_circular\t"\
+                "35:rs_spatial_nalns\t"\
+                "36:rs_spatial_invalid\n"
 #define REFSTATSTR2 "#1:Id\t"\
                  "2:taxID\t"\
                  "3:rs_length\t"\
@@ -456,7 +485,12 @@ typedef struct _covstats_t {
                  "29:rs_norm_gini\t"\
                  "30:rs_tad80\t"\
 								 "31:rs_mdust\t"\
-								 "32:rs_stdev_dust\n"
+								 "32:rs_stdev_dust\t"\
+                "33:rs_ks_linear\t"\
+                "34:rs_kuiper_linear\t"\
+                "35:rs_kuiper_circular\t"\
+                "36:rs_spatial_nalns\t"\
+                "37:rs_spatial_invalid\n"
 #define TIDSTATSTR "#1:taxid\t"\
                    "2:name\t"\
                    "3:ts_num_accessions\t"\
@@ -494,7 +528,7 @@ typedef struct _covstats_t {
                   "%"PRIu64"\t"\
                   "%f\t"\
                   "%f\t"\
-                  "%u\t"\
+                  "%f\t"\
                   "%u\t"\
                   "%u\t"\
                   "%u\t"\
@@ -513,8 +547,7 @@ typedef struct _covstats_t {
                   "%f\t"\
                   "%f\t"\
                   "%f\t"\
-                  "%f\n"
-
+                  "%f\t"
 
 uint8_t _ASCHECK(bam1_t *b, int32_t ms);
                   /*

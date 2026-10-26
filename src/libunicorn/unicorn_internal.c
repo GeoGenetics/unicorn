@@ -89,6 +89,7 @@ static void refmap_free(refmap_t *map)
     kh_foreach(map, k) {
       refstat_t v = kh_val(map, k);
       free(v.aRLEN.dense);
+      unicorn_spatial_free(&v.spatial);
       if (v.READSET) {
         unicorn_mem_free(&unicorn_spill_threshold, v.aANI.a);
         unicorn_mem_free(&unicorn_spill_threshold, v.aEVENT.a);
@@ -107,6 +108,8 @@ static void taxmap_free(taxmap_t *map)
   khint_t k;
   kh_foreach(map, k) {
     taxstat_t v = kh_val(map, k);
+    int32int64map_destroy(v.length_hist); int32int64map_destroy(v.nm_hist); int32int64map_destroy(v.dust_hist);
+    for(int i=0;i<UNICORN_REF_METRICS;++i) unicorn_mem_free(&unicorn_spill_threshold,v.ref_metrics[i].a);
     taxrefmap_free(v.refmap);
     if (v.readset)
       unicorn_readset_free(v.readset);

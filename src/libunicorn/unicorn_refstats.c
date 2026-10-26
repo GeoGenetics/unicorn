@@ -199,6 +199,7 @@ static refstat_t *_refstat_new(const unicorn_t *u, int32_t tid)
     if (r->camex) lint2int_destroy(r->camex);
     unicorn_mem_free(&unicorn_spill_threshold, r->aANI.a);
     unicorn_mem_free(&unicorn_spill_threshold, r->aEVENT.a);
+  unicorn_spatial_free(&r->spatial);
     free(r);
     return NULL;
   }
@@ -224,6 +225,7 @@ static void _ref_finalize(refstat_t *r)
   uint32_t nreads = r->READSET ? unicorn_readset_size(r->READSET) : 0;
   r->REFREADD = readhist_median(&r->aRLEN, nreads);
   r->REFREADO = readhist_mode(&r->aRLEN);
+  unicorn_spatial_finish(&r->spatial);
   // Coverage stats from events
   if (r->aEVENT.n) {
     unicorn_sorturange(r->aEVENT.n, r->aEVENT.a);
@@ -262,7 +264,7 @@ static void _printrefstats(FILE *fp,
     int absent;
     uint32_t taxid = utax_gettaxid(utax, accession, &absent);
     if (absent) taxid = 0;
-    fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+    fprintf(fp, "%s\t%u\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f",
             accession,                                  //1
             taxid,                                      //2
             v->REFLEN,                                  //3
@@ -295,10 +297,11 @@ static void _printrefstats(FILE *fp,
             v->tad80,                                   //30
             v->mdust,                                   //31
             sqrtf(v->vdust));                           //32
+    fprintf(fp,"\t%.9g\t%.9g\t%.9g\t%"PRIu64"\t%"PRIu64"\n", v->spatial.ks,v->spatial.kuiper,v->spatial.circular,v->spatial.valid,v->spatial.invalid);
     return;
   }
 
-  fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\n",
+  fprintf(fp, "%s\t%u\t%"PRIu64"\t%u\t%f\t%f\t%u\t%u\t%u\t%u\t%f\t%f\t%f\t%f\t%"PRIu64"\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f",
           accession,                                  //1
           v->REFLEN,                                  //2
           v->REFNALNS,                                //3
@@ -330,6 +333,7 @@ static void _printrefstats(FILE *fp,
           v->tad80,                                   //29
           v->mdust,                                   //30
           sqrtf(v->vdust));                           //31
+  fprintf(fp,"\t%.9g\t%.9g\t%.9g\t%"PRIu64"\t%"PRIu64"\n", v->spatial.ks,v->spatial.kuiper,v->spatial.circular,v->spatial.valid,v->spatial.invalid);
 }
 
 static int _addaln(refstat_t *rs,
@@ -384,6 +388,8 @@ static int _addaln(refstat_t *rs,
   _urangeevent e_ev = {bam_endpos(b), 0};
   REF_PUSH(_urangeevent, rs->aEVENT, s_ev, return -1);
   REF_PUSH(_urangeevent, rs->aEVENT, e_ev, return -1);
+
+  if (unicorn_spatial_add(&rs->spatial, b->core.pos, bam_endpos(b), rs->REFLEN)) return -1;
 
   // Alignment NM
   mean = rs->REFALNNM;
@@ -616,10 +622,12 @@ static void _refmapstats(unicorn_stat_t *stats)
         unicorn_readset_free(refstat.READSET);
         unicorn_mem_free(&unicorn_spill_threshold, refstat.aANI.a);
         unicorn_mem_free(&unicorn_spill_threshold, refstat.aEVENT.a);
+        unicorn_spatial_free(&refstat.spatial);
         if (refstat.camex) lint2int_destroy(refstat.camex);
         kv_push(int32_t, rmq, tid); //tid is added to a removal queue
         continue;
     }
+    unicorn_spatial_finish(&kh_val(refmap,k).spatial);
     _falns  += refstat.REFNALNS;
     _freads += _n;
     ueventq_t aEVENT = refstat.aEVENT;
@@ -678,6 +686,7 @@ static void _refstat_free(refstat_t *r)
   if (r->camex) lint2int_destroy(r->camex);
   unicorn_mem_free(&unicorn_spill_threshold, r->aANI.a);
   unicorn_mem_free(&unicorn_spill_threshold, r->aEVENT.a);
+  unicorn_spatial_free(&r->spatial);
   free(r);
 }
 
@@ -763,6 +772,7 @@ int unsorted_compute(unicorn_t *u, unicorn_stat_t *stats)
     _urangeevent e = {bam_endpos(b), 0};
     REF_PUSH(_urangeevent, refstat->aEVENT, s, goto exit);
     REF_PUSH(_urangeevent, refstat->aEVENT, e, goto exit);
+    if (unicorn_spatial_add(&refstat->spatial, b->core.pos, bam_endpos(b), refstat->REFLEN)) goto exit;
     //Alignment NM
     mean = refstat->REFALNNM;
     delta = NM-mean;

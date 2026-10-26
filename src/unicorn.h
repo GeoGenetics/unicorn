@@ -290,3 +290,7 @@ void unicorn_set_memory_limit(uint64_t bytes);
 FILE *unicorn_text_open(const char *path, int threads);
 
 void unicorn_set_output(unicorn_t *u, FILE *fp);
+
+void unicorn_set_readlength_output(FILE *fp);
+
+int unicorn_readlength_error(void);

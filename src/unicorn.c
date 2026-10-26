@@ -36,6 +36,7 @@ SOFTWARE.
 static ko_longopt_t unicorn_lopts[] = {
     { "memory-limit", ko_required_argument, 336 },
     { "plain-text", ko_no_argument, 337 },
+    { "read-lengths", ko_required_argument, 338 },
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
     { "names",           ko_required_argument, 302 },
@@ -100,6 +101,7 @@ typedef struct unicorn_opts {
   int  threads;         // Number of threads to use
   char *filelist;        // File containing list of input files
   char *outbam;         // Output BAM file
+  char *lengths_path;
   char *outstat;        // Output statistics file
   char *ifile;          // Input file (BAM/SAM)
   char *statstr;        // Comma separated list of statistics to compute
@@ -196,6 +198,9 @@ static void refstats_usage(FILE *fp)
 						"  --verbose  Print libunicorn's messages.\n"\
             "  --group-memory <MiB> Per-queue spill and large-allocation threshold [64]\n"\
             "  --tmpdir <directory> Local scratch directory [TMPDIR or /tmp]\n"\
+            "  Spatial output: rs_ks_linear, rs_kuiper_linear, rs_kuiper_circular,\n"
+            "  rs_spatial_nalns and rs_spatial_invalid. All retained alignments count.\n"
+            "  Distances are descriptive, not p-values or species authentication.\n"
             "  -h         print this help message\n");
 }
 
@@ -232,9 +237,21 @@ static void taxstats_usage(FILE *fp)
 						"  --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
             "  --names <str>     Taxonomy names file.\n"\
             "  --nodes <str>     Taxonomy nodes file\n"\
-            "  --rank <str>      Taxonomic rank to summarize by. [genus]\n"\
+            "  --rank <str>      Rank to summarize by, or assigned for original taxids. [genus]\n"\
 						"  --qsize <int>     Size of queue for XR sorted input bam files [1024]\n"\
             "  --verbose         Prints libunicorn's messages.\n"\
+            "  --read-lengths <path> BGZF companion taxid,length,count (automatic with --outstat)\n"\
+            "  Named --outstat files default to BGZF (.gz); stdout stays plain text.\n"\
+            "  Medians: exact read lengths (including >255), ANI, NM and DUST.\n"\
+            "  ts_ref_{mean,median,q25,q75}_* summarize breadth, depth, evenness,\n"\
+            "  breadth ratio, Gini, entropy, normalized Gini/entropy, linear KS and\n"\
+            "  linear/circular Kuiper per reference. Spatial summaries exclude undefined\n"\
+            "  reference distances and are not pooled taxon tests.\n"\
+            "  CAUTION: aligned references only; equal reference weights; not genome\n"\
+            "  completeness or pooled Gini/entropy. Organelles, copy number and\n"\
+            "  redundant assemblies can bias these summaries. Quartiles use type 7.\n"\
+            "  Pooled breadth ratio uses sum L_i*(1-exp(-mean_depth_i)) as expectation.\n"\
+            "  Memory limit is a soft spill trigger, NOT a hard RAM cap.\n"\
             "  -h                Print this help message\n");
 }
 
@@ -454,6 +471,7 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 				opts->qsize = strtoul(o.arg, NULL, 10);
         if (!opts->qsize) return 7;
 				break;
+      case 338: free(opts->lengths_path); opts->lengths_path=strdup(o.arg); break;
       case 337: opts->plain_text = 1; break;
       case 336: {
         char *end; double n = strtod(o.arg, &end), scale = 1;
@@ -845,7 +863,7 @@ static int unicorn_taxstats(int argc, char **argv)
 	unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
   strq_t accq = {0};
-  FILE *ofp = NULL;
+  FILE *ofp = NULL, *length_fp = NULL;
   char *_argv[64] = {0};
   clock_gettime(CLOCK_MONOTONIC, &pstart);
 	if (argc <= 2) goto exit;
@@ -860,6 +878,23 @@ static int unicorn_taxstats(int argc, char **argv)
     if (!ofp) goto exit;
   }
   else ofp = stdout;
+  if (!opts.lengths_path && opts.outstat) {
+    size_t n=strlen(opts.outstat);if(n>=3&&!strcmp(opts.outstat+n-3,".gz"))n-=3;
+    if(n>=4&&!strncmp(opts.outstat+n-4,".tsv",4))n-=4;
+    opts.lengths_path=malloc(n+24);
+    if(!opts.lengths_path) {ret=3;goto exit;}
+    snprintf(opts.lengths_path,n+24,"%.*s.readlengths.tsv.gz",(int)n,opts.outstat);
+  }
+  if (opts.lengths_path) {
+    size_t n=strlen(opts.lengths_path);
+    if(n<3 || strcmp(opts.lengths_path+n-3,".gz")) { char *x=malloc(n+4);if(!x){ret=3;goto exit;}snprintf(x,n+4,"%s.gz",opts.lengths_path);free(opts.lengths_path);opts.lengths_path=x; }
+    if(opts.outstat && !strcmp(opts.outstat,opts.lengths_path)) {ret=7;goto exit;}
+    length_fp=unicorn_text_open(opts.lengths_path,opts.threads);if(!length_fp){ret=3;goto exit;}
+    fprintf(length_fp,"taxid\tlength\tcount\n");
+  }
+  unicorn_set_readlength_output(length_fp);
+  fprintf(stderr,"[unicorn::taxstats] CAUTION: ts_ref_* summarizes aligned references (equal weight), not genome completeness or pooled taxon Gini/entropy. Organelle/copy-number differences and alternative assemblies affect interpretation.\n");
+
   unicorn_printopts(&opts, stderr, TAXSTATS);
 	//Add files to queue
   strq_t fileq = {0};
@@ -884,7 +919,7 @@ static int unicorn_taxstats(int argc, char **argv)
   utax = unicorn_loadtaxonomy(opts.acc2tax,
                               opts.names,
                               opts.nodes,
-                              opts.rank,
+                              opts.rank && !strcmp(opts.rank, "assigned") ? NULL : opts.rank,
                               &ret);
   if (!utax) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
@@ -990,6 +1025,10 @@ static int unicorn_taxstats(int argc, char **argv)
 			else ret = 0;
 				taxstats_usage(stderr);
     }
+    if(unicorn_readlength_error()) ret=3;
+    unicorn_set_readlength_output(NULL);
+    if(length_fp) {int bad=ferror(length_fp);if(fclose(length_fp)||bad)ret=3;}
+    free(opts.lengths_path);
     if (ofp) { int bad = ferror(ofp);
       if (ofp != stdout) { if (fclose(ofp) || bad) ret = 3; }
       else if (fflush(ofp) || bad) ret = 3;

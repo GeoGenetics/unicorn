@@ -68,13 +68,86 @@ typedef struct step {
 
 KSORT_INIT(_tid_sfloat, float, ks_lt_generic)
 
-static inline float _fMEDIAN(float *v, uint32_t n)
+static inline float _fMEDIAN(float *v, size_t n)
 {
   if ( n%2 )
     return v[n/2];
   return (v[n/2 - 1] + v[n/2]) / 2.0;
 }
 
+static FILE *length_output;
+static int length_error;
+int unicorn_readlength_error(void) {return length_error || (length_output && ferror(length_output));}
+void unicorn_set_readlength_output(FILE *fp) { length_output = fp; length_error = 0; }
+static const char *ref_metric_names[UNICORN_REF_METRICS] = {"breadth", "mean_cov", "mean_covcovered", "evenness_cov", "breadth_ratio", "entropy", "gini", "norm_entropy", "norm_gini", "ks_linear", "kuiper_linear", "kuiper_circular"};
+KSORT_INIT(tax_summary_double, double, ks_lt_generic)
+static double tax_quantile(const taxmetricq_t *v, double q)
+{
+  if (!v->n) return NAN;
+  double pos = (v->n-1)*q; size_t i = (size_t)pos;
+  return v->a[i] + (i+1 < v->n ? (pos-i)*(v->a[i+1]-v->a[i]) : 0);
+}
+static int tax_medians(taxstat_t *ts)
+{
+  uint32_t mode; uint64_t n;
+  if (unicorn_histogram_median(ts->length_hist, &ts->readl_median, &ts->readl_mode, &n) ||
+      unicorn_histogram_median(ts->nm_hist, &ts->median_nm, &mode, &n) ||
+      unicorn_histogram_median(ts->dust_hist, &ts->median_dust, &mode, &n)) return -1;
+  return 0;
+}
+static int tax_reference(taxstat_t *ts, const _covstats_t *c, uint32_t length, spatial_t *spatial)
+{
+  unicorn_spatial_finish(spatial);
+  ts->spatial_nalns += spatial->valid;
+  ts->spatial_invalid += spatial->invalid;
+  ts->spatial_nrefs += spatial->valid > 0;
+  double breadth = (float)(c->covbases/(double)length);
+  double expected = -expm1f(-(float)c->meancov);
+  float sd = sqrtf(c->varoncov);
+  double values[UNICORN_REF_METRICS] = {breadth, (float)c->meancov, (float)c->meanoncov,
+    c->meanoncov ? sd/(float)c->meanoncov : 0,
+    expected > 0 ? (float)(breadth/expected) : 1,
+    c->entropy, c->gini, c->nentropy, c->ngini, spatial->ks, spatial->kuiper, spatial->circular};
+  ts->expected_covbases += length*expected;
+  for (int m=0; m<UNICORN_REF_METRICS; ++m) if (m < 9 || isfinite(values[m])) TAX_PUSH(double, ts->ref_metrics[m], values[m], return -1);
+  return 0;
+}
+static void tax_summaries(taxstat_t *ts)
+{
+  for (int m=0; m<UNICORN_REF_METRICS; ++m) {
+    taxmetricq_t *v = &ts->ref_metrics[m]; double sum=0;
+    for (size_t i=0;i<v->n;++i) sum+=v->a[i];
+    if(v->n>1) ks_introsort(tax_summary_double, v->n, v->a);
+    ts->ref_summary[m][0] = v->n ? sum/v->n : NAN;
+    ts->ref_summary[m][1] = tax_quantile(v, .5);
+    ts->ref_summary[m][2] = tax_quantile(v, .25);
+    ts->ref_summary[m][3] = tax_quantile(v, .75);
+    unicorn_mem_free(&unicorn_spill_threshold, v->a); *v = (taxmetricq_t){0};
+  }
+}
+static void tax_header(FILE *fp)
+{
+  size_t n = strlen(TIDSTATSTR);
+  fwrite(TIDSTATSTR, 1, n-1, fp);
+  fprintf(fp,"\t29:ts_median_alnnm\t30:ts_median_dust");
+  int col=31; const char *summary[4]={"mean","median","q25","q75"};
+  for (int m=0;m<UNICORN_REF_METRICS;++m) for (int q=0;q<4;++q)
+    fprintf(fp,"\t%d:ts_ref_%s_%s",col++,summary[q],ref_metric_names[m]);
+  fprintf(fp,"\t%d:ts_spatial_nalns\t%d:ts_spatial_invalid\t%d:ts_ref_spatial_nvalid\n",col,col+1,col+2);
+}
+static int length_cmp(const void *a,const void *b) {uint32_t x=*(const uint32_t*)a,y=*(const uint32_t*)b;return (x>y)-(x<y);}
+static void tax_lengths(const taxstat_t *ts)
+{
+  if (!length_output || !ts->length_hist) return;
+  /* Ordering is deterministic and the number of lengths is usually small. */
+  size_t n=kh_size(ts->length_hist), j=0;
+  uint32_t *keys = unicorn_mem_alloc(&unicorn_spill_threshold,n*sizeof(*keys),0);
+  if (!keys) { length_error=1; return; }
+  khint_t k; kh_foreach(ts->length_hist,k) keys[j++]=kh_key(ts->length_hist,k);
+  qsort(keys,n,sizeof(*keys),length_cmp);
+  for(size_t i=0;i<n;++i) fprintf(length_output,"%u\t%u\t%"PRIu64"\n",ts->_ntid,keys[i],kh_val(ts->length_hist,int32int64map_get(ts->length_hist,keys[i])));
+  unicorn_mem_free(&unicorn_spill_threshold,keys);
+}
 static int _taxmapstats(unicorn_stat_t *stats)
 {
   taxmap_t *taxmap = (taxmap_t *)stats->__map;
@@ -102,6 +175,7 @@ static int _taxmapstats(unicorn_stat_t *stats)
         taxrefmap_free(taxstat.refmap);
         unicorn_mem_free(&unicorn_spill_threshold, taxstat.a_ani.a);
         lint2int_destroy(taxstat.camex);
+        int32int64map_destroy(taxstat.length_hist); int32int64map_destroy(taxstat.nm_hist); int32int64map_destroy(taxstat.dust_hist);
         /* A later allocation failure must not leave freed pointers in the map. */
         kh_val(taxmap, ktax) = (taxstat_t){0};
         kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
@@ -119,9 +193,7 @@ static int _taxmapstats(unicorn_stat_t *stats)
     if (unicorn_readset_merge(freadset, taxstat.readset)) {
       unicorn_readset_free(freadset); kv_destroy(rmq); return -1;
     }
-    uint32_t *v_rlen     = taxstat.v_rlen;
-    taxstat.readl_median = _udCAMEDIAN(v_rlen, 256, unicorn_readset_size(taxstat.readset));
-    taxstat.readl_mode   = _udCAMODE(v_rlen, 256);
+    if (tax_medians(&taxstat)) return -1;
     if (taxstat.a_ani.n) {
       ks_introsort(_tid_sfloat, taxstat.a_ani.n, taxstat.a_ani.a);
       taxstat.alnani_median = _fMEDIAN(taxstat.a_ani.a, taxstat.a_ani.n);
@@ -129,6 +201,7 @@ static int _taxmapstats(unicorn_stat_t *stats)
     unicorn_mem_free(&unicorn_spill_threshold, taxstat.a_ani.a);
     taxstat.a_ani.n = taxstat.a_ani.m = 0;
     taxstat.a_ani.a = NULL;
+    kh_val(taxmap, ktax) = taxstat; // cleanup must not retain freed ANI storage
     taxrefmap_t *refmap = taxstat.refmap;
     _frefs  += kh_size(refmap);
     //Add coverage histograms for all references
@@ -138,7 +211,11 @@ static int _taxmapstats(unicorn_stat_t *stats)
       ueventq_t events = kh_val(refmap, kref).aEVENT;
       unicorn_sorturange(events.n, events.a);
       _covstats_t covstats = {0};
-      _tdepth += _taxcoverage(events, kh_val(refmap, kref).REFLEN, &covstats);
+      _tdepth += _refcoverage(events, kh_val(refmap, kref).REFLEN, &covstats);
+      if (tax_reference(&taxstat, &covstats, kh_val(refmap,kref).REFLEN, &kh_val(refmap,kref).spatial)) {
+        kh_val(taxmap, ktax) = taxstat;
+        unicorn_readset_free(freadset); kv_destroy(rmq); return -1;
+      }
       _tcov += covstats.covbases;
       _tsumsq += (long double)covstats.covbases *
                  (covstats.varoncov +
@@ -152,6 +229,7 @@ static int _taxmapstats(unicorn_stat_t *stats)
     taxstat.varoncov  = _tcov ? _tsumsq / _tcov -
                          (taxstat.meanoncov * taxstat.meanoncov) : 0.0;
     if (taxstat.varoncov < 0.0f) taxstat.varoncov = 0.0f;
+    tax_summaries(&taxstat);
     kh_val(taxmap, ktax) = taxstat;
   }
   for (uint32_t i = 0; i < rmq.n; i++) {
@@ -254,8 +332,8 @@ static int _addaln(taxstat_t *ts,
   double mean, delta;
   if (absent) {
     // Read-length stats (unique reads only)
-    ts->v_rlen[qlen < 256 ? qlen : 255]++;
-    uint32_t n = unicorn_readset_size(ts->readset);
+    if (unicorn_histogram_add(&ts->length_hist, qlen, 1)) return -1;
+    uint64_t n = unicorn_readset_size(ts->readset);
     mean = ts->readl_mean;
     delta = qlen - mean;
     ts->readl_mean += delta/n;
@@ -297,9 +375,11 @@ static int _addaln(taxstat_t *ts,
   TAX_PUSH(_urangeevent, refstat.aEVENT, s, return -1);
   TAX_PUSH(_urangeevent, refstat.aEVENT, e, return -1);
   kh_val(ts->refmap, kref) = refstat;
+  if (unicorn_spatial_add(&kh_val(ts->refmap,kref).spatial,b->core.pos,bam_endpos(b),refstat.REFLEN)) return -1;
   // Alignment ANI/NM
   uint32_t NM;
   float ani = _ANINM(b, &NM);
+  if (unicorn_histogram_add(&ts->nm_hist, NM, 1) || unicorn_histogram_add(&ts->dust_hist, dusts, 1)) return -1;
   TAX_PUSH(float, ts->a_ani, ani, return -1);
   mean = ts->alnani_mean;
   delta = ani-mean;
@@ -317,10 +397,9 @@ static int _addaln(taxstat_t *ts,
   return 0;
 }
 
-static void _taxafinalize(taxstat_t *ts)
+static int _taxafinalize(taxstat_t *ts)
 {
-  if (!ts) return;
-  if (!ts->readset || !ts->refmap) return;
+  if (!ts || !ts->readset || !ts->refmap) return -1;
   // camex shenanigans
   if (ts->camex && kh_size(ts->camex)) {
     khint_t k;
@@ -330,8 +409,7 @@ static void _taxafinalize(taxstat_t *ts)
     }
     ts->duplicity = nkmers ? (float)kh_size(ts->camex)/(float)nkmers : 0.0f;
   }
-  ts->readl_median = _udCAMEDIAN(ts->v_rlen, 256, unicorn_readset_size(ts->readset));
-  ts->readl_mode   = _udCAMODE(ts->v_rlen, 256);
+  if (tax_medians(ts)) return -1;
   if (ts->a_ani.n) {
     ks_introsort(_tid_sfloat, ts->a_ani.n, ts->a_ani.a);
     ts->alnani_median = _fMEDIAN(ts->a_ani.a, ts->a_ani.n);
@@ -347,7 +425,8 @@ static void _taxafinalize(taxstat_t *ts)
     ueventq_t events = kh_val(ts->refmap, kref).aEVENT;
     unicorn_sorturange(events.n, events.a);
     _covstats_t covstats = {0};
-    tdepth += _taxcoverage(events, kh_val(ts->refmap, kref).REFLEN, &covstats);
+    tdepth += _refcoverage(events, kh_val(ts->refmap, kref).REFLEN, &covstats);
+    if (tax_reference(ts, &covstats, kh_val(ts->refmap,kref).REFLEN, &kh_val(ts->refmap,kref).spatial)) return -1;
     tcov += covstats.covbases;
     tsumsq += (long double)covstats.covbases *
               (covstats.varoncov +
@@ -361,6 +440,8 @@ static void _taxafinalize(taxstat_t *ts)
   ts->varoncov  = tcov ? tsumsq / tcov -
                    (ts->meanoncov * ts->meanoncov) : 0.0;
   if (ts->varoncov < 0.0f) ts->varoncov = 0.0f;
+  tax_summaries(ts);
+  return 0;
 }
 
 static int _compute(unicorn_t *u,
@@ -437,8 +518,8 @@ static int _compute(unicorn_t *u,
     //mean, median, and variance  Welford's online algorithm
     if (absent) { //Only first instance of query, no counting same read twice
       //Read length mean, variance, median, mode, min, max
-      current->v_rlen[qlen < 256 ? qlen : 255]++; //Count read length
-      uint32_t n = unicorn_readset_size(current->readset);
+      if (unicorn_histogram_add(&current->length_hist, qlen, 1)) goto exit; //Count read length
+      uint64_t n = unicorn_readset_size(current->readset);
       mean = current->readl_mean;                         //Get current mean
       delta = qlen - mean;                               //Compute difference
       current->readl_mean += delta/n;                     //Running mean
@@ -482,9 +563,11 @@ static int _compute(unicorn_t *u,
     TAX_PUSH(_urangeevent, refstat.aEVENT, e, goto exit);
     //Do not loose your stats value
     kh_val(current->refmap, kref) = refstat;
+    if (unicorn_spatial_add(&kh_val(current->refmap,kref).spatial,b->core.pos,bam_endpos(b),refstat.REFLEN)) goto exit;
     //Alignment ANI
     uint32_t NM;
     float ani = _ANINM(b, &NM);
+    if (unicorn_histogram_add(&current->nm_hist, NM, 1) || unicorn_histogram_add(&current->dust_hist, dusts, 1)) goto exit;
     TAX_PUSH(float, current->a_ani, ani, goto exit);
     mean = current->alnani_mean;
     delta = ani-mean;
@@ -554,6 +637,8 @@ static void _taxstat_free(taxstat_t *t)
   if (t->refmap) taxrefmap_free(t->refmap);
   if (t->camex) lint2int_destroy(t->camex);
   unicorn_mem_free(&unicorn_spill_threshold, t->a_ani.a);
+  int32int64map_destroy(t->length_hist); int32int64map_destroy(t->nm_hist); int32int64map_destroy(t->dust_hist);
+  for(int i=0;i<UNICORN_REF_METRICS;++i) unicorn_mem_free(&unicorn_spill_threshold,t->ref_metrics[i].a);
   free(t);
 }
 
@@ -648,7 +733,7 @@ static void _statfor(void *data, long i, int tid)
     if (j == 0) prev_xr = xr;
     if (xr != prev_xr) {
       cur->_ntid = prev_xr;
-      _taxafinalize(cur);
+      if (_taxafinalize(cur)) __atomic_store_n(&s->failed, 1, __ATOMIC_RELAXED);
       kv_push(taxstat_t *, *out, cur);
       cur = _taxstat_new();
       if (!cur) break;
@@ -663,7 +748,7 @@ static void _statfor(void *data, long i, int tid)
   }
   if (cur) {
     cur->_ntid = prev_xr;
-    _taxafinalize(cur);
+    if (_taxafinalize(cur)) __atomic_store_n(&s->failed, 1, __ATOMIC_RELAXED);
     kv_push(taxstat_t *, *out, cur);
   }
   genesis_encoderfree(enc);
@@ -673,7 +758,7 @@ static void _printtaxstats(FILE *fp, const taxstat_t taxstat, const utax_t *utax
 {
 	if (!fp) return;
   float breath = taxstat.reflen ? (float)(taxstat.covbases/(double)taxstat.reflen) : 0.0f;
-  float expbreath = -expm1f(-breath);
+  float expbreath = taxstat.reflen ? taxstat.expected_covbases/taxstat.reflen : 0;
   float stdevoncov = sqrtf(taxstat.varoncov);
   float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
   float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
@@ -706,6 +791,11 @@ static void _printtaxstats(FILE *fp, const taxstat_t taxstat, const utax_t *utax
 	                         taxstat.mdust,
 	                         sqrt(taxstat.vdust)
 	            );
+  fprintf(fp,"%f\t%f",taxstat.median_nm,taxstat.median_dust);
+  for(int m=0;m<UNICORN_REF_METRICS;++m) for(int q=0;q<4;++q) fprintf(fp,"\t%.9g",taxstat.ref_summary[m][q]);
+  fprintf(fp,"\t%"PRIu64"\t%"PRIu64"\t%"PRIu64,taxstat.spatial_nalns,taxstat.spatial_invalid,taxstat.spatial_nrefs);
+  fputc('\n',fp);
+  tax_lengths(&taxstat);
 }
 
 static void *_taxstats_pipeline(void *data, int step, void *in)
@@ -781,7 +871,7 @@ static int _sorted_compute(unicorn_t *u,
   if (!p.forpool) {
     unicorn_readset_free(p.treadset); unicorn_readset_free(p.freadset); return ret;
   }
- 	fprintf(u->ofp, TIDSTATSTR);
+  tax_header(u->ofp);
 	kt_pipeline(3, _taxstats_pipeline, &p, 3);
   kt_forpool_destroy(p.forpool);
   stats->_nreads  = p.treadset ? unicorn_readset_size(p.treadset) : 0;
@@ -796,7 +886,9 @@ int unicorn_tidstat_compute(unicorn_t *u,
                             unicorn_stat_t *stats,
                             utax_t *utax)
 {
-  if ( u->sorted & XRSORTED ) {
+  /* XR may have been written for a different rank. Assigned taxids must
+   * always be resolved from the reference accession, even on XR-sorted BAMs. */
+  if ( (u->sorted & XRSORTED) && utax->rank ) {
     return _sorted_compute(u, stats, utax);
   }
   return _compute(u, stats, utax);
@@ -809,90 +901,16 @@ void unicorn_taxstat_print(const unicorn_t *u,
 {
   if (!stats || !fp || !u || !utax) return;
   if (!stats->fc) return;
-  fprintf(fp, TIDSTATSTR);
+  tax_header(fp);
   taxmap_t *taxmap = (taxmap_t *)stats->__map;
   if (!taxmap) return;
 
   if (stats->_taxorder.n) {
-    for (uint32_t i = 0; i < stats->_taxorder.n; i++) {
-      int32_t taxid = stats->_taxorder.a[i];
-      khint_t k = taxmap_get(taxmap, taxid);
-      if (k == kh_end(taxmap)) continue;
-      taxstat_t taxstat = kh_val(taxmap, k);
-      float breath = taxstat.covbases/(double)taxstat.reflen;
-      float expbreath = -expm1f(-breath);
-      float stdevoncov = sqrtf(taxstat.varoncov);
-      float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
-      float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
-      fprintf(fp, TIDFMTSTR, taxid,
-                             utax_getname(utax, taxid),
-                             taxstat.nrefs,
-                             taxstat.reflen,
-                             taxstat.nalns,
-                             unicorn_readset_size(taxstat.readset),
-                             taxstat.readl_mean,
-                             sqrt(taxstat.readl_var),
-                             taxstat.readl_median,
-                             taxstat.readl_mode,
-                             taxstat.readl_min,
-                             taxstat.readl_max,
-                             taxstat.alnnm_mean,
-                             taxstat.alnani_mean,
-                             sqrt(taxstat.alnani_var),
-                             taxstat.alnani_median,
-                             taxstat.covbases,
-                             taxstat.covmean,
-                             breath,
-                             expbreath,
-                             breath_ratio,
-                             taxstat.meanoncov,
-                             stdevoncov,
-                             evenness,
-                             1000.0f * breath,
-                             taxstat.duplicity,
-                             taxstat.mdust,
-                             sqrt(taxstat.vdust)
-            );
+    for(size_t i=0;i<stats->_taxorder.n;++i) {
+      khint_t k=taxmap_get(taxmap,stats->_taxorder.a[i]); if(k==kh_end(taxmap)) continue;
+      taxstat_t ts=kh_val(taxmap,k);ts._ntid=stats->_taxorder.a[i];_printtaxstats(fp,ts,utax);
     }
-    return;
-  }
-
-  khint_t k;
-  kh_foreach(taxmap, k) {
-    taxstat_t taxstat = kh_val(taxmap, k);
-    float breath = taxstat.covbases/(double)taxstat.reflen;
-    float expbreath = -expm1f(-breath);
-    float stdevoncov = sqrtf(taxstat.varoncov);
-    float evenness = taxstat.meanoncov ? stdevoncov/taxstat.meanoncov : 0.0f;
-    float breath_ratio = (expbreath > 0.0f) ? (breath/expbreath) : 1.0f;
-    fprintf(fp, TIDFMTSTR, kh_key(taxmap, k),
-                           utax_getname(utax, kh_key(taxmap, k)),
-                           taxstat.nrefs,
-                           taxstat.reflen,
-                           taxstat.nalns,
-                           unicorn_readset_size(taxstat.readset),
-                           taxstat.readl_mean,
-                           sqrt(taxstat.readl_var),
-                           taxstat.readl_median,
-                           taxstat.readl_mode,
-                           taxstat.readl_min,
-                           taxstat.readl_max,
-                           taxstat.alnnm_mean,
-                           taxstat.alnani_mean,
-                           sqrt(taxstat.alnani_var),
-                           taxstat.alnani_median,
-                           taxstat.covbases,
-                           taxstat.covmean,
-                           breath,
-                           expbreath,
-                           breath_ratio,
-                           taxstat.meanoncov,
-                           stdevoncov,
-                           evenness,
-                           1000.0f * breath,
-                           taxstat.duplicity,
-                           taxstat.mdust,
-                           sqrt(taxstat.vdust)
-          );
+  } else {
+    khint_t k;kh_foreach(taxmap,k) {taxstat_t ts=kh_val(taxmap,k);ts._ntid=kh_key(taxmap,k);_printtaxstats(fp,ts,utax);}
   }
 }
