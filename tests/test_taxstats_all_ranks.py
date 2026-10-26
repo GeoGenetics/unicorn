@@ -41,6 +41,11 @@ class AllRankRollup(unittest.TestCase):
             bam = p / "xr.bam"
             run("samtools", "sort", "-t", "XR", "-o", bam, sam)
             base = [UNICORN, "taxstats", "-b", bam, "--names", names, "--nodes", nodes, "--acc2tax", acc]
+            missing_map = subprocess.run([str(UNICORN), "taxstats", "-b", str(bam),
+                                          "--names", str(names), "--nodes", str(nodes),
+                                          "--rank", "assigned"], capture_output=True, text=True)
+            self.assertNotEqual(missing_map.returncode, 0)
+            self.assertIn("--rank assigned requires --acc2tax", missing_map.stderr)
             assigned = p / "assigned.tsv"
             lengths = p / "assigned.readlengths.tsv.gz"
             result = run(*base, "--rank", "assigned", "--outstat", assigned, "--read-lengths", lengths)

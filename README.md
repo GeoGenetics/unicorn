@@ -11,7 +11,8 @@
   - [From Source](#from-source)
 - [Run](#run)
   - [refstats](#refstats)
-  - [taxstats](#taxstats)
+  - [taxstats: one rank](#taxstats-one-rank)
+  - [taxstats: all observed ranks](#taxstats-all-observed-ranks)
   - [alnfilt](#alnfilt)
 - [Output](#output-columns)
 - [Taxonomy Files](#taxonomy-files)
@@ -38,7 +39,7 @@ conda install -c conda-forge -c bioconda enhjoerning
 Clone with submodules and build:
 
 ```bash
-git clone --recursive https://github.com/GeoGenetics/unicorn.git
+git clone --branch dev2 --recurse-submodules https://github.com/GeoGenetics/unicorn.git
 cd unicorn
 make
 ```
@@ -74,198 +75,139 @@ make
 
 ## Run
 
-### Commands
+The examples below assume you are in the source checkout and use `./unicorn`.
+Use `unicorn` instead if it is installed on your `PATH`.
 
-```text
-./unicorn command [options] -b <in.bam>|<in.sam>
+| Goal | Command | Output |
+|---|---|---|
+| Keep the best-scoring alignments within an ANI range | `alnfilt` | BAM |
+| Inspect coverage of each reference sequence | `refstats` | One row per aligned reference |
+| Count distinct read names at one taxonomic rank | `taxstats --rank genus` | One row per reported taxid |
+| Summarize every observed taxonomic ancestor | `taxstats --rank assigned`, then `taxstats_all_ranks.py` | One row per ancestor; read counts are associations |
 
-Commands:
-  refstats    Compute per-reference statistics.
-  bamstats    Compute per-BAM statistics.
-  taxstats    Compute per-taxid statistics.
-  alnfilt     Filter alignments based on user-defined criteria.
+### alnfilt
+
+`alnfilt` needs a **query-grouped** BAM because it compares a read's alignments
+together. This example retains top-scoring alignments with ANI from 93 to 100,
+then sorts the retained BAM by reference coordinate for downstream statistics:
+
+```bash
+./unicorn alnfilt -b sample.query.bam --mode ALLTOP \
+  --minani 93 --maxani 100 --outbam sample.filtered.bam
+samtools sort -o sample.filtered.coord.bam sample.filtered.bam
 ```
+
+`ALLTOP` can keep several alignments for the same read. The ANI calculation in
+`alnfilt` uses the reference-aligned span; the ANI reported by `refstats` and
+`taxstats` uses the BAM read length. See [input and resource notes](#input-notes)
+for large files.
 
 ### refstats
 
-Computes one row of statistics per reference sequence. It is the main
-command for reference-level filtering, coverage metrics, and adding taxonomy tags
-to filtered BAM files.
+`refstats` describes each aligned reference sequence separately. For example,
+write per-reference breadth, depth, Gini, entropy and spatial statistics:
 
 ```bash
-unicorn 2.5.1 b53cd7e
-	Jun  4 2026 13:36:20
-./unicorn refstats [options] -b <in.bam>|<in.sam>
-Options:
-  -b <str>   Input bam|sam [Required]
-  -t <int>, --threads <int> Number of threads [4]
-  -o <str>, --outbam  <str> Output BAM file with filtered references
-  -k <int>, --ksize <int>   kmer size for duplicity computation [17]
-  --outstat <str> Print statistics to file <str> [stdout]
-  --[FILTER] <PARAM>  Apply filter "FILTER" with parameter "PARAM"
-      Example: "--minreads 100" to filter out references with
-                 less than 100 reads.
-      Filters:
-       - minreflen <int>  Minimum reference length to consider  [1]
-       - minreads  <int>  Minimum number of reads per reference [1]
-       - minalnas  <int>  Minimum alignment score [-Inf]
-       - maxdust   <int>  Maximum alignment dust score [100]
-  --names   <str> Taxonomy nodeid to name mapping file.
-  --nodes   <str> Taxonomy nodeid to parent nodeid mapping file.
-  --acc2tax <str> Accession to taxid mapping file.
-  Report taxid of reference sequence. Enabled automatically when
-  --acc2tax, --names and --nodes are provided.
-  taxid is reported in bam records in custom:
-  XT:i:<taxid> tag and
-  XR:i:<taxid> tag in.
-  taxid column 2 in the output statistics file.
-  --rank <str>  Taxonomic rank for XR tag. [genus]
-  --qsize <int> Size of queue for coordinate sorted input bam files [1024]
-  --verbose  Print libunicorn's messages.
-  -h         print this help message
+./unicorn refstats -b sample.filtered.coord.bam \
+  --outstat sample.refstats.tsv
 ```
 
-Filter aligned.bam so that we only keep references with at least 10 reads aligned to them.
-We also only keep references that are 1000bp or more. Additionally only keep reads whose dust value is 80 or less.
-Write the statistics to refstats.txt and the alignments that passed filters to refstats.bam.
+This creates `sample.refstats.tsv.gz` in BGZF format. `rs_nreads` counts distinct
+read names **within each reference**; the same read can appear in several rows.
+Breadth describes the fraction of bases covered on that reference. Gini,
+entropy, KS and Kuiper are descriptive measures of the retained alignments,
+not tests of species identity. See [spatial-statistic definitions](doc/spatial-statistics.md).
+
+To keep only references with at least 10 distinct reads and length at least
+1,000 bases, and write their alignments to a new BAM:
 
 ```bash
-unicorn refstats \
-  -b aligned.bam \
-  -o refstats.bam
-  --minreads 10 \
-  --minrefl 1000 \
-  --maxdust 80 \
-  --outstat refstats.txt
+./unicorn refstats -b sample.filtered.coord.bam \
+  --minreads 10 --minreflen 1000 \
+  --outbam supported.bam --outstat supported.refstats.tsv
 ```
 
-#### Add Taxonomy To BAM Files
+With `--acc2tax`, `--names` and `--nodes`, `refstats` can add `XT` (assigned
+reference taxid) and `XR` (requested ancestor taxid) tags to its output BAM.
+Those tags are useful for downstream taxonomy work, but the examples below
+use the accession map directly so they also work on ordinary coordinate BAMs.
 
-When `--acc2tax`, `--names`, and `--nodes` are provided, `refstats` can annotate
-the filtered BAM with taxonomy tags.
+### taxstats: one rank
+
+Use this when you want **distinct read names at a chosen rank**, such as genus.
+The accession map must match the BAM reference names; `names.dmp` and
+`nodes.dmp` should come from the same taxonomy release.
 
 ```bash
-unicorn refstats \
-  -b aligned.bam \
-  --acc2tax acc2tax.txt \
-  --names names.dmp \
-  --nodes nodes.dmp \
-  --rank genus \
-  --outbam refstats.bam > refstats.txt
+./unicorn taxstats -b sample.filtered.coord.bam \
+  --acc2tax accessions.tsv.gz --names names.dmp --nodes nodes.dmp \
+  --rank genus --minreads 10 --outstat sample.genus.tsv
 ```
 
-The taxonomy inputs are:
+This creates two BGZF files automatically:
 
-- `--nodes`: NCBI taxonomy nodes file.
-- `--names`: NCBI taxonomy names file.
-- `--acc2tax`: accession-to-taxid map. It maps BAM reference names to taxids.
+- `sample.genus.tsv.gz`: one row per reported taxid, with `ts_nreads` counting
+  each full read name once within that row.
+- `sample.genus.readlengths.tsv.gz`: the matching `taxid`, `length`, `count`
+  table, including lengths above 200 bp.
 
-`refstats` writes two integer tags to BAM records:
+A read assigned to two genera appears once in each genus. `--minreads 10`
+filters individual output rows; the default is 1. If the requested rank does
+not occur on a lineage, a row can fall back to another rank. Check the
+`taxid` and taxonomy rank before treating every row as genus-level.
 
-- `XT:i:<taxid>`: the direct taxid assigned to the reference accession.
-- `XR:i:<rank_taxid>`: the ancestor taxid at the requested `--rank`.
+Taxstats also reports per-reference **mean, median and quartiles** for breadth,
+depth, Gini, entropy and spatial distances. These summarize aligned
+references; they do not measure genome completeness or pool their Gini or
+entropy into a new taxon-wide statistic. See [reference-summary definitions](doc/taxstats-reference-summaries.md).
 
-It also records how `XR` was produced in the BAM header:
+### taxstats: all observed ranks
 
-```text
-@CO	unicorn:tax-tags	XR=rank_taxid	rank=genus
-```
-
-This makes the BAM usable by `taxstats` without reloading the accession-to-taxid
-map.
-
-### taxstats
-
-`taxstats` computes one row of statistics per taxid at the requested rank. It
-can either assign alignments to taxa from an accession map, or consume BAM files
-that already contain Unicorn `XT` and `XR` tags.
+Use this when you want a path from each accession-assigned taxid to the root.
+First calculate taxstats at the accession's assigned taxid. Keep
+`--minreads 1` here so rare starting taxa can contribute to ancestors:
 
 ```bash
-unicorn 2.5.1 b53cd7e
-	Jun  4 2026 13:36:20
-./unicorn taxstats [options] -b <in.bam>|<in.sam>
-Options:
-  -b <str>                     Input bam|sam
-  -t <int>, --threads <int>    Number of threads [4]
-  -k <int>, --ksize <int>      kmer size for duplicity computation [17]
-  --outstat <str> Print statistics to file <str> [stdout]
-  --[FILTER] <PARAM>  Apply filter "FILTER" with parameter "PARAM"
-      For example "--minreads 100" to filter out taxids with
-      less than 100 reads.
-      Available filters:
-       - minrefl  <int>   Minimum reference length. [1]
-       - minreads <int>   Minimum number of reads per taxid. [1]
-       - minmani  <float> Minimum mean ANI per taxid. [0]
-       - minalnas <int>   Minimum alignment score [-Inf]
-       - maxdust  <int>   Maximum alignment dust score [100]
-  --acc2tax <str>   Accession to taxid mapping file or .khash file.
-  --names <str>     Taxonomy names file.
-  --nodes <str>     Taxonomy nodes file
-  --rank <str>      Taxonomic rank to summarize by. [genus]
-  --qsize <int>     Size of queue for XR sorted input bam files [1024]
-  --verbose         Prints libunicorn's messages.
-  -h                Print this help message
+./unicorn taxstats -b sample.filtered.coord.bam \
+  --acc2tax accessions.tsv.gz --names names.dmp --nodes nodes.dmp \
+  --rank assigned --minreads 1 --outstat sample.assigned.tsv
 ```
 
-Run `taxstats` from an accession map:
+Then roll up that table. This step **does not reread the BAM**:
 
 ```bash
-unicorn taxstats \
-  -b aligned.bam \
-  --acc2tax acc2tax.txt.gz \
-  --names names.dmp \
-  --nodes nodes.dmp \
-  --rank genus \
-  --outstat genus.taxstats.txt
+python3 tools/taxstats_all_ranks.py \
+  --taxstats sample.assigned.tsv.gz \
+  --read-lengths sample.assigned.readlengths.tsv.gz \
+  --nodes nodes.dmp --names names.dmp \
+  --starting-level assigned_taxid \
+  --output sample.all-ranks.tsv.gz \
+  --out-read-lengths sample.all-ranks.readlengths.tsv.gz
 ```
 
-Run `taxstats` from a BAM already annotated by `refstats`:
+The output has one row for every observed ancestor, including unranked nodes.
+`ts_alignment_associations` adds alignment counts. `ts_nread_associations`
+adds distinct-read counts from the **starting taxids**: it does not deduplicate
+a read again at the genus, family or root. For example, if one read maps to two
+species in the same genus and two other reads map to one species each:
 
-```bash
-unicorn refstats \
-  -b alignments.bam \
-  -o refstats.bam \
-  --names names.dmp --nodes nodes.dmp > /dev/null 
-unicorn taxstats \
-  -b refstats.bam \
-  --names names.dmp \
-  --nodes nodes.dmp \
-  --rank genus \
-  --outstat genus.taxstats.txt
-```
+| Result | Read count |
+|---|---:|
+| Direct `taxstats --rank genus`: distinct read names | 3 |
+| All-ranks genus row: read–taxon associations | 4 |
 
-#### Relation To refstats Taxonomy Tags
+The rollup includes read-weighted averages of starting-taxon statistics,
+pooled breadth across aligned references, and an exact median of the summed
+read-length **associations** when the histogram is supplied. It keeps taxids
+missing from `nodes.dmp` as clearly marked unresolved rows rather than inventing
+an ancestor. A well-covered chloroplast can dominate a weighted average while
+nuclear references remain sparsely covered. See the [all-ranks guide](doc/taxstats-all-ranks.md)
+for definitions, caveats and the tested example.
 
-`refstats` and `taxstats` are designed to work together. A common workflow is:
-
-From a metagenomic sample, let's keep only the reads that mapped to any mamal.
-Only report mammals with at least 1000 reads.
-    
-
-```bash
-unicorn refstats \
-  -b aligned.bam \
-  --maxdust 50\
-  --acc2tax acc2tax.txt.gz \
-  --names names.dmp \
-  --nodes nodes.dmp \
-  --rank class \
-  --outbam refstat.bam \
-  --outstat refstats.txt
-
-samtools sort -t XR refstat.bam > refstats.XRsorted.bam
-
-unicorn taxstats \
-  -b refstats.XRSorted.bam \
-  --minrefl 1000000000\
-  --minreads 10000\
-  --minalnas -10\
-  --outstat genus.taxstats.txt
-
-
-samtools view refstats.XRSorted.bam <() | 
-  
-```
+Named statistics default to BGZF compression (`.tsv.gz`). Use `--plain-text`
+for ordinary text. The Python rollup needs `bgzip` on `PATH` for BGZF output.
+`--memory-limit 50G` on Unicorn is a soft spill trigger, not a hard RAM cap;
+use `--tmpdir /path/to/local/scratch` when processing large files.
 
 ## Output Columns
 
@@ -405,35 +347,3 @@ combined-map test, numerical corrections and remaining limits.
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
-
-See [statistics compression and memory spilling](doc/output-storage.md) for default BGZF outputs, `--plain-text`, and the soft `--memory-limit 50G` trigger.
-
-See [development changes](CHANGELOG.md) for the consolidated dev2 change summary.
-
-### Taxstats reference summaries and read-length distributions
-
-Taxstats includes mean/median/quartile summaries of reference breadth, coverage, Gini and entropy, full-range read-length medians, median NM/DUST and a BGZF read-length histogram companion. **These aligned-reference summaries are not genome completeness or pooled taxon Gini/entropy.** See [definitions, usage and interpretation cautions](doc/taxstats-reference-summaries.md).
-
-```bash
-unicorn taxstats -b sample.coord.bam --acc2tax accessions.tsv \
-  --names names.dmp --nodes nodes.dmp --outstat sample.tsv \
-  --read-lengths sample.readlengths.tsv.gz --memory-limit 50G --tmpdir /local/scratch
-```
-
-### Taxstats at all observed taxonomic ranks
-
-Run `taxstats --rank assigned --minreads 1` once to retain each accession's
-mapped taxid, then use `tools/taxstats_all_ranks.py` to propagate counts and
-read-weighted leaf statistics to every observed ancestor without rescanning the
-BAM. Counts are read–taxon **associations**, not distinct ancestor reads;
-coverage, Gini and entropy do not establish genome completeness. The optional
-read-length companion yields exact association-based medians at each ancestor.
-See [commands, output definitions, validation and cautions](doc/taxstats-all-ranks.md).
-
-### Spatial alignment statistics
-
-`refstats` now appends linear KS, linear Kuiper, circular Kuiper and valid/excluded
-alignment counts. `taxstats` adds reference-level means, medians and quartiles plus
-spatial denominators. These describe retained alignment positions; they are not
-species-authentication tests or pooled taxon distances. No cutoff is enabled.
-See [definitions, memory behaviour and cautions](doc/spatial-statistics.md).

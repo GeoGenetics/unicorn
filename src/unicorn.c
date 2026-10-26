@@ -217,42 +217,52 @@ static void bamstats_usage(FILE *fp)
 
 static void taxstats_usage(FILE *fp)
 {
-    fprintf(fp, "./unicorn taxstats [options] -b <in.bam>|<in.sam>\n");
-    fprintf(fp, "Options:\n"\
-            "  -b <str>                     Input bam|sam\n"\
-						"  -t <int>, --threads <int>    Number of threads [4]\n"\
-            "  -k <int>, --ksize <int>      kmer size for duplicity computation [17]\n"\
-						"  --memory-limit <N[G|M]> Soft RSS spill trigger (GiB/MiB); not a hard cap\n"\
-            "  --plain-text                 Disable default BGZF for named statistics\n"\
-            "  --outstat <str> Print statistics to file <str> [stdout]\n"\
-	          "  --[FILTER] <PARAM>  Apply filter \"FILTER\" with parameter \"PARAM\"\n"\
-            "      For example \"--minreads 100\" to filter out taxids with\n"\
-            "      less than 100 reads.\n"\
-            "      Available filters:\n"\
-            "       - minrefl  <int>   Minimum reference length. [1]\n"\
-            "       - minreads <int>   Minimum number of reads per taxid. [1]\n"\
-            "       - minmani  <float> Minimum mean ANI per taxid. [0]\n"\
-            "       - minalnas <int>   Minimum alignment score [-Inf]\n"\
-            "       - maxdust  <int>   Maximum alignment dust score [100]\n"\
-						"  --acc2tax <str>   Accession to taxid mapping file or .khash file.\n"\
-            "  --names <str>     Taxonomy names file.\n"\
-            "  --nodes <str>     Taxonomy nodes file\n"\
-            "  --rank <str>      Rank to summarize by, or assigned for original taxids. [genus]\n"\
-						"  --qsize <int>     Size of queue for XR sorted input bam files [1024]\n"\
-            "  --verbose         Prints libunicorn's messages.\n"\
-            "  --read-lengths <path> BGZF companion taxid,length,count (automatic with --outstat)\n"\
-            "  Named --outstat files default to BGZF (.gz); stdout stays plain text.\n"\
-            "  Medians: exact read lengths (including >255), ANI, NM and DUST.\n"\
-            "  ts_ref_{mean,median,q25,q75}_* summarize breadth, depth, evenness,\n"\
-            "  breadth ratio, Gini, entropy, normalized Gini/entropy, linear KS and\n"\
-            "  linear/circular Kuiper per reference. Spatial summaries exclude undefined\n"\
-            "  reference distances and are not pooled taxon tests.\n"\
-            "  CAUTION: aligned references only; equal reference weights; not genome\n"\
-            "  completeness or pooled Gini/entropy. Organelles, copy number and\n"\
-            "  redundant assemblies can bias these summaries. Quartiles use type 7.\n"\
-            "  Pooled breadth ratio uses sum L_i*(1-exp(-mean_depth_i)) as expectation.\n"\
-            "  Memory limit is a soft spill trigger, NOT a hard RAM cap.\n"\
-            "  -h                Print this help message\n");
+  fprintf(fp,
+    "taxstats: summarize alignments by taxon.\n"
+    "\n"
+    "One rank (distinct read names per reported taxid):\n"
+    "  ./unicorn taxstats -b sample.coord.bam --acc2tax accessions.tsv.gz \\\n"
+    "    --names names.dmp --nodes nodes.dmp --rank genus --outstat genus.tsv\n"
+    "\n"
+    "All ranks (read-taxon associations at ancestors):\n"
+    "  Run the command above with --rank assigned --minreads 1\n"
+    "    --outstat assigned.tsv, then use tools/taxstats_all_ranks.py.\n"
+    "  The rollup reads the statistics table; it does not rescan the BAM.\n"
+    "\n"
+    "Required inputs:\n"
+    "  -b, --bam <path>        Input BAM or SAM.\n"
+    "  --names <path>         NCBI scientific names (names.dmp).\n"
+    "  --nodes <path>         NCBI taxonomic tree (nodes.dmp).\n"
+    "  --acc2tax <path>       Reference accession-to-taxid map; required for\n"
+    "                         coordinate BAMs and --rank assigned.\n"
+    "\n"
+    "Grouping and output:\n"
+    "  --rank <name>          Rank such as species or genus; default genus.\n"
+    "                         Use assigned for each accession's mapped taxid.\n"
+    "  --outstat <path>       Main table; named files default to BGZF (.gz).\n"
+    "                         Also writes <stem>.readlengths.tsv.gz.\n"
+    "  --read-lengths <path>  Override read-length companion path.\n"
+    "  --plain-text           Write the named main table as ordinary TSV.\n"
+    "  -t, --threads <N>      Worker threads; default 4.\n"
+    "\n"
+    "Filters and resources:\n"
+    "  --minreads <N>         Minimum distinct reads per output taxid; default 1.\n"
+    "  --minreflen <N>        Minimum reference length; default 1.\n"
+    "  --minmani <fraction>   Minimum mean ANI; default 0.\n"
+    "  --minalnas <score>     Minimum alignment score; disabled by default.\n"
+    "  --maxdust <score>      Maximum DUST score; default 100.\n"
+    "  -k, --ksize <N>        K-mer size for duplicity; default 17.\n"
+    "  --memory-limit <N[G|M]>  Soft RSS spill trigger, not a hard RAM cap.\n"
+    "  --tmpdir <path>        Scratch directory for spilling.\n"
+    "  --qsize <N>            XR-sorted input queue size; default 1024.\n"
+    "  --verbose              Print additional progress.\n"
+    "  -h, --help             Show this help.\n"
+    "\n"
+    "Interpretation: ts_nreads is distinct only within one reported taxid.\n"
+    "  All-ranks read counts are associations and can repeat a read across taxa.\n"
+    "  Reference coverage, Gini, entropy and spatial summaries describe only\n"
+    "  aligned references; they do not establish genome completeness.\n"
+    "  See README.md and doc/taxstats-all-ranks.md for worked examples.\n");
 }
 
 static void alnfilt_usage(FILE *fp)
@@ -911,6 +921,11 @@ static int unicorn_taxstats(int argc, char **argv)
   }
   if (!opts.names || !opts.nodes) {
     fprintf(stderr, "[unicorn::%s] Error: taxonomy reporting requires --names and --nodes.\n", __func__);
+    ret = 7;
+    goto exit;
+  }
+  if (opts.rank && !strcmp(opts.rank, "assigned") && !opts.acc2tax) {
+    fprintf(stderr, "[unicorn::%s] Error: --rank assigned requires --acc2tax to resolve reference accessions.\n", __func__);
     ret = 7;
     goto exit;
   }

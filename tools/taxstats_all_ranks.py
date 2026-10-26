@@ -227,17 +227,34 @@ def rollup(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--taxstats", required=True, type=Path)
-    parser.add_argument("--nodes", required=True, type=Path)
-    parser.add_argument("--names", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--starting-level", required=True, help="e.g. assigned_taxid or genus; written to every row")
-    parser.add_argument("--min-associations", type=int, default=1, help="reporting threshold after aggregation")
+    parser = argparse.ArgumentParser(
+        description="Summarize taxstats from starting taxids through every observed ancestor. The BAM is not reread.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Example after running unicorn taxstats --rank assigned --minreads 1 --outstat sample.assigned.tsv:
+  python3 tools/taxstats_all_ranks.py \\
+    --taxstats sample.assigned.tsv.gz --nodes nodes.dmp --names names.dmp \\
+    --starting-level assigned_taxid --output sample.all-ranks.tsv.gz \\
+    --read-lengths sample.assigned.readlengths.tsv.gz \\
+    --out-read-lengths sample.all-ranks.readlengths.tsv.gz
+
+Ancestor read counts are read-taxon associations, not distinct read names.
+Coverage, Gini and entropy describe aligned references, not genome completeness.
+See README.md and doc/taxstats-all-ranks.md for worked examples.""")
+    parser.add_argument("--taxstats", required=True, type=Path,
+                        help="input table from unicorn taxstats, ideally --rank assigned --minreads 1")
+    parser.add_argument("--nodes", required=True, type=Path, help="NCBI nodes.dmp from the same taxonomy release")
+    parser.add_argument("--names", required=True, type=Path, help="matching NCBI names.dmp")
+    parser.add_argument("--output", required=True, type=Path, help="all-ranks table; use .tsv.gz for default BGZF")
+    parser.add_argument("--starting-level", required=True,
+                        help="label for input taxids, e.g. assigned_taxid; copied to every output row")
+    parser.add_argument("--min-associations", type=int, default=1,
+                        help="omit output rows below this association count, after rollup (default: 1)")
     parser.add_argument("--unknown-policy", choices=("retain", "error"), default="retain",
                         help="retain unresolved taxids as unpropagated rows, or fail (default: retain)")
-    parser.add_argument("--read-lengths", type=Path)
-    parser.add_argument("--out-read-lengths", type=Path)
+    parser.add_argument("--read-lengths", type=Path,
+                        help="optional taxstats read-length companion for exact association medians")
+    parser.add_argument("--out-read-lengths", type=Path,
+                        help="all-ranks length histogram output; required with --read-lengths")
     parser.add_argument("--tmpdir", type=Path, help="disk spill directory for optional read-length rollup")
     parser.add_argument("--plain-text", action="store_true", help="write ordinary TSV instead of BGZF")
     args = parser.parse_args()

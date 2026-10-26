@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Replace outdated README command transcripts with runnable filtering,
+  reference-statistics, one-rank and all-ranks examples; clarify output files
+  and the difference between distinct reads and taxon associations.
 - Add `taxstats --rank assigned` to summarize accession-assigned taxids, even
   when an input BAM is XR-sorted for another rank.
 - Add a one-pass all-ancestor taxstats postprocessor with additive association
