@@ -17,8 +17,8 @@ uint8_t unicorn_rewind(unicorn_t *u)
 		if ( !( u->_FP = hts_open(u->ifile, "r") ) ) goto exit;
 		bam_hdr_destroy(u->hdr);
 		if ( !(u->hdr = sam_hdr_read(u->_FP)) ) goto exit;
-		if (u->nthreads > 1)
-      bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0);
+		if (u->nthreads > 1 && u->_FP->is_bgzf &&
+        bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0) < 0) goto exit;
 		ret = 0;
 	}
 	exit:
@@ -112,7 +112,9 @@ unicorn_t *unicorn_init( int nthreads,
     if (nthreads > 1) {
         u->p = hts_tpool_init(nthreads);
         if (!u->p) goto exit;
-        bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0);
+        // Plain SAM uses fp.hfile, not fp.bgzf. Only BGZF-backed input can
+        // receive a BGZF thread pool.
+        if (u->_FP->is_bgzf && bgzf_thread_pool(u->_FP->fp.bgzf, u->p, 0) < 0) goto exit;
     }
     u->argc = argc;
     u->argv = argv;
