@@ -1,5 +1,6 @@
 """CLI regressions; requires a built unicorn, Python 3, and samtools on PATH."""
 import os
+import math
 from pathlib import Path
 import shutil
 import subprocess
@@ -92,6 +93,69 @@ class Outputs(unittest.TestCase):
         rows = run("samtools", "view", output).stdout.splitlines()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].split("\t")[2], "refB")
+
+    def test_refstats_damage_tags_preserve_alignment_and_work_in_both_orders(self):
+        source = self.path / "damage-tags.sam"
+        rows = [
+            ("changed_forward", 0, 11, "10M", "TAAAAAAAAA", "0C9", 1),
+            ("matched_forward", 0, 21, "10M", "CAAAAAAAAA", "10", 0),
+            ("changed_reverse", 16, 31, "10M", "AAAAAAAAAA", "9G0", 1),
+            ("with_insertion", 0, 41, "5M1I5M", "TAAAAGAAAAA", "0C9", 2),
+            ("with_deletion", 0, 51, "5M1D5M", "TAAAAAAAAA", "0C4^A5", 2),
+            ("with_soft_clip", 0, 61, "2S10M", "GGTAAAAAAAAA", "0C9", 1),
+            ("no_diagnostic", 0, 71, "10M", "AAAAAAAAAA", "10", 0),
+        ]
+        with source.open("w") as fh:
+            fh.write("@HD\tVN:1.6\tSO:queryname\n@SQ\tSN:refA\tLN:1000\n")
+            for name, flag, pos, cigar, seq, md, nm in rows:
+                fh.write(f"{name}\t{flag}\trefA\t{pos}\t60\t{cigar}\t*\t0\t0\t"
+                         f"{seq}\t{'?' * len(seq)}\tNM:i:{nm}\tAS:i:7\tMD:Z:{md}\n")
+            fh.write("no_md\t0\trefA\t81\t60\t10M\t*\t0\t0\t"
+                     "TAAAAAAAAA\t??????????\tNM:i:1\tAS:i:7\n")
+        query = self.path / "damage-tags.query.bam"
+        coord = self.path / "damage-tags.coord.bam"
+        run("samtools", "view", "-b", "-o", query, source)
+        run("samtools", "sort", "-o", coord, query)
+        for input_bam in (query, coord):
+            with self.subTest(order=input_bam.name):
+                output = self.path / f"{input_bam.stem}.annotated.bam"
+                run(UNICORN, "refstats", "-b", input_bam, "-o", output)
+                run("samtools", "quickcheck", output)
+                decoded = run("samtools", "view", output).stdout.splitlines()
+                self.assertEqual(len(decoded), 8)
+                by_name = {r.split("\t")[0]: r.split("\t") for r in decoded}
+                tags = {name: {f[:2]: f for f in fields[11:]}
+                        for name, fields in by_name.items()}
+                self.assertEqual(tags["changed_forward"]["AS"], "AS:i:7")
+                self.assertEqual(tags["changed_reverse"]["AS"], "AS:i:7")
+                self.assertAlmostEqual(float(tags["changed_forward"]["XD"].split(":")[-1]), 0.2, places=5)
+                self.assertAlmostEqual(float(tags["changed_reverse"]["XD"].split(":")[-1]), 0.2, places=5)
+                self.assertAlmostEqual(float(tags["with_insertion"]["XD"].split(":")[-1]), 1.2, places=5)
+                self.assertAlmostEqual(float(tags["with_deletion"]["XD"].split(":")[-1]), 1.2, places=5)
+                self.assertAlmostEqual(float(tags["with_soft_clip"]["XD"].split(":")[-1]),
+                                       1 - 0.8 * math.exp(-2 / 5), places=5)
+                self.assertAlmostEqual(float(tags["matched_forward"]["XD"].split(":")[-1]), 0.0, places=5)
+                self.assertEqual(float(tags["no_diagnostic"]["XP"].split(":")[-1]), 0.0)
+                self.assertGreater(float(tags["changed_forward"]["XP"].split(":")[-1]), 3)
+                error = 0.001 / 3
+                def mismatch_probability(damage):
+                    match = ((1 - damage) * (1 - error) * (1 - 0.001)
+                             + damage * error * (1 - 0.001)
+                             + error * 0.001 * (1 - damage))
+                    return 1 - match
+                expected_pmd = math.log(mismatch_probability(0.31) /
+                                        mismatch_probability(0.001))
+                self.assertAlmostEqual(float(tags["changed_forward"]["XP"].split(":")[-1]),
+                                       expected_pmd, places=5)
+                self.assertAlmostEqual(float(tags["changed_forward"]["XP"].split(":")[-1]),
+                                       float(tags["changed_reverse"]["XP"].split(":")[-1]), places=5)
+                self.assertLess(float(tags["matched_forward"]["XP"].split(":")[-1]), 0)
+                self.assertNotIn("XP", tags["no_md"])
+                self.assertNotIn("XD", tags["no_md"])
+                bare = self.path / f"{input_bam.stem}.bare.bam"
+                run(UNICORN, "refstats", "-b", input_bam, "-o", bare, "--no-damage-tags")
+                self.assertTrue(all("XP:f:" not in line and "XD:f:" not in line
+                                    for line in run("samtools", "view", bare).stdout.splitlines()))
 
     def assert_prefixed_header(self, text, identifiers, prefix, read_column):
         fields = text.splitlines()[0].split("\t")

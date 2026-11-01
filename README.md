@@ -132,6 +132,14 @@ reference taxid) and `XR` (requested ancestor taxid) tags to its output BAM.
 Those tags are useful for downstream taxonomy work, but the examples below
 use the accession map directly so they also work on ordinary coordinate BAMs.
 
+When writing an output BAM, `refstats` also adds `XP` (a PMDtools-style damage
+log-likelihood ratio) and `XD` (an experimental damage-adjusted mismatch
+burden) to each scorable alignment. BAM measurements are optional tags, not
+table columns. The original `AS`, `NM`, and `MAPQ` remain unchanged, and these
+new tags do **not** filter or rerank reads. Use `--no-damage-tags` to disable
+their calculation (any existing input tags are copied unchanged).
+The meaning, assumptions, and PMD ≥ 3 caveat are in [damage tags](doc/damage-tags.md).
+
 ### taxstats: one rank
 
 Use this when you want **distinct read names at a chosen rank**, such as genus.

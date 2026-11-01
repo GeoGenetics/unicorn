@@ -5,6 +5,11 @@
 
 #include "genesisC.h"
 
+void unicorn_refstats_set_damage_tags(unicorn_t *u, int enabled)
+{
+  if (u) u->damage_tags = enabled != 0;
+}
+
 static void *ref_array_reserve(void *data, size_t *capacity, size_t item_size)
 {
   size_t next = *capacity ? *capacity * 2 : 2;
@@ -525,6 +530,7 @@ static void *_refstats_pipeline(void *data, int step, void *in)
       refstat_t *rs = rq->a[rindex];
       if (unicorn_readset_size(rs->READSET) < p->stats->minnreads || !_aln_passes_refstats_filters(p->u, p->stats, b)) continue;
       if (p->utax && _append_refstats_tax_tags(b, p->u->hdr->target_name[b->core.tid], p->utax)) { __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED); break; }
+      if (p->u->damage_tags && unicorn_damage_tag_alignment(b) < 0) { __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED); break; }
       if (sam_write1(p->outfp, p->ohdr, b) < 0) { __atomic_store_n(&p->err, 1, __ATOMIC_RELAXED); break; }
     }
   }
@@ -838,6 +844,11 @@ int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
                            rank);
       sam_hdr_add_lines(p.ohdr, cotag, colen);
     }
+    if (u->damage_tags &&
+        sam_hdr_add_line(p.ohdr, "CO", "unicorn:XP=PMDtools-style-logLR;XD=damage-adjusted-NM;experimental", NULL) < 0) {
+      p.err = 1;
+      goto exit;
+    }
     char *pgstr = stringify_argv(u->argc, u->argv);
     sam_hdr_add_pg(p.ohdr, "unicorn", "CL", pgstr, NULL);
     free(pgstr);
@@ -1002,6 +1013,9 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
                          "@CO\tunicorn:tax-tags\tXR=rank_taxid\trank=%s\n", rank);
     sam_hdr_add_lines(ohdr, cotag, colen);
   }
+  if (u->damage_tags &&
+      sam_hdr_add_line(ohdr, "CO", "unicorn:XP=PMDtools-style-logLR;XD=damage-adjusted-NM;experimental", NULL) < 0)
+    goto exit;
   //Add PG line for this program
   char *pgstr = stringify_argv(u->argc, u->argv);
   sam_hdr_add_pg(ohdr, "unicorn", "CL", pgstr, NULL);
@@ -1023,6 +1037,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
       const char *accession = _hdr->target_name[tid];
       if (_append_refstats_tax_tags(b, accession, utax)) goto exit;
     }
+    if (u->damage_tags && unicorn_damage_tag_alignment(b) < 0) goto exit;
     int32_t ntid = kh_val(refmap, k)._ntid; //Get new tid
     b->core.tid = ntid; //Set new tid
     //Write alignment to output file

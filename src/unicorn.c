@@ -37,6 +37,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "memory-limit", ko_required_argument, 336 },
     { "plain-text", ko_no_argument, 337 },
     { "read-lengths", ko_required_argument, 338 },
+    { "no-damage-tags", ko_no_argument, 339 },
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
     { "names",           ko_required_argument, 302 },
@@ -97,6 +98,7 @@ typedef struct unicorn_opts {
   uint64_t group_memory;
   uint64_t rss_limit;
   int plain_text;
+  int no_damage_tags;
   int compression;
   int  threads;         // Number of threads to use
   char *filelist;        // File containing list of input files
@@ -172,6 +174,7 @@ static void refstats_usage(FILE *fp)
             "  -b <str>   Input bam|sam [Required]\n"\
             "  -t <int>, --threads <int> Number of threads [4]\n"
             "  -o <str>, --outbam  <str> Output BAM file with filtered references\n"\
+						"  --no-damage-tags            Do not calculate XP (PMD-style) or XD (adjusted NM) tags\n"\
 						"  -k <int>, --ksize <int>   kmer size for duplicity computation [17]\n"\
 						"  --memory-limit <N[G|M]> Soft RSS spill trigger (GiB/MiB); not a hard cap\n"\
             "  --plain-text                 Disable default BGZF for named statistics\n"\
@@ -358,6 +361,9 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         break;
       case 307: //withtaxid
         opts->withtid = 1;
+        break;
+      case 339: //no-damage-tags
+        opts->no_damage_tags = 1;
         break;
       case 308: //min_length
         opts->minrefl = strtoul(o.arg, NULL, 10);
@@ -642,6 +648,7 @@ static int unicorn_refstats(int argc, char **argv)
 									 argc,
                    _argv);
   if (!u) goto exit;
+	unicorn_refstats_set_damage_tags(u, !opts.no_damage_tags);
 	clock_gettime(CLOCK_MONOTONIC, &stop);
 	ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
   fprintf(stderr, "\t%d reference sequence(s).\n", unicorn_getnref(u));

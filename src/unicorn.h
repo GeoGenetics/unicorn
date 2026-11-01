@@ -59,6 +59,7 @@ void unicorn_setverbose(void);
  * Use unicorn_init() to create, and unicorn_destroy() to free.
  */
 typedef struct unicorn_t *unicorn_t;
+void unicorn_refstats_set_damage_tags(unicorn_t *u, int enabled);
 
 /**
  * @brief Initialise a unicorn object for BAM/CRAM statistics.

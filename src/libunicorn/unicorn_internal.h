@@ -132,6 +132,7 @@ typedef struct {
   hts_pos_t coord_pos;
   char *ifile;
 	char *outbam;
+	int damage_tags; // Annotate refstats BAM with XP and XD.
 	FILE *ofp;
 	hts_tpool *p;
   htsFile   *_FP;
@@ -149,6 +150,7 @@ int32_t unicorn_reassignload(unicorn_t *u, alnscoreq_t *q);
 int32_t unicorn_alnfiltload(unicorn_t *u, alnscoreq_t *q);
 dataq_t *unicorn_qloadqueue(unicorn_t *u, uint64_t *naln);
 uint8_t unicorn_rewind(unicorn_t *u);
+int unicorn_damage_tag_alignment(bam1_t *b);
 
 #define _unmapped(b) (((b)->core.flag & BAM_FUNMAP) != 0)
 //Check if reference is too short
