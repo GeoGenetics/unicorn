@@ -38,6 +38,16 @@ the observed edit count remains three. This score does not establish that a
 reference is the true source when reads map to related references. Compare
 known-source examples before using it to select alignments.
 
+![Worked example of end-specific mismatch penalties](xd_calculation.png)
+
+*Figure. A 20-base alignment contains C→T at the 5′ end (distance 0), A→C
+internally, and G→A one base from the 3′ end (distance 1). Panels B and C
+plot the separate end-specific penalty curves against the unchanged unit
+penalty for other edits. The contributions are 0.200, 1.000, and 0.345,
+giving NM = 3 and XD = 1.545; for AS = −3, XE = −1.545. Reference and read
+are aligned 5′ to 3′ for comparison, not drawn as a physical DNA duplex.*
+([Vector PDF](xd_calculation.pdf); [figure source](../tools/plot_xd_calculation.py))
+
 The `XP` calculation uses the basic double-stranded [PMDtools
 v0.60](https://github.com/pontussk/PMDtools/blob/master/pmdtools.0.60.py)
 default parameters: ancient damage probability

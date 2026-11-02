@@ -137,10 +137,36 @@ log-likelihood ratio) and `XD` (an experimental damage-adjusted mismatch
 burden) to each scorable alignment. It adds `XE = -XD` as an experimental
 alignment score only where the input `AS` equals `-NM` (unit edit penalties).
 BAM measurements are optional tags, not table columns. The original `AS`,
-`NM`, and `MAPQ` remain unchanged, and these
-new tags do **not** filter or rerank reads. Use `--no-damage-tags` to disable
-their calculation (any existing input tags are copied unchanged).
-The meaning, assumptions, and PMD ≥ 3 caveat are in [damage tags](doc/damage-tags.md).
+`NM`, and `MAPQ` remain unchanged; these tags do **not** filter or rerank reads.
+
+For example, annotate the retained alignments and inspect a BAM record:
+
+```bash
+./unicorn refstats -b sample.filtered.coord.bam \
+  --outbam annotated.bam --outstat annotated.refstats.tsv
+samtools view annotated.bam | head -n 1
+```
+
+The named statistics file is `annotated.refstats.tsv.gz` by default. A record
+with three observed edits could contain `AS:i:-3`, `NM:i:3`, `XD:f:1.54502`
+and `XE:f:-1.54502`. The adjusted score is higher than the original `AS`
+because two end-compatible mismatches receive a partial discount. `XE` is
+absent when `AS` is missing or does not equal `-NM`; `XP` and `XD` can still
+be present. To skip scoring, add `--no-damage-tags` to the command. This leaves
+any damage tags already present in the input unchanged.
+
+![Worked example of the XD penalty and XE score](doc/xd_calculation.png)
+
+*Figure. An illustrative 20-base reference/read alignment has a 5′ C→T
+change, an ordinary internal A→C change, and a 3′ G→A change. The two
+end-compatible changes contribute 0.200 and 0.345 instead of 1 each; the
+ordinary change contributes 1. Thus NM = 3, XD = 1.545, and XE = −1.545
+when AS = −3. Panels B and C show the 5′ and 3′ penalties separately. This
+is an experimental score, not proof of the source reference.*
+([Vector PDF](doc/xd_calculation.pdf))
+
+The exact definitions, assumptions, and PMD ≥ 3 caveat are in
+[damage tags](doc/damage-tags.md).
 
 ### taxstats: one rank
 
