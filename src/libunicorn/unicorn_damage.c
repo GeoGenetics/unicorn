@@ -10,7 +10,8 @@
  * C/T and G/A sites. It uses PMDtools' default geometric damage curve and
  * polymorphism rate, but is not a byte-for-byte PMDtools implementation.
  * XD is the NM mismatch burden after the nonzero damage penalty tested in
- * the local benchmark. Neither field changes AS, MAPQ, or read selection. */
+ * the local benchmark. XE is the corresponding score only for unit-penalty
+ * alignments (AS = -NM). None changes AS, MAPQ, or read selection. */
 #define DAMAGE_P 0.30
 #define DAMAGE_C 0.01
 #define MODERN_P 0.001
@@ -73,7 +74,7 @@ static int clear_tag(bam1_t *b, const char tag[2])
 int unicorn_damage_tag_alignment(bam1_t *b)
 {
   if (!b) return -1;
-  if (clear_tag(b, "XP") || clear_tag(b, "XD")) return -1;
+  if (clear_tag(b, "XP") || clear_tag(b, "XD") || clear_tag(b, "XE")) return -1;
   uint8_t *md_tag = bam_aux_get(b, "MD");
   uint8_t *nm_tag = bam_aux_get(b, "NM");
   if (_unmapped(b) || !md_tag || *md_tag != 'Z' || !nm_tag || b->core.l_qseq <= 0)
@@ -189,7 +190,14 @@ int unicorn_damage_tag_alignment(bam1_t *b)
   }
   if (discount > (double)nm + 1e-6) goto done;
   if (bam_aux_update_float(b, "XP", (float)pmd) < 0) { status = -1; goto done; }
-  if (bam_aux_update_float(b, "XD", (float)((double)nm - discount)) < 0) {
+  float adjusted_nm = (float)((double)nm - discount);
+  if (bam_aux_update_float(b, "XD", adjusted_nm) < 0) {
+    status = -1; goto done;
+  }
+  uint8_t *as_tag = bam_aux_get(b, "AS");
+  /* A unit NM discount is comparable to AS only when AS itself is -NM. */
+  if (as_tag && strchr("cCsSiI", as_tag[0]) && bam_aux2i(as_tag) == -nm &&
+      bam_aux_update_float(b, "XE", -adjusted_nm) < 0) {
     status = -1; goto done;
   }
   status = 0;

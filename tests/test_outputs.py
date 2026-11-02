@@ -152,10 +152,57 @@ class Outputs(unittest.TestCase):
                 self.assertLess(float(tags["matched_forward"]["XP"].split(":")[-1]), 0)
                 self.assertNotIn("XP", tags["no_md"])
                 self.assertNotIn("XD", tags["no_md"])
+                self.assertNotIn("XE", tags["no_md"])
                 bare = self.path / f"{input_bam.stem}.bare.bam"
                 run(UNICORN, "refstats", "-b", input_bam, "-o", bare, "--no-damage-tags")
-                self.assertTrue(all("XP:f:" not in line and "XD:f:" not in line
+                self.assertTrue(all("XP:f:" not in line and "XD:f:" not in line and "XE:f:" not in line
                                     for line in run("samtools", "view", bare).stdout.splitlines()))
+
+    def test_experimental_score_requires_unit_penalty_as(self):
+        source = self.path / "damage-score.sam"
+        with source.open("w") as fh:
+            fh.write("@HD\tVN:1.6\tSO:queryname\n@SQ\tSN:refA\tLN:1000\n")
+            for name, as_field, prior_xe in (
+                ("missing_as", "", ""),
+                ("nonunit", "\tAS:i:-4", "\tXE:f:99"),
+                ("unit", "\tAS:i:-1", "\tXE:f:99"),
+            ):
+                fh.write(f"{name}\t0\trefA\t11\t60\t10M\t*\t0\t0\t"
+                         f"TAAAAAAAAA\t??????????\tNM:i:1\tMD:Z:0C9{as_field}{prior_xe}\n")
+        query = self.path / "damage-score.bam"
+        output = self.path / "damage-score.annotated.bam"
+        run("samtools", "view", "-b", "-o", query, source)
+        run(UNICORN, "refstats", "-b", query, "-o", output)
+        run("samtools", "quickcheck", output)
+        self.assertIn("XE=-XD-if-AS=-NM", run("samtools", "view", "-H", output).stdout)
+        rows = {fields[0]: fields for line in run("samtools", "view", output).stdout.splitlines()
+                if (fields := line.split("\t"))}
+        self.assertEqual(set(rows), {"missing_as", "nonunit", "unit"})
+        for name, fields in rows.items():
+            tags = {field[:2]: field for field in fields[11:]}
+            self.assertAlmostEqual(float(tags["XD"].split(":")[-1]), 0.2, places=5)
+            if name == "unit":
+                self.assertEqual(tags["AS"], "AS:i:-1")
+                self.assertAlmostEqual(float(tags["XE"].split(":")[-1]), -0.2, places=5)
+            else:
+                self.assertNotIn("XE", tags)
+        bare = self.path / "damage-score.no-tags.bam"
+        run(UNICORN, "refstats", "-b", query, "-o", bare, "--no-damage-tags")
+        bare_rows = {fields[0]: fields for line in run("samtools", "view", bare).stdout.splitlines()
+                     if (fields := line.split("\t"))}
+        for name in ("nonunit", "unit"):
+            self.assertIn("XE:f:99", bare_rows[name])
+        coord = self.path / "damage-score.coord.bam"
+        coord_output = self.path / "damage-score.coord.annotated.bam"
+        run("samtools", "sort", "-o", coord, query)
+        run(UNICORN, "refstats", "-b", coord, "-o", coord_output)
+        run("samtools", "quickcheck", coord_output)
+        coord_rows = {fields[0]: fields for line in run("samtools", "view", coord_output).stdout.splitlines()
+                      if (fields := line.split("\t"))}
+        self.assertAlmostEqual(float(next(tag for tag in coord_rows["unit"]
+                                          if tag.startswith("XE:f:")).split(":")[-1]),
+                               -0.2, places=5)
+        self.assertFalse(any(tag.startswith("XE:") for tag in coord_rows["nonunit"]))
 
     def assert_prefixed_header(self, text, identifiers, prefix, read_column):
         fields = text.splitlines()[0].split("\t")

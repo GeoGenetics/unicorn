@@ -174,7 +174,7 @@ static void refstats_usage(FILE *fp)
             "  -b <str>   Input bam|sam [Required]\n"\
             "  -t <int>, --threads <int> Number of threads [4]\n"
             "  -o <str>, --outbam  <str> Output BAM file with filtered references\n"\
-						"  --no-damage-tags            Do not calculate XP (PMD-style) or XD (adjusted NM) tags\n"\
+						"  --no-damage-tags            Do not calculate XP, XD, or experimental XE tags\n"\
 						"  -k <int>, --ksize <int>   kmer size for duplicity computation [17]\n"\
 						"  --memory-limit <N[G|M]> Soft RSS spill trigger (GiB/MiB); not a hard cap\n"\
             "  --plain-text                 Disable default BGZF for named statistics\n"\

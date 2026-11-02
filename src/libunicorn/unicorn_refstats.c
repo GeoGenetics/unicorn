@@ -845,7 +845,7 @@ int sorted_compute(unicorn_t *u, unicorn_stat_t *stats, utax_t *utax)
       sam_hdr_add_lines(p.ohdr, cotag, colen);
     }
     if (u->damage_tags &&
-        sam_hdr_add_line(p.ohdr, "CO", "unicorn:XP=PMDtools-style-logLR;XD=damage-adjusted-NM;experimental", NULL) < 0) {
+        sam_hdr_add_line(p.ohdr, "CO", "unicorn:XP=PMDtools-style-logLR;XD=damage-adjusted-NM;XE=-XD-if-AS=-NM;experimental", NULL) < 0) {
       p.err = 1;
       goto exit;
     }
@@ -1014,7 +1014,7 @@ uint8_t unicorn_refstats_filterbam(unicorn_t *u,
     sam_hdr_add_lines(ohdr, cotag, colen);
   }
   if (u->damage_tags &&
-      sam_hdr_add_line(ohdr, "CO", "unicorn:XP=PMDtools-style-logLR;XD=damage-adjusted-NM;experimental", NULL) < 0)
+      sam_hdr_add_line(ohdr, "CO", "unicorn:XP=PMDtools-style-logLR;XD=damage-adjusted-NM;XE=-XD-if-AS=-NM;experimental", NULL) < 0)
     goto exit;
   //Add PG line for this program
   char *pgstr = stringify_argv(u->argc, u->argv);
