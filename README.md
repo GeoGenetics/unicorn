@@ -97,6 +97,25 @@ then sorts the retained BAM by reference coordinate for downstream statistics:
 samtools sort -o sample.filtered.coord.bam sample.filtered.bam
 ```
 
+With a named output BAM, `alnfilt` also writes
+`sample.filtered.bam.stats.tsv.gz` by default (BGZF compressed). This small
+three-column table (`metric`, `value`, `unit`) reports alignments and distinct
+query names before/after filtering, removed counts and percentages, median
+read length before/after, BAM sizes in bytes/MB/GB, elapsed time, and total
+process CPU time for filtering. Read lengths count the first input alignment
+and first retained alignment per query; an empty side has median `NA`. File
+sizes are `NA` for streams. MB and GB use decimal units. The field
+`reads_removed_below_minreads` is `NA`: `alnfilt` has no minimum-read filter;
+`--minreads` belongs to `refstats` and `taxstats`.
+
+Use `--outstat path.tsv` to choose another report name (`.gz` is appended by
+default), `--plain-text` to write an uncompressed TSV, or `--no-stats` to skip
+the report and its median calculation. When the BAM goes to
+stdout, specify `--outstat` if a report file is needed. The input BAM is kept
+by default. `--delete-input` removes a regular input alignment file only after
+the named output BAM and any requested report succeed. Use it only when a
+verified copy of the input is no longer needed.
+
 `ALLTOP` can keep several alignments for the same read. The ANI calculation in
 `alnfilt` uses the reference-aligned span; the ANI reported by `refstats` and
 `taxstats` uses the BAM read length. See [input and resource notes](#input-notes)
@@ -117,6 +136,9 @@ read names **within each reference**; the same read can appear in several rows.
 Breadth describes the fraction of bases covered on that reference. Gini,
 entropy, KS and Kuiper are descriptive measures of the retained alignments,
 not tests of species identity. See [spatial-statistic definitions](doc/spatial-statistics.md).
+An [empirical filtering audit](doc/minreads-filter-audit-2026-11.md) shows how
+the per-reference `--minreads` rule affected one metagenomic BAM, including
+taxon-level alternatives and limitations.
 
 To keep only references with at least 10 distinct reads and length at least
 1,000 bases, and write their alignments to a new BAM:

@@ -6,11 +6,12 @@ Taxstats keeps its original 28 columns and appends:
 
 - `ts_median_alnnm`: alignment-weighted median NM/edit distance.
 - `ts_median_dust`: alignment-weighted median of the rounded DUST scores used by the existing computation.
-- `ts_ref_{mean,median,q25,q75}_{metric}` for nine reference-level metrics:
+- `ts_ref_{mean,median,q25,q75}_{metric}` for twelve reference-level metrics:
   `breadth`, `mean_cov`, `mean_covcovered`, `evenness_cov`, `breadth_ratio`,
-  `entropy`, `gini`, `norm_entropy`, and `norm_gini`.
+  `entropy`, `gini`, `norm_entropy`, `norm_gini`, `ks_linear`, `kuiper_linear`,
+  and `kuiper_circular`.
 
-There are 66 columns. Every reference receiving passing alignments contributes
+There are 81 columns. Every reference receiving passing alignments contributes
 one observation to each reference summary. Means are arithmetic and unweighted;
 medians average the two middle observations for even counts; quartiles use
 linear interpolation at `(n-1)*p` (R type 7). A single-reference group has equal

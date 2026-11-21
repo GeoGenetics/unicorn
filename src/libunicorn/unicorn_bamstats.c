@@ -60,6 +60,7 @@ static void worker_for(void *data, long i, int tid)
 	}
 }
 
+/* BAM-wide read lengths count distinct names; ANI and NM count alignments. */
 int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 {
 	if (!u || !stats) return -1;
@@ -70,7 +71,7 @@ int unicorn_bamstat_compute(unicorn_t *u, unicorn_stat_t *stats)
 	readnames_t *readset = readnames_init();
 	floatmap_t   *anihist = floatmap_init();
 	uint32_t RLHIST[256] = {0}; //Read length count table
-	//Loop over alignments //TODO refector
+	// Accumulate alignment metrics and distinct read lengths in one BAM pass.
 	double meanani = 0.0, meannm = 0.0, delta;
 	while (sam_read1(u->_FP, u->hdr, b) >= 0) {
 		if (_unmapped(b)) continue;

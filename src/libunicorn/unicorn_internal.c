@@ -542,6 +542,8 @@ uint64_t _taxcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
   return depth;
 }
 
+/* Mean depth includes zeros; covered-base moments exclude them. Entropy and
+ * Gini use adaptive spatial-bin counts, not per-base depth values. */
 uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
 {
   // Handle the edge case of no events

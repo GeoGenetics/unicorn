@@ -12,6 +12,68 @@ typedef struct {
   uint64_t count;
 } query_buffer_t;
 
+/* Common short reads use fixed bins; exceptional lengths use a sparse map. */
+#define SHORT_LENGTH_BINS 4096
+typedef struct {
+  uint64_t short_counts[SHORT_LENGTH_BINS];
+  lint2int_t *long_counts;
+  uint64_t total;
+} length_hist_t;
+
+static int length_hist_add(length_hist_t *hist, uint32_t length)
+{
+  if (length < SHORT_LENGTH_BINS) ++hist->short_counts[length];
+  else {
+    if (!hist->long_counts &&
+        !(hist->long_counts = lint2int_init2(&unicorn_spill_threshold))) return -1;
+    int absent;
+    khint_t k = lint2int_put(hist->long_counts, length, &absent);
+    if (k == kh_end(hist->long_counts)) return -1;
+    if (absent) kh_val(hist->long_counts, k) = 0;
+    ++kh_val(hist->long_counts, k);
+  }
+  ++hist->total;
+  return 0;
+}
+
+static int length_compare(const void *a, const void *b)
+{
+  uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+  return (x > y) - (x < y);
+}
+
+/* Return the conventional midpoint for an even number of reads. */
+static int length_hist_median(const length_hist_t *hist, double *median)
+{
+  if (!hist->total) { *median = NAN; return 0; }
+  uint64_t left = (hist->total - 1) / 2, right = hist->total / 2;
+  uint64_t seen = 0, first = 0;
+  int have_first = 0;
+  for (uint32_t length = 0; length < SHORT_LENGTH_BINS; ++length) {
+    seen += hist->short_counts[length];
+    if (!have_first && seen > left) { first = length; have_first = 1; }
+    if (seen > right) { *median = ((double)first + length) / 2.0; return 0; }
+  }
+  size_t n = hist->long_counts ? kh_size(hist->long_counts) : 0;
+  uint64_t *keys = unicorn_mem_alloc(&unicorn_spill_threshold, n * sizeof(*keys), 0);
+  if (!keys) return -1;
+  size_t i = 0;
+  khint_t k;
+  kh_foreach(hist->long_counts, k) keys[i++] = kh_key(hist->long_counts, k);
+  qsort(keys, n, sizeof(*keys), length_compare);
+  for (i = 0; i < n; ++i) {
+    seen += kh_val(hist->long_counts, lint2int_get(hist->long_counts, keys[i]));
+    if (!have_first && seen > left) { first = keys[i]; have_first = 1; }
+    if (seen > right) {
+      *median = ((double)first + keys[i]) / 2.0;
+      unicorn_mem_free(&unicorn_spill_threshold, keys);
+      return 0;
+    }
+  }
+  unicorn_mem_free(&unicorn_spill_threshold, keys);
+  return -1;
+}
+
 static int spill_write(FILE *fp, const bam1_t *b)
 {
   return fwrite(&b->core, sizeof(b->core), 1, fp) != 1 ||
@@ -77,6 +139,7 @@ static int query_add(query_buffer_t *q, const bam1_t *b, uint64_t limit)
   return 0;
 }
 
+/* Filtering ANI uses NM / reference span, including deletions in the span. */
 static int alignment_ani(const bam1_t *b, float *score)
 {
   if (b->core.flag & BAM_FUNMAP || b->core.tid < 0) return 0;
@@ -89,9 +152,11 @@ static int alignment_ani(const bam1_t *b, float *score)
   return 1;
 }
 
+/* Modes: 0 all top ties, 1 one random top tie, 2 percentage of top, 3 all. */
 static int query_emit(unicorn_t *u, query_buffer_t *q, uint8_t mode,
                       float best, float pct, int reject, htsFile *out,
-                      sam_hdr_t *hdr, uint8_t *references, bam1_t *scratch)
+                      sam_hdr_t *hdr, uint8_t *references, bam1_t *scratch,
+                      length_hist_t *lengths_after)
 {
   if (reject || !q->count) return 0;
   uint64_t selected = UINT64_MAX, ties = 0;
@@ -117,6 +182,7 @@ static int query_emit(unicorn_t *u, query_buffer_t *q, uint8_t mode,
                (mode == 1 && i == selected) || (mode == 2 && score >= best * pct);
     if (!keep) continue;
     if (sam_write1(out, hdr, b) < 0) return -1;
+    if (!written && lengths_after && length_hist_add(lengths_after, b->core.l_qseq)) return -1;
     uint32_t tid = b->core.tid;
     if (!(references[tid >> 3] & (1u << (tid & 7)))) {
       references[tid >> 3] |= 1u << (tid & 7);
@@ -139,15 +205,21 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani,
   char *query = NULL;
   uint8_t *references = NULL;
   query_buffer_t q = {0};
+  length_hist_t *lengths_before = NULL, *lengths_after = NULL;
   float best = 0;
   if (!u || !unicorn_isqgrouped(u) || mode > 3 || !isfinite(minani) ||
       !isfinite(maxani) || minani > maxani) return 7;
+  if (u->collect_alnfilt_lengths) {
+    lengths_before = calloc(1, sizeof(*lengths_before));
+    lengths_after = calloc(1, sizeof(*lengths_after));
+  }
   b = bam_init1();
   scratch = bam_init1();
   /* The dictionary is unchanged: share it instead of duplicating millions of SQ entries. */
   hdr = u->hdr;
   references = calloc(((size_t)sam_hdr_nref(u->hdr) + 7) / 8 + 1, 1);
-  if (!b || !scratch || !hdr || !references) goto exit;
+  if (!b || !scratch || !hdr || !references ||
+      (u->collect_alnfilt_lengths && (!lengths_before || !lengths_after))) goto exit;
   char output_mode[] = "wb5";
   output_mode[2] = '0' + u->compression;
   out = hts_open(u->outbam ? u->outbam : "-", output_mode);
@@ -164,12 +236,13 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani,
     const char *name = bam_get_qname(b);
     if (!have_query || strcmp(query, name)) {
       if (have_query && query_emit(u, &q, mode, best, pct, reject, out,
-                                  hdr, references, scratch)) goto exit;
+                                  hdr, references, scratch, lengths_after)) goto exit;
       query_clear(&q);
       free(query);
       query = strdup(name);
       if (!query) goto exit;
       ++u->values.nread;
+      if (lengths_before && length_hist_add(lengths_before, b->core.l_qseq)) goto exit;
       have_query = 1;
       reject = 0;
       best = 0;
@@ -181,6 +254,8 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani,
       fprintf(stderr, "[unicorn::alnfilt] Invalid or missing NM/span for query %s\n", name);
       goto exit;
     }
+    /* Strict bounds reject the whole query if a mapped alignment is outside
+     * the requested ANI interval. */
     if (!valid || score < minani || score > maxani) {
       if (strictb && valid) { reject = 1; query_clear(&q); }
       continue;
@@ -195,7 +270,10 @@ int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani,
   }
   if (state < -1) goto exit;
   if (have_query && query_emit(u, &q, mode, best, pct, reject, out,
-                              hdr, references, scratch)) goto exit;
+                              hdr, references, scratch, lengths_after)) goto exit;
+  if (lengths_before &&
+      (length_hist_median(lengths_before, &u->values.median_read_length_before) ||
+       length_hist_median(lengths_after, &u->values.median_read_length_after))) goto exit;
   ret = 0;
 exit:
   if (ret) fprintf(stderr, "[unicorn::alnfilt] Failed reading, spilling or writing BAM: %s\n", strerror(errno));
@@ -205,5 +283,9 @@ exit:
   bam_destroy1(b);
   bam_destroy1(scratch);
   if (out && sam_close(out) < 0) ret = 3;
+  if (lengths_before && lengths_before->long_counts) lint2int_destroy(lengths_before->long_counts);
+  if (lengths_after && lengths_after->long_counts) lint2int_destroy(lengths_after->long_counts);
+  free(lengths_before);
+  free(lengths_after);
   return ret;
 }

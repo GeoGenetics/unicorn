@@ -175,6 +175,21 @@ int64_t unicorn_getnfqueries(unicorn_t *u)
 	return u ? (int64_t)u->values.nfread : -1;
 }
 
+double unicorn_getalnfiltmedian_before(unicorn_t *u)
+{
+  return u ? u->values.median_read_length_before : NAN;
+}
+
+double unicorn_getalnfiltmedian_after(unicorn_t *u)
+{
+  return u ? u->values.median_read_length_after : NAN;
+}
+
+void unicorn_set_alnfilt_report(unicorn_t *u, int enabled)
+{
+  if (u) u->collect_alnfilt_lengths = !!enabled;
+}
+
 uint64_t unicorn_loadqueues(unicorn_t *u, bamq_t *q, uint8_t n)
 {
   if (!u || !q) return 0;

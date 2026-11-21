@@ -188,6 +188,8 @@ struct unicorn_readset {
   size_t heap_bytes;
 };
 
+/* Grouped input can use exact sequential IDs; other orders retain full names
+ * so distinct reads remain distinct even when their hashes collide. */
 unicorn_readset_t *unicorn_readset_new(int grouped)
 {
   unicorn_readset_t *set = calloc(1, sizeof(*set));

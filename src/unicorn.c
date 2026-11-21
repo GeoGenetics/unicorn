@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 200809L
 /*
 MIT License
 
@@ -30,6 +31,9 @@ SOFTWARE.
 #include <inttypes.h>
 #include <math.h>
 #include <strings.h>
+#include <errno.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 
 #include "klib/ketopt.h"
 #define OPT_STR "b:o:t:a:n:d:1:2:p:q:k:h"
@@ -38,6 +42,8 @@ static ko_longopt_t unicorn_lopts[] = {
     { "plain-text", ko_no_argument, 337 },
     { "read-lengths", ko_required_argument, 338 },
     { "no-damage-tags", ko_no_argument, 339 },
+    { "delete-input", ko_no_argument, 340 },
+    { "no-stats", ko_no_argument, 341 },
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
     { "names",           ko_required_argument, 302 },
@@ -99,6 +105,8 @@ typedef struct unicorn_opts {
   uint64_t rss_limit;
   int plain_text;
   int no_damage_tags;
+  int delete_input;
+  int no_stats;
   int compression;
   int  threads;         // Number of threads to use
   char *filelist;        // File containing list of input files
@@ -288,12 +296,17 @@ static void alnfilt_usage(FILE *fp)
             "  --memory-limit <N[G|M]>     Soft RSS spill trigger; e.g. 50G\n"\
             "  --group-memory <MiB>         Query buffer before disk spill [64]\n"\
             "  --compression <0..9>         Output compression [5]; 0 for pipes\n"\
+            "  --outstat <path>             Run summary [<outbam>.stats.tsv.gz]\n"\
+            "  --plain-text                 Write named statistics as plain TSV\n"\
+            "  --delete-input               Delete regular input BAM after successful output\n"\
+            "  --no-stats                   Skip run-summary generation\n"\
             "  --seed <int>                 Seed for RNDTOP reservoir sampling\n"\
             "  --strictbounds               Remove query if ANI out of bounds at any alignment.\n"\
             "  --verbose                    Prints libunicorn's messages.\n"\
             "  -h                           Print this help message.\n");
 }
 
+/* Parse shared options here; each command validates its own required inputs. */
 static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 {
   int c, ret = 0;
@@ -515,6 +528,12 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
         break;
       case 334:
         srand((unsigned)strtoul(o.arg, NULL, 10));
+        break;
+      case 340:
+        opts->delete_input = 1;
+        break;
+      case 341:
+        opts->no_stats = 1;
         break;
       case ':':
         fprintf(stderr, "[unicorn::%s] Option %s requires an argument\n",
@@ -1096,10 +1115,83 @@ static int unicorn_cmpstat(int argc, char **argv)
     return ret;
 }
 
+static double cpu_time(const struct rusage *usage)
+{
+  return usage->ru_utime.tv_sec + usage->ru_utime.tv_usec / 1e6 +
+         usage->ru_stime.tv_sec + usage->ru_stime.tv_usec / 1e6;
+}
+
+static double elapsed_time(const struct timespec *start, const struct timespec *end)
+{
+  return (double)(end->tv_sec - start->tv_sec) +
+         (double)(end->tv_nsec - start->tv_nsec) / 1e9;
+}
+
+static int same_existing_file(const char *a, const char *b)
+{
+  struct stat first, second;
+  return a && b && strcmp(a, "-") && strcmp(b, "-") &&
+         !stat(a, &first) && !stat(b, &second) &&
+         first.st_dev == second.st_dev && first.st_ino == second.st_ino;
+}
+
+static int alnfilt_report(const char *path, int threads, unicorn_t *u,
+                          const char *input, const char *output,
+                          double wall, double cpu)
+{
+  FILE *fp = unicorn_text_open(path, threads);
+  if (!fp) return -1;
+  struct stat before, after;
+  int have_before = input && strcmp(input, "-") && !stat(input, &before) && S_ISREG(before.st_mode);
+  int have_after = output && strcmp(output, "-") && !stat(output, &after) && S_ISREG(after.st_mode);
+  uint64_t alignments_before = (uint64_t)unicorn_getnaln(u);
+  uint64_t alignments_after = (uint64_t)unicorn_getnfaln(u);
+  uint64_t reads_before = (uint64_t)unicorn_getnqueries(u);
+  uint64_t reads_after = (uint64_t)unicorn_getnfqueries(u);
+  uint64_t aln_removed = alignments_before - alignments_after;
+  uint64_t read_removed = reads_before - reads_after;
+  fprintf(fp, "metric\tvalue\tunit\n");
+  fprintf(fp, "alignments_before\t%" PRIu64 "\talignments\n", alignments_before);
+  fprintf(fp, "alignments_after\t%" PRIu64 "\talignments\n", alignments_after);
+  fprintf(fp, "alignments_removed\t%" PRIu64 "\talignments\n", aln_removed);
+  fprintf(fp, "alignments_removed_pct\t%.6f\tpercent\n",
+          alignments_before ? 100.0 * aln_removed / alignments_before : 0.0);
+  fprintf(fp, "reads_before\t%" PRIu64 "\tquery_names\n", reads_before);
+  fprintf(fp, "reads_after\t%" PRIu64 "\tquery_names\n", reads_after);
+  fprintf(fp, "reads_removed\t%" PRIu64 "\tquery_names\n", read_removed);
+  fprintf(fp, "reads_removed_pct\t%.6f\tpercent\n",
+          reads_before ? 100.0 * read_removed / reads_before : 0.0);
+  /* alnfilt has no minimum-read threshold; report this explicitly. */
+  fprintf(fp, "reads_removed_below_minreads\tNA\tquery_names\n");
+  fprintf(fp, "median_read_length_before\t");
+  if (reads_before) fprintf(fp, "%.1f", unicorn_getalnfiltmedian_before(u));
+  else fprintf(fp, "NA");
+  fprintf(fp, "\tbp\nmedian_read_length_after\t");
+  if (reads_after) fprintf(fp, "%.1f", unicorn_getalnfiltmedian_after(u));
+  else fprintf(fp, "NA");
+  fprintf(fp, "\tbp\n");
+  if (have_before)
+    fprintf(fp, "input_bam_size_bytes\t%" PRIu64 "\tbytes\n"
+                "input_bam_size_mb\t%.3f\tMB\ninput_bam_size_gb\t%.6f\tGB\n",
+            (uint64_t)before.st_size, before.st_size / 1e6, before.st_size / 1e9);
+  else fprintf(fp, "input_bam_size_bytes\tNA\tbytes\ninput_bam_size_mb\tNA\tMB\ninput_bam_size_gb\tNA\tGB\n");
+  if (have_after)
+    fprintf(fp, "output_bam_size_bytes\t%" PRIu64 "\tbytes\n"
+                "output_bam_size_mb\t%.3f\tMB\noutput_bam_size_gb\t%.6f\tGB\n",
+            (uint64_t)after.st_size, after.st_size / 1e6, after.st_size / 1e9);
+  else fprintf(fp, "output_bam_size_bytes\tNA\tbytes\noutput_bam_size_mb\tNA\tMB\noutput_bam_size_gb\tNA\tGB\n");
+  fprintf(fp, "wall_time_seconds\t%.6f\tseconds\n"
+              "cpu_time_seconds\t%.6f\tseconds\n", wall, cpu);
+  int failed = ferror(fp);
+  if (fclose(fp)) failed = 1;
+  return failed ? -1 : 0;
+}
+
 static int unicorn_alnfilt(int argc, char **argv)
 {
   int ret = 1;
   struct timespec start, stop, pB, pE;
+  struct rusage cpu_start, cpu_end;
   uint64_t ns = 0;
   clock_gettime(CLOCK_MONOTONIC, &pB);
   unicorn_opt_t opts = {0};
@@ -1120,6 +1212,39 @@ static int unicorn_alnfilt(int argc, char **argv)
   if (unicorn_set_temp_directory(opts.tmpdir)) { ret = 7; goto exit; }
   ret = 1;
   if (!opts.ifile) goto exit;
+  if (opts.no_stats && opts.outstat) {
+    fprintf(stderr, "[unicorn::alnfilt] --no-stats cannot be combined with --outstat\n");
+    ret = 7; goto exit;
+  }
+  if (!opts.no_stats && !opts.outstat && opts.outbam && strcmp(opts.outbam, "-")) {
+    size_t n = strlen(opts.outbam);
+    const char *suffix = opts.plain_text ? ".stats.tsv" : ".stats.tsv.gz";
+    opts.outstat = malloc(n + strlen(suffix) + 1);
+    if (!opts.outstat) { ret = 4; goto exit; }
+    memcpy(opts.outstat, opts.outbam, n);
+    strcpy(opts.outstat + n, suffix);
+  }
+  if (opts.outstat && (!strcmp(opts.outstat, opts.ifile) ||
+                       (opts.outbam && !strcmp(opts.outstat, opts.outbam)) ||
+                       same_existing_file(opts.outstat, opts.ifile) ||
+                       same_existing_file(opts.outstat, opts.outbam))) {
+    fprintf(stderr, "[unicorn::alnfilt] Statistics path must differ from input and output BAM\n");
+    ret = 7; goto exit;
+  }
+  if (opts.outbam && (same_existing_file(opts.ifile, opts.outbam) ||
+                      !strcmp(opts.ifile, opts.outbam))) {
+    fprintf(stderr, "[unicorn::alnfilt] Input and output BAM must differ\n");
+    ret = 7; goto exit;
+  }
+  if (opts.delete_input) {
+    struct stat input_stat, output_stat;
+    if (!opts.outbam || !strcmp(opts.outbam, "-") || !strcmp(opts.ifile, "-") ||
+        lstat(opts.ifile, &input_stat) || !S_ISREG(input_stat.st_mode) ||
+        (!stat(opts.outbam, &output_stat) && !S_ISREG(output_stat.st_mode))) {
+      fprintf(stderr, "[unicorn::alnfilt] --delete-input requires distinct named BAM files and a regular input file\n");
+      ret = 7; goto exit;
+    }
+  }
   ret = 2;
   fprintf(stderr, "[unicorn::%s] Loading BAM header data from %s\n", __func__,
                                                                      opts.ifile);
@@ -1153,20 +1278,44 @@ static int unicorn_alnfilt(int argc, char **argv)
     fprintf(stderr, "\tstrictbounds == TRUE\n");
   fflush(stderr);
   unicorn_set_stream_options(u, opts.group_memory, opts.compression);
+  unicorn_set_alnfilt_report(u, !!opts.outstat);
+  getrusage(RUSAGE_SELF, &cpu_start);
+  clock_gettime(CLOCK_MONOTONIC, &start);
   ret = unicorn_alnfilter(u, opts.alnfiltmode, opts.minani, opts.maxani, opts.pct, opts.strictb);
   if (ret) goto exit;
+  clock_gettime(CLOCK_MONOTONIC, &stop);
+  getrusage(RUSAGE_SELF, &cpu_end);
+  if (opts.outstat && alnfilt_report(opts.outstat, opts.threads, u,
+                                     opts.ifile, opts.outbam,
+                                     elapsed_time(&start, &stop),
+                                     cpu_time(&cpu_end) - cpu_time(&cpu_start))) {
+    fprintf(stderr, "[unicorn::alnfilt] Failed writing statistics: %s\n", strerror(errno));
+    ret = 3; goto exit;
+  }
   fprintf(stderr, "[unicorn::%s] Done\n"\
                   "\t%"PRIu64" alignments, %" PRIu64 " passed filters (%f)\n"\
                   "\t%"PRId64" queries, %"PRId64" passed filter (%f)\n"\
                   "\t%u references, %u passed filter (%f)\n",
                   __func__,
                   unicorn_getnaln(u), unicorn_getnfaln(u),
-                  (float)unicorn_getnfaln(u)/unicorn_getnaln(u),
+                  unicorn_getnaln(u) ? (float)unicorn_getnfaln(u)/unicorn_getnaln(u) : 0.0f,
                   unicorn_getnqueries(u), unicorn_getnfqueries(u),
-                  (float)unicorn_getnfqueries(u)/unicorn_getnqueries(u),
+                  unicorn_getnqueries(u) ? (float)unicorn_getnfqueries(u)/unicorn_getnqueries(u) : 0.0f,
                   unicorn_getnref(u), unicorn_getnfref(u),
-                  (float)unicorn_getnfref(u)/unicorn_getnref(u));
+                  unicorn_getnref(u) ? (float)unicorn_getnfref(u)/unicorn_getnref(u) : 0.0f);
   ret = 0;
+  if (opts.delete_input) {
+    struct stat completed_output;
+    unicorn_destroy(u);
+    u = NULL;
+    if (stat(opts.outbam, &completed_output) || !S_ISREG(completed_output.st_mode)) {
+      fprintf(stderr, "[unicorn::alnfilt] Output BAM must be a regular file before input deletion\n");
+      ret = 3;
+    } else if (unlink(opts.ifile)) {
+      fprintf(stderr, "[unicorn::alnfilt] Failed deleting input BAM: %s\n", strerror(errno));
+      ret = 3;
+    }
+  }
   exit:
     if (ret) {
       alnfilt_usage(stderr);
@@ -1179,7 +1328,7 @@ static int unicorn_alnfilt(int argc, char **argv)
                     (double)ns/1000000000.f);
     if (u) unicorn_destroy(u);
     for (unsigned i = 0; i < ((argc > 64) ? 64u : (unsigned)argc); ++i) free(_argv[i]);
-    free(opts.ifile); free(opts.outbam); free(opts.tmpdir);
+    free(opts.ifile); free(opts.outbam); free(opts.outstat); free(opts.tmpdir);
     return ret;
 }
 

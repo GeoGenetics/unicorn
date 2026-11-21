@@ -83,6 +83,8 @@ int unicorn_damage_tag_alignment(bam1_t *b)
   if (!md || !b->core.n_cigar) return 1;
   int64_t nm = bam_aux2i(nm_tag);
   if (nm < 0) return 1;
+  /* Reconstruct reference bases from MD and map them through CIGAR to the
+   * query; clipped and inserted bases have no diagnostic reference base. */
   size_t qlen = (size_t)b->core.l_qseq;
   const uint32_t *cigar = bam_get_cigar(b);
   size_t refcols = 0;
@@ -162,6 +164,7 @@ int unicorn_damage_tag_alignment(bam1_t *b)
     if (!ref[q]) continue;
     unsigned char observed = (unsigned char)toupper((unsigned char)seq_nt16_str[bam_seqi(seq, q)]);
     unsigned char reference = ref[q];
+    /* Orient substitutions to the molecule before measuring terminal decay. */
     if (b->core.flag & BAM_FREVERSE) {
       observed = complement(observed);
       reference = complement(reference);
@@ -188,6 +191,7 @@ int unicorn_damage_tag_alignment(bam1_t *b)
                                exp(-(double)distance / PENALTY_DECAY);
     }
   }
+  /* Keep NM intact; XD is a separate nonnegative experimental burden. */
   if (discount > (double)nm + 1e-6) goto done;
   if (bam_aux_update_float(b, "XP", (float)pmd) < 0) { status = -1; goto done; }
   float adjusted_nm = (float)((double)nm - discount);

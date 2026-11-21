@@ -135,6 +135,8 @@ def rollup(args):
                 if math.isfinite(value):
                     local[len(COUNTS) + 1 + 2 * i] = weight * value
                     local[len(COUNTS) + 2 + 2 * i] = weight
+            # Ancestor read counts are summed associations, not deduplicated
+            # molecules; multi-mapping can therefore contribute at each leaf.
             for ancestor in path:
                 current = aggregates.setdefault(ancestor, [0.0] * width)
                 for i, value in enumerate(local):

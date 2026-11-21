@@ -54,9 +54,16 @@ default parameters: ancient damage probability
 `0.3 × 0.7^distance + 0.01`, modern damage probability 0.001, and
 polymorphism probability 0.001. Base qualities enter as a Phred error
 probability. It does **not** implement every PMDtools option, such as CpG,
-UDG, and single-stranded-library treatments; numerical equivalence to
-PMDtools has not been established. The local PMD-gating benchmark used a
-different empirically fitted damage curve, so its numerical threshold-3
+UDG, and single-stranded-library treatments. In a direct 20,000-alignment comparison,
+19,982 `XP` values were within 0.0005 of PMDtools' three-decimal output;
+18 combined insertion-and-deletion alignments differed, including one that
+crossed score 3, so `XP` is not numerically identical to PMDtools. Independent
+MD/CIGAR reconstructions reproduced both scores and traced the difference to
+the PMDtools v0.60 handling of deleted bases and later insertions. Unicorn's
+mapping follows the SAM CIGAR/MD coordinate rules; the original reference
+assembly was not independently checked. This sample had no soft-clipped
+alignments. The local PMD-gating benchmark used a different
+empirically fitted damage curve, so its numerical threshold-3
 frequency cannot be transferred directly to `XP`.
 
 `XD` and `XE` do **not** overwrite Bowtie2 `AS`, change `MAPQ`, or alter which

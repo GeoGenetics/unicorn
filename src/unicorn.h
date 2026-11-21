@@ -59,6 +59,7 @@ void unicorn_setverbose(void);
  * Use unicorn_init() to create, and unicorn_destroy() to free.
  */
 typedef struct unicorn_t *unicorn_t;
+/** Annotate scorable refstats output BAM alignments with experimental XP/XD tags. */
 void unicorn_refstats_set_damage_tags(unicorn_t *u, int enabled);
 
 /**
@@ -66,7 +67,8 @@ void unicorn_refstats_set_damage_tags(unicorn_t *u, int enabled);
  *
  * @param threads Number of threads to use for processing.
  * @param ifile   Input BAM/CRAM file path.
- * @param prefix  Output file prefix (optional).
+ * @param prefix  Output BAM path (optional; historical parameter name).
+ * @param ofile   Statistics output path; NULL writes to stdout.
  * @param argc    Argument count (for command-line integration).
  * @param argv    Argument vector (for command-line integration).
  * @return Pointer to unicorn_t object, or NULL on error.
@@ -128,14 +130,15 @@ typedef struct utax_t *utax_t;
 
 /**
  * @brief Initialize a unicorn_stat_t object
- * @param minnreads - Minimum number of reads per reference
+ * @param minnreads - Minimum distinct reads per output group
  * @param minrefl   - Minimum length of reference to consider
- * @param minani    - Minimum Average Nucleotide Identity (ANI) to consider
- * @param minas     - Minimum alignment score to consider
+ * @param minmani   - Minimum mean alignment ANI to consider
+ * @param minalnas  - Minimum alignment score to consider
  * @param maxdust   - Maximum dust score to consider
- * @param flg       - Flag to indicate which map to use:
-                       0 - per reference, 1 - per taxid, other - no map
- * @return - unicorn_bamstat_t* on success NULL on error
+ * @param ksize     - K-mer length for duplicity
+ * @param qsize     - Alignment queue size
+ * @param flg       - Map type: 1 per reference, 2 per taxid, other no map
+ * @return Statistics handle, or NULL on error
  */
 unicorn_stat_t *unicorn_stat_init(uint32_t minnreads,
                                   uint32_t minrefl,
@@ -276,6 +279,9 @@ unicorn's alnfilt routines
 
 ****************************************************/
 int unicorn_alnfilter(unicorn_t *u, uint8_t mode, float minani, float maxani, float pct, uint8_t strictb);
+double unicorn_getalnfiltmedian_before(unicorn_t *u);
+double unicorn_getalnfiltmedian_after(unicorn_t *u);
+void unicorn_set_alnfilt_report(unicorn_t *u, int enabled);
 
 /* Configure query spill threshold in bytes and BAM compression (0..9). */
 void unicorn_set_stream_options(unicorn_t *u, uint64_t bytes, int compression);

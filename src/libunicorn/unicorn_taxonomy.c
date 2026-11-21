@@ -42,7 +42,7 @@ typedef struct accmappipe_t {
 } accmappipe_t;
 
 
-// usefull little function to split
+// Split an NCBI taxonomy field at the next delimiter.
 static inline char *strpop(char **str, char split)
 {
     char *tok = *str;
@@ -58,7 +58,7 @@ static inline char *strpop(char **str, char split)
     return tok;
 }
 
-// usefull little function to remove tab and newlines
+// Remove tab and newline separators from a taxonomy field.
 static inline void strip(char *line)
 {
     uint32_t at = 0;
@@ -477,6 +477,7 @@ const char *utax_getname(const utax_t *utax, uint32_t taxid)
 	return kh_val(map, k); // Return name
 }
 
+/* Return the assigned taxid if the lineage reaches root without that rank. */
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret)
 {
 	*ret = 1;

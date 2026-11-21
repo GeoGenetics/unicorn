@@ -341,6 +341,7 @@ static void _printrefstats(FILE *fp,
   fprintf(fp,"\t%.9g\t%.9g\t%.9g\t%"PRIu64"\t%"PRIu64"\n", v->spatial.ks,v->spatial.kuiper,v->spatial.circular,v->spatial.valid,v->spatial.invalid);
 }
 
+/* Read-length and k-mer summaries use distinct names; ANI/NM use alignments. */
 static int _addaln(refstat_t *rs,
                    const unicorn_t *u,
                    const unicorn_stat_t *stats,
@@ -388,7 +389,7 @@ static int _addaln(refstat_t *rs,
   rs->_MANI += delta * (ani - rs->REFALNANIE);
   rs->REFALNANIV = naln > 1 ? (rs->_MANI / (naln - 1)) : 0.0f;
 
-  // Coverage events
+  /* Half-open alignment intervals become start/end events for exact breadth. */
   _urangeevent s_ev = {b->core.pos, 1};
   _urangeevent e_ev = {bam_endpos(b), 0};
   REF_PUSH(_urangeevent, rs->aEVENT, s_ev, return -1);
@@ -487,6 +488,7 @@ static void step_free(step_t *s)
   free(s->queue); free(s->refq); free(s->counts); free(s->spills); free(s);
 }
 
+/* Load bounded coordinate batches, compute by reference, then emit in order. */
 static void *_refstats_pipeline(void *data, int step, void *in)
 {
   pipeline_t *p = data;
@@ -512,6 +514,7 @@ static void *_refstats_pipeline(void *data, int step, void *in)
     for (size_t j = 0; j < rq->n; ++j) {
       refstat_t *rs = rq->a[j];
       uint64_t nreads = rs->READSET ? unicorn_readset_size(rs->READSET) : 0;
+      /* A multimapping read contributes once to each reference it reaches. */
       p->stats->_nreads += nreads;
       ++p->stats->_nrefs;
       if (nreads < p->stats->minnreads) continue;
@@ -789,7 +792,7 @@ int unsorted_compute(unicorn_t *u, unicorn_stat_t *stats)
     refstat->mdust += delta/naln;
     refstat->_MDUST += delta * (dusts - refstat->mdust);
     refstat->vdust = naln > 1 ? refstat->_MDUST / (naln - 1) : 0.0f;
-    //Don't loose your stats value
+    // The reference map already owns the updated statistics object.
 
   }
   stats->_nalns = naln;

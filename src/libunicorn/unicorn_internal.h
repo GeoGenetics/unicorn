@@ -119,6 +119,8 @@ typedef struct values_t {
   uint64_t nfread; //Number of filtered reads
   uint32_t nref;   //Number of references
   uint32_t nfref;  //Number of filtered references
+  double median_read_length_before; // One sequence length per input query.
+  double median_read_length_after;  // One sequence length per retained query.
 } values_t;
 
 typedef struct {
@@ -127,6 +129,7 @@ typedef struct {
   int  nthreads;
   uint64_t memory_limit; // Bytes buffered per query before disk spill.
   int compression;
+  int collect_alnfilt_lengths;
   int coord_seen;
   int32_t coord_tid;
   hts_pos_t coord_pos;
@@ -379,7 +382,7 @@ typedef struct unicorn_stats_t {
   uint8_t fc: 1;          //Filter computed flag
   //Data
   void *__map; // Stat map to use, either _refmap or _taxmap
-  uint8_t mapflg; //Map type, 0 for per reference, 1 for per taxid
+  uint8_t mapflg; // Map type: 1 per reference, 2 per taxid, otherwise none.
 	int32q_t _taxorder; //Preserve XR-sorted taxid output order
   uint64_t _nalns;
   uint64_t _nreads;
@@ -405,7 +408,7 @@ typedef struct unicorn_stats_t {
   int32_t  minalnas;  // Minimum alignment score to consider
   int32_t  maxdust;   // Maximum dust score to consider
 	uint8_t	 ksize;     // kmer size for complexity estimation
-	uint32_t qsize;     // Queue size for taxstats computation
+	uint32_t qsize;     // Alignment queue size for statistics pipelines.
 } unicorn_stat_t;
 
 typedef struct _covstats_t {

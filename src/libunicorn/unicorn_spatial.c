@@ -19,6 +19,7 @@ int unicorn_spatial_add(spatial_t *s, int64_t start, int64_t end, uint64_t lengt
     if (!a) return -1;
     v->a = a; v->m = next;
   }
+  /* Linear KS adjusts for the alignment's available start positions. */
   v->a[v->n++] = (spatial_pos_t){(double)start/(length-(end-start)),(double)start/length};
   return 0;
 }
@@ -38,6 +39,7 @@ void unicorn_spatial_finish(spatial_t *s)
     double u=v->a[i].linear;
     plus=fmax(plus,(i+1)/n-u); minus=fmax(minus,u-i/n);
   }
+  /* KS uses the larger one-sided deviation; Kuiper sums both deviations. */
   s->ks=fmax(plus,minus); s->kuiper=plus+minus;
   ks_introsort(spatial_circular,v->n,v->a);
   plus=minus=0;

@@ -1,5 +1,6 @@
 """Scientific equivalence, bounded-buffer and failure-path regressions."""
 import os
+import gzip
 from pathlib import Path
 import random
 import shutil
@@ -50,6 +51,70 @@ class Streaming(unittest.TestCase):
                     if mode == 'ALLTOP': self.assertEqual([r.split('\t')[0] for r in rows], ['a','a','b'])
             strict = self.filter(bam, f'strict-{threads}', '--strictbounds', '--mode','ALLTOP','--threads',str(threads))
             self.assertEqual([r.split('\t')[0] for r in strict], ['a','a'])
+
+    def test_alnfilt_default_report_and_optional_input_deletion(self):
+        bam = self.bam('report', [('a','A',1,40,0), ('a','B',1,40,0),
+                                  ('b','A',50,60,10), ('c','A',100,80,0)])
+        out = self.path/'report.filtered.bam'
+        run(UNICORN, 'alnfilt', '-b', bam, '-o', out, '--minani', '93')
+        self.assertTrue(bam.exists())
+        report = out.with_name(out.name + '.stats.tsv.gz')
+        with gzip.open(report, 'rt') as stream:
+            rows = dict((parts[0], parts[1]) for line in stream.readlines()[1:]
+                        if (parts := line.rstrip('\n').split('\t')))
+        self.assertEqual([rows[key] for key in ('alignments_before', 'alignments_after',
+                         'reads_before', 'reads_after', 'alignments_removed', 'reads_removed')],
+                         ['4', '3', '3', '2', '1', '1'])
+        self.assertEqual(rows['reads_removed_below_minreads'], 'NA')
+        self.assertEqual(rows['median_read_length_before'], '60.0')
+        self.assertEqual(rows['median_read_length_after'], '60.0')
+        self.assertEqual(int(rows['input_bam_size_bytes']), bam.stat().st_size)
+        self.assertEqual(int(rows['output_bam_size_bytes']), out.stat().st_size)
+        self.assertGreaterEqual(float(rows['cpu_time_seconds']), 0)
+        self.assertEqual(int(run('samtools', 'view', '-c', out).stdout), 3)
+
+        disposable = self.path/'report-disposable.bam'
+        shutil.copyfile(bam, disposable)
+        disposable_out = self.path/'report-disposable.filtered.bam'
+        run(UNICORN, 'alnfilt', '-b', disposable, '-o', disposable_out,
+            '--minani', '93', '--delete-input')
+        self.assertFalse(disposable.exists())
+        self.assertTrue(disposable_out.exists())
+        self.assertTrue((self.path/(disposable_out.name+'.stats.tsv.gz')).exists())
+
+        preserved = self.path/'report-on-error.bam'
+        shutil.copyfile(bam, preserved)
+        failed = subprocess.run([UNICORN, 'alnfilt', '-b', str(preserved),
+                                 '-o', str(self.path/'report-on-error.filtered.bam'),
+                                 '--outstat', str(self.path/'missing'/'stats.tsv'),
+                                 '--delete-input'], capture_output=True, timeout=15)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertTrue(preserved.exists())
+
+        fast = self.path/'report-no-stats.bam'
+        run(UNICORN, 'alnfilt', '-b', bam, '-o', fast, '--no-stats')
+        self.assertFalse((self.path/(fast.name+'.stats.tsv.gz')).exists())
+        self.assertEqual(int(run('samtools', 'view', '-c', fast).stdout), 3)
+
+        plain = self.path/'report-plain.bam'
+        run(UNICORN, 'alnfilt', '-b', bam, '-o', plain, '--plain-text')
+        self.assertTrue((self.path/(plain.name+'.stats.tsv')).read_text().startswith('metric\tvalue\tunit\n'))
+
+        same_path = subprocess.run([UNICORN, 'alnfilt', '-b', str(bam),
+                                    '-o', str(bam), '--delete-input'],
+                                   capture_output=True, timeout=15)
+        self.assertNotEqual(same_path.returncode, 0)
+        self.assertTrue(bam.exists())
+
+        long_bam = self.bam('report-long', [('a','A',1,5000,0),
+                                           ('b','A',6000,6000,0)])
+        long_out = self.path/'report-long.filtered.bam'
+        run(UNICORN, 'alnfilt', '-b', long_bam, '-o', long_out)
+        with gzip.open(str(long_out)+'.stats.tsv.gz', 'rt') as stream:
+            long_rows = dict((parts[0], parts[1]) for line in stream.readlines()[1:]
+                             if (parts := line.rstrip('\n').split('\t')))
+        self.assertEqual(long_rows['median_read_length_before'], '5500.0')
+        self.assertEqual(long_rows['median_read_length_after'], '5500.0')
 
     def test_oversized_query_spill_matches_memory_and_threads(self):
         # A single highly multimapping query exceeds the forced 1 MiB budget.

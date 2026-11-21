@@ -95,6 +95,7 @@ static int tax_medians(taxstat_t *ts)
       unicorn_histogram_median(ts->dust_hist, &ts->median_dust, &mode, &n)) return -1;
   return 0;
 }
+/* Preserve one observation per aligned reference for unweighted summaries. */
 static int tax_reference(taxstat_t *ts, const _covstats_t *c, uint32_t length, spatial_t *spatial)
 {
   unicorn_spatial_finish(spatial);
@@ -112,6 +113,7 @@ static int tax_reference(taxstat_t *ts, const _covstats_t *c, uint32_t length, s
   for (int m=0; m<UNICORN_REF_METRICS; ++m) if (m < 9 || isfinite(values[m])) TAX_PUSH(double, ts->ref_metrics[m], values[m], return -1);
   return 0;
 }
+/* Each reference has equal weight; these are not pooled genomic metrics. */
 static void tax_summaries(taxstat_t *ts)
 {
   for (int m=0; m<UNICORN_REF_METRICS; ++m) {
@@ -181,7 +183,7 @@ static int _taxmapstats(unicorn_stat_t *stats)
         kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
         continue;
     }
-    //camex shenanigans
+    // Duplicity is the fraction of distinct canonical k-mers observed.
     khint_t k;
     uint64_t nkmers = 0;
     kh_foreach(taxstat.camex, k) {
@@ -309,6 +311,7 @@ static void _loadalns(bamq_t *q, uint8_t *n, unicorn_t *u, utax_t *t, uint32_t q
     bam_destroy1(b);
 }
 
+/* Taxon read lengths count names once; ANI, NM and DUST count alignments. */
 static int _addaln(taxstat_t *ts,
                    const unicorn_t *u,
                    const unicorn_stat_t *stats,
@@ -400,7 +403,7 @@ static int _addaln(taxstat_t *ts,
 static int _taxafinalize(taxstat_t *ts)
 {
   if (!ts || !ts->readset || !ts->refmap) return -1;
-  // camex shenanigans
+  // Duplicity is the fraction of distinct canonical k-mers observed.
   if (ts->camex && kh_size(ts->camex)) {
     khint_t k;
     uint64_t nkmers = 0;
@@ -417,7 +420,8 @@ static int _taxafinalize(taxstat_t *ts)
   unicorn_mem_free(&unicorn_spill_threshold, ts->a_ani.a);
   ts->a_ani.n = ts->a_ani.m = 0;
   ts->a_ani.a = NULL;
-  // Coverage stats across references
+  /* Pool covered bases and depth across aligned references, retaining each
+   * reference's own coverage distribution for the separate summaries. */
   uint64_t tcov = 0, tdepth = 0;
   long double tsumsq = 0.0L;
   khint_t kref;
@@ -469,7 +473,7 @@ static int _compute(unicorn_t *u,
   struct timespec start, stop;
   clock_gettime(CLOCK_MONOTONIC, &start);
   dust_cache_t cache = {0};
-  //Loop over alignments //TODO refector
+  // Accumulate taxon summaries from passing alignments in one BAM pass.
   while (sam_read1(u->_FP, u->hdr, b) >= 0) {
     taln++;
     if (_unmapped(b)) continue;
@@ -478,6 +482,8 @@ static int _compute(unicorn_t *u,
     int32_t dusts = cached_dust(b, &cache);
     if ( dusts > stats->maxdust ) continue; //Check for dust score
     int32_t tid   = b->core.tid;
+    /* Accession assignment is cached because consecutive alignments often
+     * share a reference; a missing ancestor follows taxonomy fallback rules. */
     if (tid != cached_tid) {
       uint8_t rank_missing = 0;
       cached_taxid = utax_gettaxid(utax, u->hdr->target_name[tid], &absent);
@@ -527,7 +533,7 @@ static int _compute(unicorn_t *u,
       current->readl_var  = n>1 ? (current->_M / (n-1)) : 0.0f; //Running variance
       current->readl_min = qlen < current->readl_min ? qlen :  current->readl_min;
       current->readl_max = qlen > current->readl_max ? qlen :  current->readl_max;
-      //Add counts for suplicity
+      // Add this distinct read's k-mers to the duplicity estimate.
       char seq[256] = {0};
       for (uint32_t i = 0; i < qlen && i < 255; i++) {
         seq[i] = seq_nt16_str[bam_seqi(bam_get_seq(b), i)];
@@ -561,7 +567,7 @@ static int _compute(unicorn_t *u,
     _urangeevent e = {bam_endpos(b), 0};
     TAX_PUSH(_urangeevent, refstat.aEVENT, s, goto exit);
     TAX_PUSH(_urangeevent, refstat.aEVENT, e, goto exit);
-    //Do not loose your stats value
+    // Store the updated reference event vector in the taxon map.
     kh_val(current->refmap, kref) = refstat;
     if (unicorn_spatial_add(&kh_val(current->refmap,kref).spatial,b->core.pos,bam_endpos(b),refstat.REFLEN)) goto exit;
     //Alignment ANI
@@ -583,7 +589,7 @@ static int _compute(unicorn_t *u,
     current->mdust += delta/naln;
     current->_MDUST += delta * (dusts - current->mdust);
     current->vdust = naln > 1 ? (current->_MDUST / (naln - 1)) : 0.0f;
-    //Don't loose your stats value
+    // The taxon map already owns the updated statistics object.
 
   }
   clock_gettime(CLOCK_MONOTONIC, &stop);
