@@ -1,5 +1,11 @@
 # Taxstats from assigned taxids to every observed ancestor
 
+For exact distinct-read statistics at family, genus and species in one BAM
+pass, use `unicorn taxstats --ranks family,genus,species --outstat sample.tsv`.
+It writes separate rank tables and read-length companions. The procedure
+below instead reports read–taxon associations at every observed ancestor;
+the two outputs answer different questions.
+
 Use `--rank assigned` to calculate the ordinary taxstats row at each accession's
 mapped taxid. Then roll the resulting table up the taxonomy with the bundled
 postprocessor. The BAM is read only once. The postprocessor reads one taxstats

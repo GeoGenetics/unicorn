@@ -83,6 +83,7 @@ Use `unicorn` instead if it is installed on your `PATH`.
 | Keep the best-scoring alignments within an ANI range | `alnfilt` | BAM |
 | Inspect coverage of each reference sequence | `refstats` | One row per aligned reference |
 | Count distinct read names at one taxonomic rank | `taxstats --rank genus` | One row per reported taxid |
+| Calculate exact statistics at several ranks in one BAM pass | `taxstats --ranks family,genus,species` | One table and read-length table per rank |
 | Summarize every observed taxonomic ancestor | `taxstats --rank assigned`, then `taxstats_all_ranks.py` | One row per ancestor; read counts are associations |
 
 ### alnfilt
@@ -213,11 +214,37 @@ A read assigned to two genera appears once in each genus. `--minreads 10`
 filters individual output rows; the default is 1. If the requested rank does
 not occur on a lineage, a row can fall back to another rank. Check the
 `taxid` and taxonomy rank before treating every row as genus-level.
+For an XR-sorted BAM, a single `--rank` run groups by its existing XR tags;
+use a coordinate-sorted BAM if the tags were created for another rank.
 
 Taxstats also reports per-reference **mean, median and quartiles** for breadth,
 depth, Gini, entropy and spatial distances. These summarize aligned
 references; they do not measure genome completeness or pool their Gini or
 entropy into a new taxon-wide statistic. See [reference-summary definitions](doc/taxstats-reference-summaries.md).
+
+### taxstats: several exact ranks
+
+To calculate family, genus and species in one pass over the same BAM, supply
+the ranks as a comma-separated list and name the output stem:
+
+```bash
+./unicorn taxstats -b sample.filtered.coord.bam \
+  --acc2tax accessions.tsv.gz --names names.dmp --nodes nodes.dmp \
+  --ranks family,genus,species --minreads 10 --outstat sample.tsv
+```
+
+This writes `sample.family.tsv.gz`, `sample.genus.tsv.gz` and
+`sample.species.tsv.gz`, with a matching `*.readlengths.tsv.gz` file for each.
+Each table uses the same columns as a separate `--rank` run. `ts_nreads` counts
+distinct read names **within that rank and taxid**; a read mapping to two
+species in one genus is counted once in the genus row. Filters such as
+`--minreads` are applied independently at each rank, so a genus can pass when
+some descendant species do not. A taxid without the requested rank on its
+lineage follows the same fallback rule as a separate `--rank` run. Coverage
+and reference-level statistics still describe aligned references and need
+caution when organelles, chromosomes and alternative assemblies differ.
+For XR-sorted BAMs, this multi-rank command resolves each rank from the
+accession map; existing XR tags may have been written for a different rank.
 
 ### taxstats: all observed ranks
 
@@ -243,7 +270,8 @@ python3 tools/taxstats_all_ranks.py \
   --out-read-lengths sample.all-ranks.readlengths.tsv.gz
 ```
 
-The output has one row for every observed ancestor, including unranked nodes.
+This association rollup differs from the exact multi-rank command above. Its
+output has one row for every observed ancestor, including unranked nodes.
 `ts_alignment_associations` adds alignment counts. `ts_nread_associations`
 adds distinct-read counts from the **starting taxids**: it does not deduplicate
 a read again at the genus, family or root. For example, if one read maps to two

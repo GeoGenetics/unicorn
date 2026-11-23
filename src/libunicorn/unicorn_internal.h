@@ -359,6 +359,8 @@ typedef struct taxstat_t {
   //uint32q_t    aRLEN;
   int32int64map_t *length_hist, *nm_hist, *dust_hist;
   double median_nm, median_dust, expected_covbases;
+  uint64_t covdepth_sum;          // Completed coordinate-sorted references
+  long double covsumsq_sum;
   uint64_t spatial_nalns, spatial_invalid, spatial_nrefs;
   taxmetricq_t ref_metrics[UNICORN_REF_METRICS];
   double ref_summary[UNICORN_REF_METRICS][4]; // mean, median, q25, q75
@@ -590,6 +592,7 @@ uint64_t cov_hist(ueventq_t events,
          uint32_t *_maxdepth);
 uint64_t _taxcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
+uint64_t _taxrefcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats);
 
 /*
   khash IO
@@ -676,6 +679,8 @@ uint32_t utax_gettaxid(utax_t *utax, const char *acc, int *absent);
 const char *utax_getname(const utax_t *utax, uint32_t taxid);
 
 uint32_t utax_getidatrank(utax_t *utax, uint32_t taxid, const char *rank, uint8_t *ret);
+int unicorn_tidstat_compute_multi(unicorn_t *u, unicorn_stat_t **stats,
+                                  utax_t *utax, const char **ranks, size_t nranks);
 
 double dust(const uint8_t *seq, int32_t l, int32_t window, int32_t *wCount);
 

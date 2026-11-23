@@ -96,9 +96,9 @@ static int tax_medians(taxstat_t *ts)
   return 0;
 }
 /* Preserve one observation per aligned reference for unweighted summaries. */
-static int tax_reference(taxstat_t *ts, const _covstats_t *c, uint32_t length, spatial_t *spatial)
+static int tax_reference_finished(taxstat_t *ts, const _covstats_t *c,
+                                  uint32_t length, const spatial_t *spatial)
 {
-  unicorn_spatial_finish(spatial);
   ts->spatial_nalns += spatial->valid;
   ts->spatial_invalid += spatial->invalid;
   ts->spatial_nrefs += spatial->valid > 0;
@@ -112,6 +112,11 @@ static int tax_reference(taxstat_t *ts, const _covstats_t *c, uint32_t length, s
   ts->expected_covbases += length*expected;
   for (int m=0; m<UNICORN_REF_METRICS; ++m) if (m < 9 || isfinite(values[m])) TAX_PUSH(double, ts->ref_metrics[m], values[m], return -1);
   return 0;
+}
+static int tax_reference(taxstat_t *ts, const _covstats_t *c, uint32_t length, spatial_t *spatial)
+{
+  unicorn_spatial_finish(spatial);
+  return tax_reference_finished(ts,c,length,spatial);
 }
 /* Each reference has equal weight; these are not pooled genomic metrics. */
 static void tax_summaries(taxstat_t *ts)
@@ -154,8 +159,13 @@ static int _taxmapstats(unicorn_stat_t *stats)
 {
   taxmap_t *taxmap = (taxmap_t *)stats->__map;
   uint64_t _falns  = 0, _frefs = 0;;
+  unicorn_readset_t *treadset = unicorn_readset_new(0);
   unicorn_readset_t *freadset = unicorn_readset_new(0);
-  if (!freadset) return -1;
+  if (!treadset || !freadset) {
+    unicorn_readset_free(treadset);
+    unicorn_readset_free(freadset);
+    return -1;
+  }
   int32q_t rmq;
   kv_init(rmq);
   khint_t ktax, kref;
@@ -171,6 +181,14 @@ static int _taxmapstats(unicorn_stat_t *stats)
   kh_foreach(taxmap, ktax) {
     uint32_t taxid = kh_key(taxmap, ktax);
     taxstat_t taxstat = kh_val(taxmap, ktax);
+    /* Union taxon names once at finalization instead of probing a second
+     * run-wide name set on every alignment. */
+    if (unicorn_readset_merge(treadset,taxstat.readset)) {
+      unicorn_readset_free(treadset);
+      unicorn_readset_free(freadset);
+      kv_destroy(rmq);
+      return -1;
+    }
     if ( (unicorn_readset_size(taxstat.readset) < stats->minnreads) ||
           (taxstat.alnani_mean < stats->minmani) ) { //filter out
         unicorn_readset_free(taxstat.readset);
@@ -178,6 +196,8 @@ static int _taxmapstats(unicorn_stat_t *stats)
         unicorn_mem_free(&unicorn_spill_threshold, taxstat.a_ani.a);
         lint2int_destroy(taxstat.camex);
         int32int64map_destroy(taxstat.length_hist); int32int64map_destroy(taxstat.nm_hist); int32int64map_destroy(taxstat.dust_hist);
+        for (int m=0; m<UNICORN_REF_METRICS; ++m)
+          unicorn_mem_free(&unicorn_spill_threshold,taxstat.ref_metrics[m].a);
         /* A later allocation failure must not leave freed pointers in the map. */
         kh_val(taxmap, ktax) = (taxstat_t){0};
         kv_push(int32_t, rmq, taxid); //tid is added to a removal queue
@@ -193,9 +213,13 @@ static int _taxmapstats(unicorn_stat_t *stats)
     _falns  += taxstat.nalns;
     // Union complete names for exact run-wide totals.
     if (unicorn_readset_merge(freadset, taxstat.readset)) {
-      unicorn_readset_free(freadset); kv_destroy(rmq); return -1;
+      unicorn_readset_free(treadset); unicorn_readset_free(freadset);
+      kv_destroy(rmq); return -1;
     }
-    if (tax_medians(&taxstat)) return -1;
+    if (tax_medians(&taxstat)) {
+      unicorn_readset_free(treadset); unicorn_readset_free(freadset);
+      kv_destroy(rmq); return -1;
+    }
     if (taxstat.a_ani.n) {
       ks_introsort(_tid_sfloat, taxstat.a_ani.n, taxstat.a_ani.a);
       taxstat.alnani_median = _fMEDIAN(taxstat.a_ani.a, taxstat.a_ani.n);
@@ -205,18 +229,19 @@ static int _taxmapstats(unicorn_stat_t *stats)
     taxstat.a_ani.a = NULL;
     kh_val(taxmap, ktax) = taxstat; // cleanup must not retain freed ANI storage
     taxrefmap_t *refmap = taxstat.refmap;
-    _frefs  += kh_size(refmap);
+    _frefs  += taxstat.nrefs;
     //Add coverage histograms for all references
-    uint64_t _tcov = 0, _tdepth = 0;
-    long double _tsumsq = 0.0L;
+    uint64_t _tcov = taxstat.covbases, _tdepth = taxstat.covdepth_sum;
+    long double _tsumsq = taxstat.covsumsq_sum;
     kh_foreach(refmap, kref) {
       ueventq_t events = kh_val(refmap, kref).aEVENT;
       unicorn_sorturange(events.n, events.a);
       _covstats_t covstats = {0};
-      _tdepth += _refcoverage(events, kh_val(refmap, kref).REFLEN, &covstats);
+      _tdepth += _taxrefcoverage(events, kh_val(refmap, kref).REFLEN, &covstats);
       if (tax_reference(&taxstat, &covstats, kh_val(refmap,kref).REFLEN, &kh_val(refmap,kref).spatial)) {
         kh_val(taxmap, ktax) = taxstat;
-        unicorn_readset_free(freadset); kv_destroy(rmq); return -1;
+        unicorn_readset_free(treadset); unicorn_readset_free(freadset);
+        kv_destroy(rmq); return -1;
       }
       _tcov += covstats.covbases;
       _tsumsq += (long double)covstats.covbases *
@@ -244,9 +269,11 @@ static int _taxmapstats(unicorn_stat_t *stats)
     uint64_t ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
   }
+  stats->_nreads = unicorn_readset_size(treadset);
   stats->_nfreads = unicorn_readset_size(freadset);
   stats->_nfrefs = _frefs;
   stats->_nfalns  = _falns;
+  unicorn_readset_free(treadset);
   unicorn_readset_free(freadset);
   return 0;
 }
@@ -429,7 +456,7 @@ static int _taxafinalize(taxstat_t *ts)
     ueventq_t events = kh_val(ts->refmap, kref).aEVENT;
     unicorn_sorturange(events.n, events.a);
     _covstats_t covstats = {0};
-    tdepth += _refcoverage(events, kh_val(ts->refmap, kref).REFLEN, &covstats);
+    tdepth += _taxrefcoverage(events, kh_val(ts->refmap, kref).REFLEN, &covstats);
     if (tax_reference(ts, &covstats, kh_val(ts->refmap,kref).REFLEN, &kh_val(ts->refmap,kref).spatial)) return -1;
     tcov += covstats.covbases;
     tsumsq += (long double)covstats.covbases *
@@ -456,15 +483,13 @@ static int _compute(unicorn_t *u,
   uint8_t ksize = stats->ksize;
   genesis_encoder_t enc = genesis_encoderinit(ksize);
   chrset_t *missing = NULL;
-  unicorn_readset_t *readset = NULL;
   if (!u || !stats || !utax) goto exit;;
   bam1_t *b = bam_init1();
   uint64_t taln = 0, kaln = 0, ns;
   uint32_t nabsent = 0;
   taxmap_t *taxmap = (taxmap_t *)stats->__map;
   missing = chrset_init();
-  readset = unicorn_readset_new(0);
-  if (!readset) goto exit;
+  if (!missing) goto exit;
   const char *rank = utax->rank;
   int32_t cached_tid = -1;
   uint32_t cached_taxid = 0;
@@ -518,7 +543,6 @@ static int _compute(unicorn_t *u,
     double mean, delta;
     uint64_t naln = ++current->nalns;
     //Add read name to read set to count number of reads to tid
-    if (unicorn_readset_add(readset, bam_get_qname(b), 0) < 0) goto exit;
     absent = unicorn_readset_add(current->readset, bam_get_qname(b), 0);
     if (absent < 0) goto exit;
     //mean, median, and variance  Welford's online algorithm
@@ -594,7 +618,6 @@ static int _compute(unicorn_t *u,
   }
   clock_gettime(CLOCK_MONOTONIC, &stop);
   stats->_nalns  = taln;
-  stats->_nreads = unicorn_readset_size(readset);
   if (!kaln) goto exit; // No alignments found
   if (VERBOSE) {
     fprintf(stderr, "[libunicorn::%s] Finished parsing alignment file\n", __func__);
@@ -611,9 +634,246 @@ static int _compute(unicorn_t *u,
   genesis_encoderfree(enc);
   ret = 0;
   exit:
-    if (readset) unicorn_readset_free(readset);
     if (missing) chrset_destroy(missing);
     return ret;
+}
+
+/* Update one rank after the shared BAM decode, taxonomy lookup, DUST and ANI
+ * calculation. Each rank keeps its own exact read names and coverage state. */
+typedef struct {
+  char seq[256];
+  uint64_t indices[256];
+  int ready;
+} multi_kmer_cache_t;
+
+static int _multi_addaln(unicorn_t *u, unicorn_stat_t *stats,
+                         bam1_t *b,
+                         uint32_t taxid, int32_t dusts, float ani,
+                         uint32_t NM, genesis_encoder_t enc,
+                         multi_kmer_cache_t *kmers, int stream_ref,
+                         int first_ref_alignment)
+{
+  taxmap_t *taxmap = (taxmap_t *)stats->__map;
+  khint_t ktax = taxmap_get(taxmap, taxid);
+  int absent;
+  if (ktax == kh_end(taxmap)) {
+    taxstat_t fresh = {0};
+    fresh.readset = unicorn_readset_new(0);
+    fresh.refmap = taxrefmap_init2(&unicorn_spill_threshold);
+    fresh.camex = lint2int_init2(&unicorn_spill_threshold);
+    fresh.readl_min = UINT32_MAX;
+    if (!fresh.readset || !fresh.refmap || !fresh.camex) {
+      unicorn_readset_free(fresh.readset);
+      taxrefmap_free(fresh.refmap);
+      lint2int_destroy(fresh.camex);
+      return -1;
+    }
+    ktax = taxmap_put(taxmap, taxid, &absent);
+    if (absent < 0) {
+      unicorn_readset_free(fresh.readset);
+      taxrefmap_free(fresh.refmap);
+      lint2int_destroy(fresh.camex);
+      return -1;
+    }
+    kh_val(taxmap, ktax) = fresh;
+  }
+  taxstat_t *current = &kh_val(taxmap, ktax);
+  uint32_t qlen = b->core.l_qseq;
+  uint64_t naln = ++current->nalns;
+  const char *qname = bam_get_qname(b);
+  absent = unicorn_readset_add(current->readset, qname, 0);
+  if (absent < 0) return -1;
+  double mean, delta;
+  if (absent) {
+    if (unicorn_histogram_add(&current->length_hist, qlen, 1)) return -1;
+    uint64_t n = unicorn_readset_size(current->readset);
+    mean = current->readl_mean;
+    delta = qlen - mean;
+    current->readl_mean += delta/n;
+    current->_M += delta * (qlen - current->readl_mean);
+    current->readl_var = n>1 ? current->_M/(n-1) : 0.0f;
+    current->readl_min = qlen < current->readl_min ? qlen : current->readl_min;
+    current->readl_max = qlen > current->readl_max ? qlen : current->readl_max;
+    if (!kmers->ready) {
+      memset(kmers->seq, 0, sizeof(kmers->seq));
+      for (uint32_t i=0; i<qlen && i<255; ++i)
+        kmers->seq[i] = seq_nt16_str[bam_seqi(bam_get_seq(b),i)];
+      if (qlen >= stats->ksize)
+        genesis_getcamexidx_bulk(enc, kmers->seq, qlen<255 ? qlen : 255,
+                                 stats->ksize, kmers->indices);
+      kmers->ready = 1;
+    }
+    uint8_t ret;
+    for (uint32_t i=0; i<(qlen-stats->ksize+1) && i<255-stats->ksize; ++i) {
+      uint64_t idx = qlen >= stats->ksize ? kmers->indices[i] :
+        genesis_getcamexidx(enc, kmers->seq+i, stats->ksize, &ret);
+      khint_t k = lint2int_put(current->camex, idx, &absent);
+      if (absent < 0) return -1;
+      if (absent) kh_val(current->camex,k) = 1;
+      else kh_val(current->camex,k)++;
+    }
+  }
+  int32_t tid = b->core.tid;
+  if (stream_ref) {
+    if (first_ref_alignment) {
+      current->nrefs++;
+      current->reflen += u->hdr->target_len[tid];
+    }
+  } else {
+    khint_t kref = taxrefmap_put(current->refmap, tid, &absent);
+    if (absent < 0) return -1;
+    if (absent) {
+      current->nrefs++;
+      current->reflen += u->hdr->target_len[tid];
+      kh_val(current->refmap,kref) = (taxref_t){0};
+    }
+    taxref_t *ref = &kh_val(current->refmap,kref);
+    ref->REFLEN = u->hdr->target_len[tid];
+    _urangeevent start = {b->core.pos, 1};
+    _urangeevent end = {bam_endpos(b), 0};
+    TAX_PUSH(_urangeevent, ref->aEVENT, start, return -1);
+    TAX_PUSH(_urangeevent, ref->aEVENT, end, return -1);
+    if (unicorn_spatial_add(&ref->spatial,b->core.pos,bam_endpos(b),
+                            ref->REFLEN)) return -1;
+  }
+  if (unicorn_histogram_add(&current->nm_hist,NM,1) ||
+      unicorn_histogram_add(&current->dust_hist,dusts,1)) return -1;
+  TAX_PUSH(float, current->a_ani, ani, return -1);
+  mean = current->alnani_mean;
+  delta = ani-mean;
+  current->alnani_mean += delta/naln;
+  current->_MANI += delta*(ani-current->alnani_mean);
+  current->alnani_var = naln>1 ? current->_MANI/(naln-1) : 0.0f;
+  current->nmsum += NM;
+  current->alnnm_mean = (double)current->nmsum/naln;
+  mean = current->mdust;
+  delta = dusts-mean;
+  current->mdust += delta/naln;
+  current->_MDUST += delta*(dusts-current->mdust);
+  current->vdust = naln>1 ? current->_MDUST/(naln-1) : 0.0f;
+  return 0;
+}
+
+/* Coordinate order makes a reference's coverage and spatial statistics
+ * identical at every rank. Finish it once, then add the same observation to
+ * each rank's taxon without retaining three copies of its event arrays. */
+static int _multi_finish_reference(unicorn_stat_t **stats,
+                                   const uint32_t *taxids,
+                                   const uint8_t *seen, size_t nranks,
+                                   taxref_t *ref)
+{
+  if (!ref->aEVENT.n) return 0;
+  unicorn_sorturange(ref->aEVENT.n,ref->aEVENT.a);
+  _covstats_t cov = {0};
+  uint64_t depth = _taxrefcoverage(ref->aEVENT,ref->REFLEN,&cov);
+  unicorn_spatial_finish(&ref->spatial);
+  for (size_t r=0; r<nranks; ++r) {
+    if (!seen[r]) continue;
+    taxmap_t *map = (taxmap_t *)stats[r]->__map;
+    khint_t k = taxmap_get(map,taxids[r]);
+    if (k == kh_end(map)) return -1;
+    taxstat_t *ts = &kh_val(map,k);
+    if (tax_reference_finished(ts,&cov,ref->REFLEN,&ref->spatial)) return -1;
+    ts->covbases += cov.covbases;
+    ts->covdepth_sum += depth;
+    ts->covsumsq_sum += (long double)cov.covbases *
+                       (cov.varoncov + cov.meanoncov*cov.meanoncov);
+  }
+  unicorn_mem_free(&unicorn_spill_threshold,ref->aEVENT.a);
+  *ref = (taxref_t){0};
+  return 0;
+}
+
+int unicorn_tidstat_compute_multi(unicorn_t *u, unicorn_stat_t **stats,
+                                  utax_t *utax, const char **ranks,
+                                  size_t nranks)
+{
+  if (!u || !stats || !stats[0] || !utax || !ranks || !nranks) return -1;
+  taxref_t active_ref = {0};
+  bam1_t *b = bam_init1();
+  genesis_encoder_t enc = genesis_encoderinit(stats[0]->ksize);
+  uint32_t *taxids = calloc(nranks,sizeof(*taxids));
+  uint8_t *missing = calloc(nranks,sizeof(*missing));
+  uint8_t *seen = calloc(nranks,sizeof(*seen));
+  uint64_t *kept = calloc(nranks,sizeof(*kept));
+  if (!b || !enc || !taxids || !missing || !seen || !kept) goto error;
+  for (size_t r=0; r<nranks; ++r) {
+    if (!stats[r] || stats[r]->ksize != stats[0]->ksize) goto error;
+  }
+  int32_t cached_tid = -1;
+  uint64_t total = 0;
+  dust_cache_t cache = {0};
+  multi_kmer_cache_t kmers = {0};
+  int stream_refs = !!(u->sorted & COORDSORTED);
+  int read_status;
+  while ((read_status = sam_read1(u->_FP,u->hdr,b)) >= 0) {
+    ++total;
+    if (_unmapped(b) || b->core.tid < 0) continue;
+    if (_reftooshort(u->hdr,b->core.tid,stats[0]->minrefl) ||
+        !_ASCHECK(b,stats[0]->minalnas)) continue;
+    int32_t dusts = cached_dust(b,&cache);
+    if (dusts > stats[0]->maxdust) continue;
+    int32_t tid = b->core.tid;
+    if (tid != cached_tid) {
+      if (stream_refs && cached_tid >= 0 && tid < cached_tid) {
+        fprintf(stderr,"[libunicorn::taxstats] BAM header claims coordinate order, but reference IDs decrease.\n");
+        goto error;
+      }
+      if (stream_refs && _multi_finish_reference(stats,taxids,seen,nranks,
+                                                  &active_ref)) goto error;
+      memset(seen,0,nranks);
+      int absent = 0;
+      uint32_t assigned = utax_gettaxid(utax,u->hdr->target_name[tid],&absent);
+      for (size_t r=0; r<nranks; ++r) {
+        uint8_t rank_missing = 0;
+        taxids[r] = assigned;
+        if (ranks[r] && strcmp(ranks[r],"assigned"))
+          taxids[r] = utax_getidatrank(utax,assigned,ranks[r],&rank_missing);
+        missing[r] = absent || rank_missing;
+      }
+      cached_tid = tid;
+    }
+    uint32_t NM;
+    float ani = _ANINM(b,&NM);
+    kmers.ready = 0;
+    int have_rank = 0;
+    for (size_t r=0; r<nranks; ++r) {
+      if (missing[r]) continue;
+      have_rank = 1;
+      ++kept[r];
+      if (_multi_addaln(u,stats[r],b,taxids[r],dusts,ani,NM,
+                        enc,&kmers,stream_refs,!seen[r]))
+        goto error;
+      seen[r] = 1;
+    }
+    if (stream_refs && have_rank) {
+      active_ref.REFLEN = u->hdr->target_len[tid];
+      _urangeevent start = {b->core.pos,1};
+      _urangeevent end = {bam_endpos(b),0};
+      TAX_PUSH(_urangeevent,active_ref.aEVENT,start,goto error);
+      TAX_PUSH(_urangeevent,active_ref.aEVENT,end,goto error);
+      if (unicorn_spatial_add(&active_ref.spatial,b->core.pos,bam_endpos(b),
+                              active_ref.REFLEN)) goto error;
+    }
+  }
+  if (read_status < -1) goto error;
+  if (stream_refs && _multi_finish_reference(stats,taxids,seen,nranks,
+                                              &active_ref)) goto error;
+  for (size_t r=0; r<nranks; ++r) {
+    stats[r]->_nalns = total;
+    if (!kept[r] || _taxmapstats(stats[r])) goto error;
+    stats[r]->fc = 1;
+  }
+  free(taxids); free(missing); free(seen); free(kept);
+  genesis_encoderfree(enc); bam_destroy1(b);
+  return 0;
+error:
+  unicorn_mem_free(&unicorn_spill_threshold,active_ref.aEVENT.a);
+  unicorn_spatial_free(&active_ref.spatial);
+  free(taxids); free(missing); free(seen); free(kept);
+  if (enc) genesis_encoderfree(enc);
+  if (b) bam_destroy1(b);
+  return -1;
 }
 
 static taxstat_t *_taxstat_new(void)
@@ -892,6 +1152,10 @@ int unicorn_tidstat_compute(unicorn_t *u,
                             unicorn_stat_t *stats,
                             utax_t *utax)
 {
+  if (u->sorted & COORDSORTED) {
+    const char *rank = utax->rank;
+    return unicorn_tidstat_compute_multi(u,&stats,utax,&rank,1);
+  }
   /* XR may have been written for a different rank. Assigned taxids must
    * always be resolved from the reference accession, even on XR-sorted BAMs. */
   if ( (u->sorted & XRSORTED) && utax->rank ) {

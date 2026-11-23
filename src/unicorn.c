@@ -44,6 +44,7 @@ static ko_longopt_t unicorn_lopts[] = {
     { "no-damage-tags", ko_no_argument, 339 },
     { "delete-input", ko_no_argument, 340 },
     { "no-stats", ko_no_argument, 341 },
+    { "ranks", ko_required_argument, 342 },
     { "threads",         ko_required_argument, 300 },
     { "bam",             ko_required_argument, 301 },
     { "names",           ko_required_argument, 302 },
@@ -121,6 +122,8 @@ typedef struct unicorn_opts {
   char *nodes;          // Taxonomy nodes file
   char *dumpacc2tax;    // Dump accession to taxid map to this file
   char *rank;           // Rank to use
+  char *ranks;          // Comma-separated ranks for a single taxstats scan
+  int rank_explicit;    // Distinguish --rank from the default rank
   uint8_t  verbose;     // Verbose mode,
   uint8_t  withtid;     // Report taxid of reference sequence
   uint8_t  onlypresent; // Only dump accessions found in the acc2tax map
@@ -147,6 +150,11 @@ typedef struct unicorn_opts {
   uint32_t col1;
   uint32_t col2;
 } unicorn_opt_t;
+
+/* The multi-rank compute API is private to the command-line frontend. */
+extern int unicorn_tidstat_compute_multi(unicorn_t *u, unicorn_stat_t **stats,
+                                         utax_t *utax, const char **ranks,
+                                         size_t nranks);
 
 static void unicorn_addfilelist(char *filelist, strq_t *fileq)
 {
@@ -235,8 +243,15 @@ static void taxstats_usage(FILE *fp)
     "  ./unicorn taxstats -b sample.coord.bam --acc2tax accessions.tsv.gz \\\n"
     "    --names names.dmp --nodes nodes.dmp --rank genus --outstat genus.tsv\n"
     "\n"
+    "Several direct ranks in one BAM pass:\n"
+    "  ./unicorn taxstats -b sample.coord.bam --acc2tax accessions.tsv.gz \\\n"
+    "    --names names.dmp --nodes nodes.dmp \\\n"
+    "    --ranks family,genus,species --outstat sample.tsv\n"
+    "  Creates sample.family.tsv.gz, sample.genus.tsv.gz and\n"
+    "  sample.species.tsv.gz, each with a read-length companion.\n"
+    "\n"
     "All ranks (read-taxon associations at ancestors):\n"
-    "  Run the command above with --rank assigned --minreads 1\n"
+    "  Run a single-rank command with --rank assigned --minreads 1\n"
     "    --outstat assigned.tsv, then use tools/taxstats_all_ranks.py.\n"
     "  The rollup reads the statistics table; it does not rescan the BAM.\n"
     "\n"
@@ -250,10 +265,12 @@ static void taxstats_usage(FILE *fp)
     "Grouping and output:\n"
     "  --rank <name>          Rank such as species or genus; default genus.\n"
     "                         Use assigned for each accession's mapped taxid.\n"
+    "  --ranks <list>         1-3 distinct named ranks, comma-separated;\n"
+    "                         requires --outstat and excludes --rank.\n"
     "  --outstat <path>       Main table; named files default to BGZF (.gz).\n"
     "                         Also writes <stem>.readlengths.tsv.gz.\n"
-    "  --read-lengths <path>  Override read-length companion path.\n"
-    "  --plain-text           Write the named main table as ordinary TSV.\n"
+    "  --read-lengths <path>  Override single-rank companion path.\n"
+    "  --plain-text           Write named main tables as ordinary TSV.\n"
     "  -t, --threads <N>      Worker threads; default 4.\n"
     "\n"
     "Filters and resources:\n"
@@ -271,9 +288,60 @@ static void taxstats_usage(FILE *fp)
     "\n"
     "Interpretation: ts_nreads is distinct only within one reported taxid.\n"
     "  All-ranks read counts are associations and can repeat a read across taxa.\n"
+    "  A single --rank run on XR-sorted input uses existing XR tags; check\n"
+    "  that they represent the requested rank. --ranks resolves accessions.\n"
     "  Reference coverage, Gini, entropy and spatial summaries describe only\n"
     "  aligned references; they do not establish genome completeness.\n"
     "  See README.md and doc/taxstats-all-ranks.md for worked examples.\n");
+}
+
+#define MAX_TAXSTATS_RANKS 3
+
+/* Keep rank order as requested; reject empty, unknown and repeated names. */
+static int taxstats_parse_ranks(const char *list, char *ranks[MAX_TAXSTATS_RANKS],
+                               size_t *nranks)
+{
+  static const char *valid[] = {
+    "species", "genus", "family", "order", "class", "phylum", "kingdom", "domain"
+  };
+  const char *part = list;
+  if (!part || !*part) goto invalid;
+  for (;;) {
+    const char *comma = strchr(part, ',');
+    size_t len = comma ? (size_t)(comma - part) : strlen(part);
+    int known = 0;
+    if (!len || *nranks == MAX_TAXSTATS_RANKS) goto invalid;
+    for (size_t i = 0; i < sizeof(valid)/sizeof(valid[0]); ++i)
+      if (strlen(valid[i]) == len && !strncmp(part, valid[i], len)) known = 1;
+    if (!known) goto invalid;
+    for (size_t i = 0; i < *nranks; ++i)
+      if (strlen(ranks[i]) == len && !strncmp(part, ranks[i], len)) goto invalid;
+    ranks[*nranks] = strndup(part, len);
+    if (!ranks[*nranks]) return 4;
+    ++*nranks;
+    if (!comma) return 0;
+    part = comma + 1;
+    if (!*part) goto invalid;
+  }
+invalid:
+  fprintf(stderr, "[unicorn::taxstats] --ranks needs 1-3 distinct names from "
+                  "species,genus,family,order,class,phylum,kingdom,domain.\n");
+  return 7;
+}
+
+/* Insert the rank before the TSV suffix; companions remain BGZF. */
+static char *taxstats_rank_path(const char *base, const char *rank,
+                               int lengths, int plain_text)
+{
+  size_t stem = strlen(base);
+  if (stem >= 3 && !strcmp(base + stem - 3, ".gz")) stem -= 3;
+  if (stem >= 4 && !strncmp(base + stem - 4, ".tsv", 4)) stem -= 4;
+  const char *suffix = lengths ? ".readlengths.tsv.gz" :
+                       plain_text ? ".tsv" : ".tsv.gz";
+  size_t size = stem + 1 + strlen(rank) + strlen(suffix) + 1;
+  char *path = malloc(size);
+  if (path) snprintf(path, size, "%.*s.%s%s", (int)stem, base, rank, suffix);
+  return path;
 }
 
 static void alnfilt_usage(FILE *fp)
@@ -310,6 +378,7 @@ static void alnfilt_usage(FILE *fp)
 static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 {
   int c, ret = 0;
+  const int is_taxstats = argc > 1 && !strcmp(argv[1], "taxstats");
   ketopt_t o = KETOPT_INIT;
   while ( (c = ketopt(&o, argc, argv, 1, OPT_STR, unicorn_lopts)) >= 0 ) {
     switch(c) {
@@ -405,6 +474,11 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
 			case 318: //rank
         free(opts->rank);
         opts->rank = strdup(o.arg);
+        opts->rank_explicit = 1;
+        break;
+      case 342: //ranks
+        free(opts->ranks);
+        opts->ranks = strdup(o.arg);
         break;
       case 319: //minmani
         opts->minmani = strtof(o.arg, NULL);
@@ -549,6 +623,11 @@ static int unicorn_parseopts(int argc, char *argv[], unicorn_opt_t *opts)
       }
   }
   if (ret) goto exit;
+  if (opts->ranks && !is_taxstats) {
+    fprintf(stderr, "[unicorn::%s] --ranks is only available for taxstats.\n", __func__);
+    ret = 7;
+    goto exit;
+  }
   unicorn_set_memory_limit(opts->rss_limit);
   if (opts->outstat && !opts->plain_text) {
     size_t n = strlen(opts->outstat);
@@ -581,7 +660,8 @@ static void unicorn_printopts(unicorn_opt_t *opts, FILE *fp, uint8_t _f)
     fprintf(fp, "\t--acc2tax %s\n", opts->acc2tax ? opts->acc2tax : "N/A");
     fprintf(fp, "\t--names %s\n", opts->names);
     fprintf(fp, "\t--nodes %s\n", opts->nodes);
-	  fprintf(fp, "\t--rank      %s\n", opts->rank);
+	  if (opts->ranks) fprintf(fp, "\t--ranks     %s\n", opts->ranks);
+	  else fprintf(fp, "\t--rank      %s\n", opts->rank);
 	}
 }
 
@@ -898,7 +978,15 @@ static int unicorn_taxstats(int argc, char **argv)
 	opts.withtid = 1;
 	unicorn_t *u = NULL;
   unicorn_stat_t *stats = NULL;
+  unicorn_stat_t *rank_stats[MAX_TAXSTATS_RANKS] = {0};
+  char *rank_names[MAX_TAXSTATS_RANKS] = {0};
+  char *rank_paths[MAX_TAXSTATS_RANKS] = {0};
+  char *rank_length_paths[MAX_TAXSTATS_RANKS] = {0};
+  FILE *rank_outputs[MAX_TAXSTATS_RANKS] = {0};
+  FILE *rank_lengths[MAX_TAXSTATS_RANKS] = {0};
+  size_t nranks = 0;
   strq_t accq = {0};
+  strq_t fileq = {0};
   FILE *ofp = NULL, *length_fp = NULL;
   char *_argv[64] = {0};
   clock_gettime(CLOCK_MONOTONIC, &pstart);
@@ -909,19 +997,39 @@ static int unicorn_taxstats(int argc, char **argv)
   if (unicorn_set_temp_directory(opts.tmpdir)) { ret = 7; goto exit; }
 	ret = 2;
 	if (!opts.ifile && !opts.filelist) goto exit;
-	if (opts.outstat) {
+  if (opts.ranks) {
+    if (opts.rank_explicit || !opts.outstat || opts.lengths_path || !opts.acc2tax) {
+      fprintf(stderr, "[unicorn::taxstats] --ranks requires --outstat and --acc2tax; "
+                      "it cannot be combined with --rank or --read-lengths.\n");
+      ret = 7;
+      goto exit;
+    }
+    if ((ret = taxstats_parse_ranks(opts.ranks, rank_names, &nranks))) goto exit;
+    for (size_t i = 0; i < nranks; ++i) {
+      rank_paths[i] = taxstats_rank_path(opts.outstat, rank_names[i], 0, opts.plain_text);
+      rank_length_paths[i] = taxstats_rank_path(opts.outstat, rank_names[i], 1, opts.plain_text);
+      if (!rank_paths[i] || !rank_length_paths[i]) { ret = 4; goto exit; }
+      /* File lists append several BAM summaries to the same open streams. */
+      if (opts.filelist) {
+        rank_outputs[i] = unicorn_text_open(rank_paths[i], opts.threads);
+        rank_lengths[i] = unicorn_text_open(rank_length_paths[i], opts.threads);
+        if (!rank_outputs[i] || !rank_lengths[i]) { ret = 3; goto exit; }
+        fprintf(rank_lengths[i], "taxid\tlength\tcount\n");
+      }
+    }
+  } else if (opts.outstat) {
     ofp = unicorn_text_open(opts.outstat, opts.threads);
     if (!ofp) goto exit;
   }
   else ofp = stdout;
-  if (!opts.lengths_path && opts.outstat) {
+  if (!opts.ranks && !opts.lengths_path && opts.outstat) {
     size_t n=strlen(opts.outstat);if(n>=3&&!strcmp(opts.outstat+n-3,".gz"))n-=3;
     if(n>=4&&!strncmp(opts.outstat+n-4,".tsv",4))n-=4;
     opts.lengths_path=malloc(n+24);
     if(!opts.lengths_path) {ret=3;goto exit;}
     snprintf(opts.lengths_path,n+24,"%.*s.readlengths.tsv.gz",(int)n,opts.outstat);
   }
-  if (opts.lengths_path) {
+  if (!opts.ranks && opts.lengths_path) {
     size_t n=strlen(opts.lengths_path);
     if(n<3 || strcmp(opts.lengths_path+n-3,".gz")) { char *x=malloc(n+4);if(!x){ret=3;goto exit;}snprintf(x,n+4,"%s.gz",opts.lengths_path);free(opts.lengths_path);opts.lengths_path=x; }
     if(opts.outstat && !strcmp(opts.outstat,opts.lengths_path)) {ret=7;goto exit;}
@@ -933,7 +1041,6 @@ static int unicorn_taxstats(int argc, char **argv)
 
   unicorn_printopts(&opts, stderr, TAXSTATS);
 	//Add files to queue
-  strq_t fileq = {0};
   if (opts.ifile) kv_push(char *, fileq, opts.ifile);
   if (opts.filelist) unicorn_addfilelist(opts.filelist, &fileq);
   if (opts.onlypresent) {
@@ -960,7 +1067,7 @@ static int unicorn_taxstats(int argc, char **argv)
   utax = unicorn_loadtaxonomy(opts.acc2tax,
                               opts.names,
                               opts.nodes,
-                              opts.rank && !strcmp(opts.rank, "assigned") ? NULL : opts.rank,
+                              opts.ranks || (opts.rank && !strcmp(opts.rank, "assigned")) ? NULL : opts.rank,
                               &ret);
   if (!utax) goto exit;
   clock_gettime(CLOCK_MONOTONIC, &stop);
@@ -995,12 +1102,75 @@ static int unicorn_taxstats(int argc, char **argv)
       failed = 1;
       continue;
     }
-    unicorn_set_output(u, ofp);
+    unicorn_set_output(u, nranks ? NULL : ofp);
 		clock_gettime(CLOCK_MONOTONIC, &stop);
 		ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
     fprintf(stderr, "\tFound %d reference sequence(s).\n", unicorn_getnref(u));
 		fprintf(stderr, "\t%f seconds\n", (double)ns/1000000000.f);
 		fprintf(stderr, "[unicorn::%s] Computing statistics\n", __func__);
+    if (nranks) {
+      const char *selected[MAX_TAXSTATS_RANKS] = {0};
+      for (size_t j = 0; j < nranks; ++j) {
+        selected[j] = rank_names[j];
+        rank_stats[j] = unicorn_stat_init(opts.minnreads,
+                                          opts.minrefl,
+                                          opts.minmani,
+                                          opts.minalnas,
+                                          opts.maxdust,
+                                          opts.ksize,
+                                          opts.qsize,
+                                          TAXSTATS);
+        if (!rank_stats[j]) { ret = 4; goto exit; }
+      }
+      clock_gettime(CLOCK_MONOTONIC, &start);
+      ret = unicorn_tidstat_compute_multi(u, rank_stats, utax, selected, nranks);
+      if (ret) {
+        fprintf(stderr, "[unicorn::%s] Error: Failed to compute statistics for file %s\n",
+                        __func__, fileq.a[i]);
+        failed = 1;
+      } else {
+        clock_gettime(CLOCK_MONOTONIC, &stop);
+        ns = (stop.tv_sec - start.tv_sec) * 1000000000 + (stop.tv_nsec - start.tv_nsec);
+        fprintf(stderr, "\t%f seconds for %zu ranks\n", (double)ns/1000000000.f, nranks);
+        if (opts.onlypresent) unicorn_fillaccq(u, &accq);
+        fprintf(stderr, "[unicorn::%s] Printing statistics\n", __func__);
+        for (size_t j = 0; j < nranks; ++j) {
+          if (!rank_outputs[j]) rank_outputs[j] = unicorn_text_open(rank_paths[j], opts.threads);
+          if (!rank_lengths[j]) {
+            rank_lengths[j] = unicorn_text_open(rank_length_paths[j], opts.threads);
+            if (rank_lengths[j]) fprintf(rank_lengths[j], "taxid\tlength\tcount\n");
+          }
+          if (!rank_outputs[j] || !rank_lengths[j]) { failed = 1; break; }
+          uint64_t taln = unicorn_stat_gettaln(rank_stats[j]);
+          uint64_t faln = unicorn_stat_getfaln(rank_stats[j]);
+          uint64_t tread = unicorn_stat_gettread(rank_stats[j]);
+          uint64_t fread = unicorn_stat_getfread(rank_stats[j]);
+          fprintf(stderr, "\t%s: %" PRIu64 "/%" PRIu64 " alignments, %" PRIu64 "/%" PRIu64 " reads passed\n",
+                          rank_names[j], faln, taln, fread, tread);
+          unicorn_set_readlength_output(rank_lengths[j]);
+          unicorn_taxstat_print(u, rank_stats[j], rank_outputs[j], utax);
+          if (unicorn_readlength_error() || ferror(rank_outputs[j])) failed = 1;
+          if (!opts.filelist) {
+            unicorn_set_readlength_output(NULL);
+            int length_bad = ferror(rank_lengths[j]);
+            int table_bad = ferror(rank_outputs[j]);
+            if (fclose(rank_lengths[j]) || length_bad) failed = 1;
+            if (fclose(rank_outputs[j]) || table_bad) failed = 1;
+            rank_lengths[j] = NULL;
+            rank_outputs[j] = NULL;
+          }
+        }
+        unicorn_set_readlength_output(NULL);
+      }
+      for (size_t j = 0; j < nranks; ++j) {
+        unicorn_stat_destroy(rank_stats[j]);
+        rank_stats[j] = NULL;
+      }
+      unicorn_set_output(u, NULL);
+      unicorn_destroy(u);
+      u = NULL;
+      continue;
+    }
     stats = unicorn_stat_init(opts.minnreads,
                               opts.minrefl,
                               opts.minmani,
@@ -1052,12 +1222,10 @@ static int unicorn_taxstats(int argc, char **argv)
     stats = NULL;
     u     = NULL;
   }
-  kv_destroy(fileq);
   if (opts.onlypresent) {
     unicorn_printstrq(opts.dumpacc2tax ,accq, utax);
     unicorn_strqdestroy(accq);
   }
-   for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
   ret = failed ? 3 : 0;
   exit:
     if (ret) {
@@ -1068,8 +1236,21 @@ static int unicorn_taxstats(int argc, char **argv)
     }
     if(unicorn_readlength_error()) ret=3;
     unicorn_set_readlength_output(NULL);
+    if (stats) unicorn_stat_destroy(stats);
+    for (size_t i = 0; i < nranks; ++i)
+      if (rank_stats[i]) unicorn_stat_destroy(rank_stats[i]);
+    if (u) { unicorn_set_output(u, NULL); unicorn_destroy(u); }
+    kv_destroy(fileq);
+    for (uint8_t i = 0; i < ( (argc > 64) ? 64 : argc ); ++i) free(_argv[i]);
     if(length_fp) {int bad=ferror(length_fp);if(fclose(length_fp)||bad)ret=3;}
     free(opts.lengths_path);
+    for (size_t i = 0; i < MAX_TAXSTATS_RANKS; ++i) {
+      if (rank_lengths[i]) { int bad=ferror(rank_lengths[i]); if(fclose(rank_lengths[i])||bad)ret=3; }
+      if (rank_outputs[i]) { int bad=ferror(rank_outputs[i]); if(fclose(rank_outputs[i])||bad)ret=3; }
+      free(rank_length_paths[i]);
+      free(rank_paths[i]);
+      free(rank_names[i]);
+    }
     if (ofp) { int bad = ferror(ofp);
       if (ofp != stdout) { if (fclose(ofp) || bad) ret = 3; }
       else if (fflush(ofp) || bad) ret = 3;
@@ -1083,6 +1264,7 @@ static int unicorn_taxstats(int argc, char **argv)
     if (opts.dumpacc2tax) free(opts.dumpacc2tax);
     if (opts.filelist)   free(opts.filelist);
     if (opts.rank)    free(opts.rank);
+    free(opts.ranks);
     clock_gettime(CLOCK_MONOTONIC, &pstop);
     ns = (pstop.tv_sec - pstart.tv_sec) * 1000000000 + (pstop.tv_nsec - pstart.tv_nsec);
     fprintf(stderr, "[unicorn::%s] Total time: %f seconds\n",

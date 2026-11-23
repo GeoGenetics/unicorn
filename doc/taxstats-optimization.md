@@ -36,3 +36,25 @@ This is a measured improvement, not a demonstration on a 1 TB BAM. The ordinary 
 Taxonomy loading alone takes approximately 5.4 seconds here and is serial; main alignment aggregation remains serial with threaded BAM decompression. The changes preserve arithmetic order rather than introducing parallel reductions that could perturb rounded results. Existing 32-bit read-length bins/median-length parameters and hash-table capacity limits also need attention before claiming unrestricted scale.
 
 An existing CLI inconsistency was observed: --minmani accepts 0–1 while taxstats compares it to mean ANI on a 0–100 scale. This optimization preserves that behavior; it should be corrected separately with an explicit interface decision. Legacy 255-base k-mer-window behavior is also preserved.
+
+## Exact multi-rank update — 23 November 2026
+
+`--ranks family,genus,species` now loads taxonomy and scans the BAM once,
+while maintaining separate exact read-name sets and statistics for each rank.
+On coordinate-sorted input it finalizes each reference as its TID ends and
+shares that reference's coverage and spatial calculation across the ranks.
+The single-rank coordinate path also uses this streamed engine. Taxstats no
+longer calculates TAD80, which it does not report.
+
+Three alternating warm-cache measurements on the same Mac used the
+213,470,007-byte filtered coordinate BAM (8,189,896 alignments, 1,806,272
+header references), the validated BAM-specific accession map, `-k 17`,
+`--minreads 10` and four requested threads. Median wall time for three
+separate ranks was 76.927 s versus 36.922 s for one multi-rank run; CPU time
+was 82.084 versus 38.758 s. Peak RSS was 2.945 GB for the largest separate
+process versus 3.789 GB for the combined process. All 18 decompressed output
+pairs (three ranks, statistics and read-length companions, three repetitions)
+were byte-identical. A new regression checks coordinate and XR-sorted input,
+rank-specific read filtering, spill behavior and mislabeled coordinate order.
+These observations do not establish performance or a hard RAM bound on a
+terabyte-scale BAM; `--memory-limit` remains a soft spill trigger.

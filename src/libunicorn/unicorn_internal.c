@@ -544,7 +544,8 @@ uint64_t _taxcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
 
 /* Mean depth includes zeros; covered-base moments exclude them. Entropy and
  * Gini use adaptive spatial-bin counts, not per-base depth values. */
-uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
+static uint64_t _refcoverage_impl(ueventq_t events, uint64_t l,
+                                  _covstats_t *covstats, int with_tad80)
 {
   // Handle the edge case of no events
   if ( !events.n || !l) {
@@ -586,9 +587,20 @@ uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
 	covstats->nentropy = _normentropy;
   covstats->gini     = _getgini(covhist, &_normgini);
   covstats->ngini    = _normgini;
-  covstats->tad80    = _tad80(covhist);
+  covstats->tad80    = with_tad80 ? _tad80(covhist) : 0.0f;
 	int32int64map_destroy(covhist);
 	return tdepthsum;
+}
+
+uint64_t _refcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
+{
+  return _refcoverage_impl(events, l, covstats, 1);
+}
+
+/* Taxstats reports the other coverage metrics but does not report TAD80. */
+uint64_t _taxrefcoverage(ueventq_t events, uint64_t l, _covstats_t *covstats)
+{
+  return _refcoverage_impl(events, l, covstats, 0);
 }
 
 void unicorn_fillaccq(unicorn_t *u, strq_t *accq)
