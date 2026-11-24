@@ -58,3 +58,74 @@ were byte-identical. A new regression checks coordinate and XR-sorted input,
 rank-specific read filtering, spill behavior and mislabeled coordinate order.
 These observations do not establish performance or a hard RAM bound on a
 terabyte-scale BAM; `--memory-limit` remains a soft spill trigger.
+
+## Large BAM CPU scaling and median selection — 24 November 2026
+
+We tested a completed validation sample, KapK12139, on Dandy-07. Its original
+queryname BAM is 68,648,217,842 bytes. `alnfilt --mode ALLTOP --minani 93
+--maxani 100` retained 542,356,556 of 4,191,264,109 alignments; the
+coordinate-sorted filtered BAM is 20.86 GB. The reference header has
+31,153,551 entries. All taxstats runs used the same accession map and NCBI
+taxonomy, `--ranks family,genus,species -k 17 --minreads 10
+--memory-limit 128G`, and low process priority. Input filtering and sorting
+are excluded from the times below.
+
+| Build and CPU affinity | Wall time | CPU time | Peak RSS |
+|---|---:|---:|---:|
+| Previous one-pass build, 4 CPUs | 78.16 min | 80.53 min | 52.38 GB |
+| Previous one-pass build, 64 CPUs | 90.05 min | 92.20 min | 52.34 GB |
+| Parallel rank finalization, 4 CPUs | 79.47 min | 108.28 min | 51.02 GB |
+| Parallel rank finalization + ANI median selection, 4 CPUs | 70.23 min | 100.80 min | 51.08 GB |
+
+The old build used about one active core with either 4 or 64 CPU affinity;
+64 CPUs were 15.2% slower in this one-run comparison. Its alignment scan
+and rank-finalization loop were serial. The updated build can finalize
+separate ranks concurrently, capped by the requested threads and rank count,
+but its BAM scan remains serial. On this large sample, rank concurrency alone
+did not improve whole-run wall time; the slowest rank dominated. CPU affinity
+does not reserve cores, and Dandy-07 was shared, so cross-day comparisons
+cannot give a precise code speedup.
+
+![CPU affinity pilot](taxstats_cpu_scaling.png)
+
+*Figure 1.* One run per setting with the previous one-pass build on the same
+filtered sample. Panels show wall time (A), mean active CPU cores (B), and
+peak resident memory (C). No uncertainty intervals are shown because there
+was no replication; host load was not controlled.
+
+The median-selection build replaces a full sort of each taxon's ANI
+observations with in-place median selection. A depth limit falls back to
+the previous sort for adverse partitions; nonfinite values and negative zero
+also use the previous path. On the **same byte-identical coordinate BAM**,
+the rank-parallel build with full ANI sorting spent 25.26 minutes scanning
+and 53.21 minutes
+finalizing; the selection build spent 31.35 and 37.80 minutes. Its finalization
+was 29.0% shorter, whole-run wall time 11.6% shorter, CPU time 6.9% lower,
+and peak RSS effectively unchanged. The selection run's scan was slower
+under different shared-host conditions; host load was not measured. Three
+paired runs on a 204 MB Mac BAM showed only a 1.0% median whole-run gain.
+
+![ANI median selection comparison](taxstats_median_selection.png)
+
+*Figure 2.* Two four-CPU runs of the same coordinate BAM and taxonomy,
+partitioned into measured scan, rank-finalization, and other time. The only
+code difference is ANI median selection. The host was shared and each build
+ran once, so the bars show observed times without uncertainty intervals.
+
+All six decoded BGZF outputs—main and read-length tables for family, genus
+and species—had identical SHA-256 hashes and line counts across the four
+large runs and the previously published separate-rank outputs. The full
+41-test suite passed for both experimental builds on Dandy-07. The older
+three-separate-rank validation timing used another executable and host, so
+it is context rather than a controlled speed baseline.
+
+Four CPUs per three-rank job is a reasonable starting allocation. Running
+independent samples concurrently can use a larger server more effectively,
+but this sample peaked around 51 GB RSS per job, and shared storage may
+limit concurrency. `--memory-limit` triggers eligible allocations to use
+scratch; it is not a hard resident-memory cap. These tests do not certify
+performance or memory use for a 1 TB BAM. Further work should profile the
+remaining long rank and exact read-name unions before adding more workers.
+
+The timed server binaries predate the current local safeguard that checks RSS
+immediately before choosing the rank-worker count.

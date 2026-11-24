@@ -75,6 +75,61 @@ static inline float _fMEDIAN(float *v, size_t n)
   return (v[n/2 - 1] + v[n/2]) / 2.0;
 }
 
+/* Only the middle ANI observation is needed. Keep the old sort for values
+ * whose ordering is ambiguous and as a bound on selection's worst case. */
+static float tax_ani_median(float *v, size_t n)
+{
+  if (!n) return NAN;
+  if (n <= 32) {
+    ks_introsort(_tid_sfloat, n, v);
+    return _fMEDIAN(v, n);
+  }
+  for (size_t i=0; i<n; ++i) {
+    if (!isfinite(v[i]) || (v[i] == 0.0f && signbit(v[i]))) {
+      ks_introsort(_tid_sfloat, n, v);
+      return _fMEDIAN(v, n);
+    }
+  }
+
+  size_t k = n/2, lo = 0, hi = n;
+  unsigned depth = 0;
+  for (size_t m=n; m>1; m>>=1) ++depth;
+  depth *= 2;
+  while (hi-lo > 32) {
+    if (!depth) {
+      ks_introsort(_tid_sfloat, n, v);
+      return _fMEDIAN(v, n);
+    }
+    --depth;
+    float a=v[lo], b=v[lo+(hi-lo)/2], c=v[hi-1], tmp;
+    if (a>b) { tmp=a; a=b; b=tmp; }
+    if (b>c) { tmp=b; b=c; c=tmp; }
+    if (a>b) { tmp=a; a=b; b=tmp; }
+    float pivot = b;
+    size_t lt=lo, i=lo, gt=hi;
+    while (i<gt) {
+      if (v[i]<pivot) { tmp=v[lt]; v[lt++]=v[i]; v[i++]=tmp; }
+      else if (v[i]>pivot) { tmp=v[--gt]; v[gt]=v[i]; v[i]=tmp; }
+      else ++i;
+    }
+    if (k<lt) hi=lt;
+    else if (k>=gt) lo=gt;
+    else break;
+  }
+  if (hi-lo <= 32) {
+    for (size_t i=lo+1; i<hi; ++i) {
+      float item=v[i];
+      size_t j=i;
+      while (j>lo && item<v[j-1]) { v[j]=v[j-1]; --j; }
+      v[j]=item;
+    }
+  }
+  if (n&1) return v[k];
+  float lower=v[0];
+  for (size_t i=1; i<k; ++i) if (v[i]>lower) lower=v[i];
+  return (lower+v[k])/2.0;
+}
+
 static FILE *length_output;
 static int length_error;
 int unicorn_readlength_error(void) {return length_error || (length_output && ferror(length_output));}
@@ -221,8 +276,7 @@ static int _taxmapstats(unicorn_stat_t *stats)
       kv_destroy(rmq); return -1;
     }
     if (taxstat.a_ani.n) {
-      ks_introsort(_tid_sfloat, taxstat.a_ani.n, taxstat.a_ani.a);
-      taxstat.alnani_median = _fMEDIAN(taxstat.a_ani.a, taxstat.a_ani.n);
+      taxstat.alnani_median = tax_ani_median(taxstat.a_ani.a, taxstat.a_ani.n);
     }
     unicorn_mem_free(&unicorn_spill_threshold, taxstat.a_ani.a);
     taxstat.a_ani.n = taxstat.a_ani.m = 0;
@@ -441,8 +495,7 @@ static int _taxafinalize(taxstat_t *ts)
   }
   if (tax_medians(ts)) return -1;
   if (ts->a_ani.n) {
-    ks_introsort(_tid_sfloat, ts->a_ani.n, ts->a_ani.a);
-    ts->alnani_median = _fMEDIAN(ts->a_ani.a, ts->a_ani.n);
+    ts->alnani_median = tax_ani_median(ts->a_ani.a, ts->a_ani.n);
   }
   unicorn_mem_free(&unicorn_spill_threshold, ts->a_ani.a);
   ts->a_ani.n = ts->a_ani.m = 0;
@@ -784,6 +837,25 @@ static int _multi_finish_reference(unicorn_stat_t **stats,
   return 0;
 }
 
+typedef struct {
+  unicorn_stat_t **stats;
+  const uint64_t *kept;
+  int failed;
+} multi_finalize_t;
+
+/* Rank maps are disjoint. The shared memory-pressure counters are atomic, and
+ * each spill allocation owns a separate temporary file. */
+static void _multi_finalize_rank(void *data, long rank, int worker)
+{
+  (void)worker;
+  multi_finalize_t *final = (multi_finalize_t *)data;
+  if (!final->kept[rank] || _taxmapstats(final->stats[rank])) {
+    __atomic_store_n(&final->failed, 1, __ATOMIC_RELAXED);
+    return;
+  }
+  final->stats[rank]->fc = 1;
+}
+
 int unicorn_tidstat_compute_multi(unicorn_t *u, unicorn_stat_t **stats,
                                   utax_t *utax, const char **ranks,
                                   size_t nranks)
@@ -806,6 +878,8 @@ int unicorn_tidstat_compute_multi(unicorn_t *u, unicorn_stat_t **stats,
   multi_kmer_cache_t kmers = {0};
   int stream_refs = !!(u->sorted & COORDSORTED);
   int read_status;
+  struct timespec scan_start, scan_stop, final_stop;
+  clock_gettime(CLOCK_MONOTONIC, &scan_start);
   while ((read_status = sam_read1(u->_FP,u->hdr,b)) >= 0) {
     ++total;
     if (_unmapped(b) || b->core.tid < 0) continue;
@@ -859,11 +933,22 @@ int unicorn_tidstat_compute_multi(unicorn_t *u, unicorn_stat_t **stats,
   if (read_status < -1) goto error;
   if (stream_refs && _multi_finish_reference(stats,taxids,seen,nranks,
                                               &active_ref)) goto error;
-  for (size_t r=0; r<nranks; ++r) {
-    stats[r]->_nalns = total;
-    if (!kept[r] || _taxmapstats(stats[r])) goto error;
-    stats[r]->fc = 1;
-  }
+  clock_gettime(CLOCK_MONOTONIC, &scan_stop);
+  for (size_t r=0; r<nranks; ++r) stats[r]->_nalns = total;
+  multi_finalize_t final = {.stats=stats, .kept=kept, .failed=0};
+  int workers = u->nthreads;
+  if ((size_t)workers > nranks) workers = (int)nranks;
+  if (workers < 1 || unicorn_memory_pressure_now()) workers = 1;
+  kt_for(workers, _multi_finalize_rank, &final, (long)nranks);
+  if (__atomic_load_n(&final.failed, __ATOMIC_RELAXED)) goto error;
+  clock_gettime(CLOCK_MONOTONIC, &final_stop);
+  double scan_seconds = (double)(scan_stop.tv_sec-scan_start.tv_sec) +
+                        (double)(scan_stop.tv_nsec-scan_start.tv_nsec)*1e-9;
+  double final_seconds = (double)(final_stop.tv_sec-scan_stop.tv_sec) +
+                         (double)(final_stop.tv_nsec-scan_stop.tv_nsec)*1e-9;
+  fprintf(stderr,"[unicorn::taxstats] multi-rank scan %.3f s; "
+                 "rank finalization %.3f s (%d worker%s)\n",
+          scan_seconds,final_seconds,workers,workers==1 ? "" : "s");
   free(taxids); free(missing); free(seen); free(kept);
   genesis_encoderfree(enc); bam_destroy1(b);
   return 0;

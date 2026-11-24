@@ -23,27 +23,52 @@ void unicorn_set_memory_limit(uint64_t bytes)
 {
   rss_limit = bytes; pressure_calls = pressure_latched = 0;
 }
-int unicorn_memory_pressure(void)
+static int current_rss(uint64_t *rss)
 {
-  if (!rss_limit) return 0;
-  if (__atomic_load_n(&pressure_latched, __ATOMIC_RELAXED)) return 1;
-  if ((__atomic_fetch_add(&pressure_calls, 1, __ATOMIC_RELAXED) & 1023) != 0) return 0;
-  uint64_t rss = 0;
 #ifdef __APPLE__
   mach_task_basic_info_data_t info;
   mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-  if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) rss = info.resident_size;
+  if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) != KERN_SUCCESS) return -1;
+  *rss = info.resident_size;
 #else
   FILE *fp = fopen("/proc/self/statm", "r");
   unsigned long total, resident;
-  if (fp) { if (fscanf(fp, "%lu %lu", &total, &resident) == 2) rss = (uint64_t)resident * sysconf(_SC_PAGESIZE); fclose(fp); }
+  if (!fp) return -1;
+  int ok = fscanf(fp, "%lu %lu", &total, &resident) == 2;
+  fclose(fp);
+  long page_size = sysconf(_SC_PAGESIZE);
+  if (!ok || page_size <= 0) return -1;
+  *rss = (uint64_t)resident * (uint64_t)page_size;
 #endif
+  return 0;
+}
+static int latch_memory_pressure(uint64_t rss)
+{
   if (rss >= rss_limit) {
     if (!__atomic_exchange_n(&pressure_latched, 1, __ATOMIC_RELAXED))
       fprintf(stderr, "[unicorn::memory] RSS spill threshold reached; growing eligible buffers and queues will use scratch disk. This is not a hard RSS cap.\n");
     return 1;
   }
   return 0;
+}
+/* A rank-worker decision occurs only once, so sample RSS immediately. If
+ * RSS cannot be read under an active limit, use one worker conservatively. */
+int unicorn_memory_pressure_now(void)
+{
+  if (!rss_limit) return 0;
+  if (__atomic_load_n(&pressure_latched, __ATOMIC_RELAXED)) return 1;
+  uint64_t rss;
+  if (current_rss(&rss)) return 1;
+  return latch_memory_pressure(rss);
+}
+int unicorn_memory_pressure(void)
+{
+  if (!rss_limit) return 0;
+  if (__atomic_load_n(&pressure_latched, __ATOMIC_RELAXED)) return 1;
+  if ((__atomic_fetch_add(&pressure_calls, 1, __ATOMIC_RELAXED) & 1023) != 0) return 0;
+  uint64_t rss;
+  if (current_rss(&rss)) return 0;
+  return latch_memory_pressure(rss);
 }
 static int disk_allocation(size_t size)
 {

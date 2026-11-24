@@ -17,6 +17,7 @@ class ReferenceSummaries(unittest.TestCase):
    records=[]
    for i in range(500):records.append((f'cp{i}','cp',1+i%160,32,i%2))
    records.extend([('long201','nucA',1000,201,2),('long255','nucA',2000,255,3),('long300','nucA',3000,300,4),('long400','nucB',10,400,5),('oddA','singleA',1,101,0),('oddB','singleB',1,102,3)])
+   records.extend((f'odd{i}','singleA',100+i%300,101,i%7) for i in range(499))
    sam=p/'a.sam'
    with sam.open('w') as f:
     f.write('@HD\tVN:1.6\tSO:unsorted\n'+''.join(f'@SQ\tSN:{ref}\tLN:{length}\n' for ref,length in lengths.items()))
@@ -50,12 +51,23 @@ class ReferenceSummaries(unittest.TestCase):
        nms=[nm for name,ref,pos,n,nm in records if taxa[ref]==t]
        self.assertEqual(float(row['ts_median_readl']),statistics.median(readlens))
        self.assertEqual(float(row['ts_median_alnnm']),statistics.median(nms))
+       anis=[100*(1-nm/n) for name,ref,pos,n,nm in records if taxa[ref]==t]
+       # Exercises selection for even and odd taxon sizes, including ties.
+       self.assertGreater(len(anis),32)
+       self.assertAlmostEqual(float(row['ts_median_alnani']),statistics.median(anis),delta=5e-5)
        self.assertEqual(int(row['ts_nreads']),sum(observed[t].values()))
        covered=sum(int(r['rs_num_covbases']) for r in group);denom=sum(lengths[r['Id']]*(1-math.exp(-float(r['rs_mean_cov']))) for r in group)
        self.assertAlmostEqual(float(row['ts_breath_ratio']),covered/denom,places=5)
        dust = float(next(r for r in group if r['Id']=='cp')['rs_mdust']) if t==2 else statistics.median(float(r['rs_mdust']) for r in group)
        self.assertAlmostEqual(float(row['ts_median_dust']),dust,places=6)
        if t==2:self.assertLess(float(row['ts_ref_median_breadth']),.2)
+   # The rank-tag sorted route has a separate taxon finalizer.
+   xr_rows=table(run(UNICORN,'taxstats','-b',xr,'--rank','genus','--names',names,'--nodes',nodes,'--acc2tax',acc).stdout)
+   self.assertEqual({int(row['taxid']) for row in xr_rows},{2,3})
+   for row in xr_rows:
+    t=int(row['taxid'])
+    anis=[100*(1-nm/n) for name,ref,pos,n,nm in records if taxa[ref]==t]
+    self.assertAlmostEqual(float(row['ts_median_alnani']),statistics.median(anis),delta=5e-5)
    # Automatic companion with a named, BGZF main table.
    run(UNICORN,'taxstats','-b',coord,'--names',names,'--nodes',nodes,'--acc2tax',acc,'--outstat',p/'summary.tsv')
    self.assertTrue((p/'summary.readlengths.tsv.gz').exists())

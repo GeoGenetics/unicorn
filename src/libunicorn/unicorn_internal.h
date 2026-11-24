@@ -42,6 +42,7 @@ void unicorn_readset_free(unicorn_readset_t *set);
 int unicorn_readset_merge(unicorn_readset_t *destination, const unicorn_readset_t *source);
 extern size_t unicorn_spill_threshold;
 int unicorn_memory_pressure(void);
+int unicorn_memory_pressure_now(void);
 FILE *unicorn_text_open(const char *path, int threads);
 FILE *unicorn_tmpfile(void);
 void *unicorn_mem_alloc(void *context, size_t size, int clear);

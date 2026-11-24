@@ -145,8 +145,10 @@ class ExactMultiRank(unittest.TestCase):
             for label, source, minreads, extra in cases:
                 with self.subTest(source=label):
                     stem = p / f"combined-{label}.tsv"
-                    run(*base, "-b", source, "--ranks", ",".join(RANKS),
-                        "--minreads", minreads, *extra, "--outstat", stem)
+                    result = run(*base, "-b", source, "--ranks", ",".join(RANKS),
+                                 "--minreads", minreads, *extra, "--outstat", stem)
+                    if label == "spill":
+                        self.assertIn("(1 worker)", result.stderr)
                     for rank in RANKS:
                         # Direct runs use coordinate order because the XR tags
                         # in the second fixture encode genus, not this rank.
@@ -184,6 +186,30 @@ class ExactMultiRank(unittest.TestCase):
                         if label == "threshold" and rank == "genus":
                             self.assertIn("20", multi)  # species 31 has only two reads
                             self.assertNotIn("22", multi)
+
+            # Finalization uses three workers with the default four threads,
+            # but runs serially with one thread or under memory pressure.
+            # Compare the complete decoded tables, including reference
+            # summaries and read-length companions, in both BAM sort orders.
+            for label, source in (("coord", coordinate), ("xr", xr_sorted)):
+                with self.subTest(finalization_threads=label):
+                    serial = p / f"serial-{label}.tsv"
+                    run(*base, "-b", source, "--ranks", ",".join(RANKS),
+                        "--threads", 1, "--outstat", serial)
+                    for rank in RANKS:
+                        for suffix in (".tsv.gz", ".readlengths.tsv.gz"):
+                            parallel_path = p / f"combined-{label}.{rank}{suffix}"
+                            serial_path = p / f"serial-{label}.{rank}{suffix}"
+                            with gzip.open(parallel_path, "rb") as parallel_fp, \
+                                 gzip.open(serial_path, "rb") as serial_fp:
+                                self.assertEqual(parallel_fp.read(), serial_fp.read())
+            for rank in RANKS:
+                for suffix in (".tsv.gz", ".readlengths.tsv.gz"):
+                    normal = p / f"combined-coord.{rank}{suffix}"
+                    pressure = p / f"combined-spill.{rank}{suffix}"
+                    with gzip.open(normal, "rb") as normal_fp, \
+                         gzip.open(pressure, "rb") as pressure_fp:
+                        self.assertEqual(normal_fp.read(), pressure_fp.read())
 
 
 if __name__ == "__main__":

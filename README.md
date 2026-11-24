@@ -230,7 +230,8 @@ the ranks as a comma-separated list and name the output stem:
 ```bash
 ./unicorn taxstats -b sample.filtered.coord.bam \
   --acc2tax accessions.tsv.gz --names names.dmp --nodes nodes.dmp \
-  --ranks family,genus,species --minreads 10 --outstat sample.tsv
+  --ranks family,genus,species --minreads 10 --threads 4 \
+  --outstat sample.tsv
 ```
 
 This writes `sample.family.tsv.gz`, `sample.genus.tsv.gz` and
@@ -245,6 +246,13 @@ and reference-level statistics still describe aligned references and need
 caution when organelles, chromosomes and alternative assemblies differ.
 For XR-sorted BAMs, this multi-rank command resolves each rank from the
 accession map; existing XR tags may have been written for a different rank.
+Four threads are a reasonable starting point for one three-rank job. Alignment
+aggregation remains serial, while BGZF decoding can use additional threads.
+After the scan, up to one worker per requested rank can finalize taxon
+statistics concurrently. Giving one job 64 CPUs did not speed the tested
+large BAM. Schedule independent samples in parallel only when memory and
+scratch space allow. See the measured
+[taxstats performance notes](doc/taxstats-optimization.md#large-bam-cpu-scaling-and-median-selection--24-november-2026).
 
 ### taxstats: all observed ranks
 
